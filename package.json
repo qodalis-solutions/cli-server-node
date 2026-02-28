@@ -1,0 +1,48 @@
+{
+    "name": "@qodalis/cli-server-node",
+    "version": "1.0.0-beta.1",
+    "description": "Node.js CLI server for Qodalis CLI ecosystem — use as a library in existing Express apps or run standalone",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "bin": {
+        "qodalis-cli-server": "dist/server.js"
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc",
+        "start": "tsx src/server.ts",
+        "dev": "tsx watch src/server.ts"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "terminal",
+        "commands",
+        "cli-server",
+        "command-processor"
+    ],
+    "author": "Nicolae Lupei <nicolae.lupei@qodalis.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node"
+    },
+    "homepage": "https://qodalis.com/",
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.21.0",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/node": "^22.0.0",
+        "@types/ws": "^8.5.13",
+        "tsx": "^4.19.0",
+        "typescript": "^5.6.0"
+    }
+}
