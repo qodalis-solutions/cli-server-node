@@ -35,8 +35,10 @@
     },
     "homepage": "https://qodalis.com/",
     "dependencies": {
+        "@qodalis/cli-server-abstractions": "file:packages/abstractions",
         "cors": "^2.8.5",
         "express": "^4.21.0",
+        "node-pty": "^1.1.0",
         "ws": "^8.18.0"
     },
     "devDependencies": {

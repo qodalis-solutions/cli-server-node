@@ -1,0 +1,35 @@
+{
+    "name": "@qodalis/cli-server-abstractions",
+    "version": "1.0.0-beta.1",
+    "description": "Shared interfaces and base classes for Qodalis CLI command processors — zero framework dependencies",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "terminal",
+        "commands",
+        "cli-server",
+        "command-processor",
+        "abstractions"
+    ],
+    "author": "Nicolae Lupei <nicolae.lupei@qodalis.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "packages/abstractions"
+    },
+    "homepage": "https://qodalis.com/",
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}

@@ -3,8 +3,6 @@ import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager } from './services';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
-import { createCliControllerV2 } from './controllers/cli-controller-v2';
-import { createCliVersionController } from './controllers/cli-version-controller';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/cli'. */
@@ -46,15 +44,11 @@ export function createCliServer(options: CliServerOptions = {}): {
 
     const executor = new CliCommandExecutorService(registry);
 
-    // Unversioned discovery endpoint
-    app.use('/api/cli', createCliVersionController());
-
-    // Versioned API routes
+    // API v1 routes
     app.use('/api/v1/cli', createCliController(registry, executor));
-    app.use('/api/v2/cli', createCliControllerV2(registry, executor));
 
-    // Legacy / custom basePath fallback (defaults to /api/cli)
-    if (basePath !== '/api/cli') {
+    // Custom basePath fallback (when user overrides the default)
+    if (basePath !== '/api/v1/cli') {
         app.use(basePath, createCliController(registry, executor));
     }
 

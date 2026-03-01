@@ -3,7 +3,7 @@ import { ICliCommandProcessor } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
 
-const SERVER_VERSION = '2.0.0';
+const SERVER_VERSION = '1.0.0';
 
 export function createCliControllerV2(
     registry: ICliCommandRegistry,

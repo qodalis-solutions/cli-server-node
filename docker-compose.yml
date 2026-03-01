@@ -1,0 +1,11 @@
+services:
+  cli-server-node:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    container_name: cli-server-node
+    ports:
+      - "8047:8047"
+    environment:
+      - PORT=8047
+    restart: unless-stopped

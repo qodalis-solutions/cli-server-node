@@ -1,4 +1,29 @@
-node_modules/
+# Build output
 dist/
 *.js.map
 *.d.ts.map
+
+# Dependencies
+node_modules/
+
+# IDEs and editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Environment
+.env
+.env.local
