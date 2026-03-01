@@ -9,6 +9,8 @@ export interface ICliCommandProcessor {
     allowUnlistedCommands?: boolean;
     valueRequired?: boolean;
     version: string;
+    /** Minimum API version this processor is available in. Defaults to 1. */
+    apiVersion?: number;
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
     handleAsync(command: CliProcessCommand): Promise<string>;
@@ -21,6 +23,7 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     allowUnlistedCommands?: boolean;
     valueRequired?: boolean;
     version: string = '1.0.0';
+    apiVersion: number = 1;
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
 
