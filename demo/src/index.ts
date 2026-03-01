@@ -29,7 +29,7 @@ const { app, eventSocketManager } = createCliServer({
             .addProcessor(new CliBase64CommandProcessor())
             .addProcessor(new CliUuidCommandProcessor())
             .addModule(new WeatherModule())
-            .addFileSystem({ allowedPaths: ['/tmp'] });
+            .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
     },
 });
 
