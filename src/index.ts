@@ -8,6 +8,8 @@ export {
     CliCommandParameterDescriptor,
     ICliCommandProcessor,
     CliCommandProcessor,
+    ICliModule,
+    CliModule,
 } from './abstractions';
 
 // Models
@@ -34,9 +36,13 @@ export {
 export { createCliController } from './controllers/cli-controller';
 export { createCliControllerV2 } from './controllers/cli-controller-v2';
 export { createCliVersionController } from './controllers/cli-version-controller';
+export { createFilesystemRouter } from './controllers/filesystem-controller';
 
 // Extensions
 export { CliBuilder } from './extensions';
+
+// Filesystem
+export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
 
 // Processors
 export { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';

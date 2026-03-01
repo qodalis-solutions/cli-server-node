@@ -3,6 +3,8 @@ import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager } from './services';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
+import { createFilesystemRouter } from './controllers/filesystem-controller';
+import { FileSystemPathValidator } from './filesystem';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/cli'. */
@@ -50,6 +52,12 @@ export function createCliServer(options: CliServerOptions = {}): {
     // Custom basePath fallback (when user overrides the default)
     if (basePath !== '/api/v1/cli') {
         app.use(basePath, createCliController(registry, executor));
+    }
+
+    // Filesystem API — only mounted when configured via builder.addFileSystem()
+    if (builder.fileSystemOptions) {
+        const validator = new FileSystemPathValidator(builder.fileSystemOptions);
+        app.use('/api/cli/fs', createFilesystemRouter(validator));
     }
 
     const eventSocketManager = new CliEventSocketManager();
