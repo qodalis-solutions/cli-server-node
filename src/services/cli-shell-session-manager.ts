@@ -102,10 +102,34 @@ export class CliShellSessionManager {
                 : { shell, args: [] };
         }
 
-        const shell = '/bin/bash';
+        const shell = this.detectShell();
         return command
             ? { shell, args: ['-c', command] }
             : { shell, args: [] };
+    }
+
+    private detectShell(): string {
+        const envShell = process.env.SHELL;
+        if (envShell) {
+            try {
+                require('fs').accessSync(envShell, require('fs').constants.X_OK);
+                return envShell;
+            } catch {
+                // SHELL env var points to non-existent binary, fall through
+            }
+        }
+
+        const candidates = ['/bin/bash', '/usr/bin/bash', '/bin/sh'];
+        for (const candidate of candidates) {
+            try {
+                require('fs').accessSync(candidate, require('fs').constants.X_OK);
+                return candidate;
+            } catch {
+                continue;
+            }
+        }
+
+        return '/bin/sh';
     }
 
     private send(ws: WebSocket, msg: ServerMessage): void {

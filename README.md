@@ -204,6 +204,86 @@ class MathProcessor extends CliCommandProcessor {
 }
 ```
 
+## Modules
+
+Modules group related command processors into a reusable unit. Implement `ICliModule` (or extend the `CliModule` base class) to bundle processors under a single name and version.
+
+### Defining a Module
+
+```typescript
+import { CliModule, CliCommandProcessor, CliProcessCommand, ICliCommandProcessor } from '@qodalis/cli-server-node';
+
+class WeatherCurrentProcessor extends CliCommandProcessor {
+    command = 'current';
+    description = 'Shows current weather conditions';
+
+    async handleAsync(command: CliProcessCommand): Promise<string> {
+        return `Weather: Sunny, 22°C`;
+    }
+}
+
+class WeatherForecastProcessor extends CliCommandProcessor {
+    command = 'forecast';
+    description = 'Shows a 3-day weather forecast';
+
+    async handleAsync(command: CliProcessCommand): Promise<string> {
+        return `Forecast: Sunny for 3 days`;
+    }
+}
+
+class CliWeatherCommandProcessor extends CliCommandProcessor {
+    command = 'weather';
+    description = 'Shows weather information for a location';
+    processors: ICliCommandProcessor[] = [
+        new WeatherCurrentProcessor(),
+        new WeatherForecastProcessor(),
+    ];
+
+    async handleAsync(command: CliProcessCommand): Promise<string> {
+        return `Weather: Sunny, 22°C`;
+    }
+}
+
+export class WeatherModule extends CliModule {
+    name = 'weather';
+    version = '1.0.0';
+    description = 'Provides weather information commands';
+    processors: ICliCommandProcessor[] = [new CliWeatherCommandProcessor()];
+}
+```
+
+### Registering a Module
+
+```typescript
+const { app, eventSocketManager } = createCliServer({
+    configure: (builder) => {
+        builder.addModule(new WeatherModule());
+    },
+});
+```
+
+`addModule()` iterates over the module's `processors` and registers each one, just like calling `addProcessor()` for each individually.
+
+### ICliModule Interface
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `name` | `string` | Unique module identifier |
+| `version` | `string` | Module version |
+| `description` | `string` | Short description |
+| `author` | `ICliCommandAuthor` | Author metadata (defaults to library author) |
+| `processors` | `ICliCommandProcessor[]` | Command processors provided by the module |
+
+### Example: Weather Module
+
+The repository includes a weather module under `plugins/weather/` as a reference implementation. It registers a `weather` command with `current` and `forecast` sub-commands, using the [wttr.in](https://wttr.in) API:
+
+```
+weather                    # Shows current weather (default: London)
+weather current London     # Current conditions for London
+weather forecast --location Paris  # 3-day forecast for Paris
+```
+
 ## Command Input
 
 Every processor receives a `CliProcessCommand` with the parsed command input:
@@ -291,7 +371,7 @@ interface CliServerOptions {
 All types are exported from the package root for TypeScript consumers:
 
 ```typescript
-// Abstractions (for creating custom processors)
+// Abstractions (for creating custom processors and modules)
 import {
     ICliCommandProcessor,
     CliCommandProcessor,
@@ -300,6 +380,8 @@ import {
     CliProcessCommand,
     ICliCommandAuthor,
     CliCommandAuthor,
+    ICliModule,
+    CliModule,
 } from '@qodalis/cli-server-node';
 
 // Models
@@ -370,9 +452,12 @@ packages/
   abstractions/                       # @qodalis/cli-server-abstractions (zero-dep)
     src/
       cli-command-processor.ts        # ICliCommandProcessor interface & base class
+      cli-module.ts                   # ICliModule interface & base class
       cli-process-command.ts          # Command input model
       cli-command-parameter-descriptor.ts  # Parameter declaration
       cli-command-author.ts           # Author metadata
+plugins/
+  weather/                            # Weather module (example plugin)
 src/
   abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
   models/
@@ -389,7 +474,7 @@ src/
     cli-controller-v2.ts              # V2 REST API (/api/v2/cli)
     cli-version-controller.ts         # Version discovery (/api/cli/versions)
   extensions/
-    cli-builder.ts                    # Fluent registration API
+    cli-builder.ts                    # Fluent registration API (addProcessor, addModule)
   processors/                         # Built-in processors
   create-cli-server.ts               # Factory function
   server.ts                          # Standalone CLI entry point

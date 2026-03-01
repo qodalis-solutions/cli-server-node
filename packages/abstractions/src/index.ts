@@ -2,3 +2,4 @@ export { ICliCommandAuthor, CliCommandAuthor, DefaultLibraryAuthor } from './cli
 export { CliProcessCommand } from './cli-process-command';
 export { ICliCommandParameterDescriptor, CliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
 export { ICliCommandProcessor, CliCommandProcessor } from './cli-command-processor';
+export { ICliModule, CliModule } from './cli-module';
