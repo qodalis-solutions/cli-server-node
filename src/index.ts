@@ -29,8 +29,10 @@ export {
     CliEventSocketManager,
 } from './services';
 
-// Controller
+// Controllers
 export { createCliController } from './controllers/cli-controller';
+export { createCliControllerV2 } from './controllers/cli-controller-v2';
+export { createCliVersionController } from './controllers/cli-version-controller';
 
 // Extensions
 export { CliBuilder } from './extensions';
