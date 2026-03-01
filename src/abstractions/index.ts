@@ -7,4 +7,6 @@ export {
     CliCommandParameterDescriptor,
     ICliCommandProcessor,
     CliCommandProcessor,
+    ICliModule,
+    CliModule,
 } from '@qodalis/cli-server-abstractions';

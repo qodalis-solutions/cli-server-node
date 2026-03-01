@@ -14,6 +14,7 @@ COPY packages/abstractions/src/ packages/abstractions/src/
 RUN cd packages/abstractions && npx tsc
 
 COPY src/ src/
+COPY plugins/ plugins/
 RUN npm run build
 
 WORKDIR /app/demo
@@ -33,6 +34,7 @@ COPY --from=build /app/node_modules/ node_modules/
 COPY --from=build /app/packages/abstractions/dist/ packages/abstractions/dist/
 COPY --from=build /app/packages/abstractions/package.json packages/abstractions/
 
+COPY --from=build /app/plugins/ plugins/
 COPY --from=build /app/demo/src/ demo/src/
 COPY --from=build /app/demo/package.json demo/
 COPY --from=build /app/demo/node_modules/ demo/node_modules/
