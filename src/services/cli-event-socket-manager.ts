@@ -5,14 +5,21 @@ export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
 
+    private static readonly ALLOWED_WS_PATHS = new Set([
+        '/ws/cli/events',
+        '/ws/v1/cli/events',
+        '/ws/v2/cli/events',
+    ]);
+
     /**
-     * Attach to an HTTP server and listen for WebSocket upgrades on /ws/cli/events.
+     * Attach to an HTTP server and listen for WebSocket upgrades on
+     * /ws/cli/events, /ws/v1/cli/events, and /ws/v2/cli/events.
      */
     attach(server: Server): void {
         this._wss = new WebSocketServer({ noServer: true });
 
         server.on('upgrade', (request, socket, head) => {
-            if (request.url !== '/ws/cli/events') {
+            if (!CliEventSocketManager.ALLOWED_WS_PATHS.has(request.url ?? '')) {
                 return; // Let other upgrade handlers (if any) handle it
             }
 

@@ -11,6 +11,7 @@ export interface CliServerCommandDescriptor {
     command: string;
     description?: string;
     version?: string;
+    apiVersion?: number;
     parameters?: CliServerCommandParameterDescriptorDto[];
     processors?: CliServerCommandDescriptor[];
 }
