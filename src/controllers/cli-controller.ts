@@ -1,7 +1,10 @@
 import { Router } from 'express';
+import * as os from 'os';
 import { ICliCommandProcessor } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
+
+const SERVER_VERSION = '1.0.0';
 
 export function createCliController(
     registry: ICliCommandRegistry,
@@ -10,7 +13,27 @@ export function createCliController(
     const router = Router();
 
     router.get('/version', (_req, res) => {
-        res.json({ version: '1.0.0' });
+        res.json({ version: SERVER_VERSION });
+    });
+
+    router.get('/capabilities', (_req, res) => {
+        const detectedOs = os.platform() === 'win32'
+            ? 'win32'
+            : os.platform() === 'darwin'
+                ? 'darwin'
+                : 'linux';
+
+        const shell = os.platform() === 'win32' ? 'powershell' : 'bash';
+        const shellPath = os.platform() === 'win32'
+            ? 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+            : '/bin/bash';
+
+        res.json({
+            shell: true,
+            os: detectedOs,
+            shellPath,
+            version: SERVER_VERSION,
+        });
     });
 
     router.get('/commands', (_req, res) => {

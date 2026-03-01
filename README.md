@@ -10,6 +10,16 @@ npm install @qodalis/cli-server-node
 
 The package exports all types, interfaces, base classes, and built-in processors. TypeScript declarations are included.
 
+### Plugin Authors
+
+If you're building a command processor plugin and don't need the server runtime (Express, WebSocket), install the abstractions package instead:
+
+```bash
+npm install @qodalis/cli-server-abstractions
+```
+
+This gives you `CliCommandProcessor`, `CliProcessCommand`, `CliCommandParameterDescriptor`, and all other base types with **zero dependencies**. See [`@qodalis/cli-server-abstractions`](https://www.npmjs.com/package/@qodalis/cli-server-abstractions) for details.
+
 ## Quick Start
 
 ### As a Library
@@ -356,12 +366,15 @@ npm run test:watch  # Watch mode
 ## Project Structure
 
 ```
+packages/
+  abstractions/                       # @qodalis/cli-server-abstractions (zero-dep)
+    src/
+      cli-command-processor.ts        # ICliCommandProcessor interface & base class
+      cli-process-command.ts          # Command input model
+      cli-command-parameter-descriptor.ts  # Parameter declaration
+      cli-command-author.ts           # Author metadata
 src/
-  abstractions/
-    cli-command-processor.ts          # ICliCommandProcessor interface & base class
-    cli-process-command.ts            # Command input model
-    cli-command-parameter-descriptor.ts  # Parameter declaration
-    cli-command-author.ts             # Author metadata
+  abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
   models/
     cli-server-response.ts            # Response wrapper (exitCode + outputs)
     cli-server-output.ts              # Output types (text, table, list, json, key-value)

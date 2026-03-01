@@ -1,4 +1,10 @@
-export { ICliCommandAuthor, CliCommandAuthor, DefaultLibraryAuthor } from './cli-command-author';
-export { CliProcessCommand } from './cli-process-command';
-export { ICliCommandParameterDescriptor, CliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
-export { ICliCommandProcessor, CliCommandProcessor } from './cli-command-processor';
+export {
+    ICliCommandAuthor,
+    CliCommandAuthor,
+    DefaultLibraryAuthor,
+    CliProcessCommand,
+    ICliCommandParameterDescriptor,
+    CliCommandParameterDescriptor,
+    ICliCommandProcessor,
+    CliCommandProcessor,
+} from '@qodalis/cli-server-abstractions';

@@ -1,31 +1,60 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Server } from 'http';
+import { URL } from 'url';
+import { CliShellSessionManager } from './cli-shell-session-manager';
 
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
+    private readonly _shellManager = new CliShellSessionManager();
 
-    private static readonly ALLOWED_WS_PATHS = new Set([
-        '/ws/cli/events',
+    private static readonly EVENT_PATHS = new Set([
         '/ws/v1/cli/events',
-        '/ws/v2/cli/events',
+        '/ws/cli/events',
+    ]);
+
+    private static readonly SHELL_PATHS = new Set([
+        '/ws/v1/cli/shell',
+        '/ws/cli/shell',
     ]);
 
     /**
      * Attach to an HTTP server and listen for WebSocket upgrades on
-     * /ws/cli/events, /ws/v1/cli/events, and /ws/v2/cli/events.
+     * event and shell paths.
      */
     attach(server: Server): void {
         this._wss = new WebSocketServer({ noServer: true });
 
         server.on('upgrade', (request, socket, head) => {
-            if (!CliEventSocketManager.ALLOWED_WS_PATHS.has(request.url ?? '')) {
-                return; // Let other upgrade handlers (if any) handle it
+            const parsed = new URL(request.url ?? '', 'http://localhost');
+            const pathname = parsed.pathname;
+
+            if (CliEventSocketManager.EVENT_PATHS.has(pathname)) {
+                this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                    this._wss!.emit('connection', ws, request);
+                });
+                return;
             }
 
-            this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                this._wss!.emit('connection', ws, request);
-            });
+            if (CliEventSocketManager.SHELL_PATHS.has(pathname)) {
+                this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                    const cols = parseInt(parsed.searchParams.get('cols') ?? '80', 10) || 80;
+                    const rows = parseInt(parsed.searchParams.get('rows') ?? '24', 10) || 24;
+                    const cmd = parsed.searchParams.get('cmd') || undefined;
+
+                    this._shellManager.handleSession(ws, cols, rows, cmd).catch((err) => {
+                        try {
+                            ws.send(JSON.stringify({ type: 'error', message: err.message }));
+                            ws.close();
+                        } catch {
+                            // ignore
+                        }
+                    });
+                });
+                return;
+            }
+
+            // Not our path — let other handlers deal with it
         });
 
         this._wss.on('connection', (ws) => {
