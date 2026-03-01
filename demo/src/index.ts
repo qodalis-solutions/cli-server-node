@@ -11,6 +11,7 @@ import { CliStatusCommandProcessor } from './processors/cli-status-command-proce
 import { CliTimeCommandProcessor } from './processors/cli-time-command-processor';
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
+import { WeatherModule } from '../../plugins/weather';
 
 const port = process.env.PORT ?? 8047;
 
@@ -26,7 +27,9 @@ const { app, eventSocketManager } = createCliServer({
             .addProcessor(new CliHttpCommandProcessor())
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
-            .addProcessor(new CliUuidCommandProcessor());
+            .addProcessor(new CliUuidCommandProcessor())
+            .addModule(new WeatherModule())
+            .addFileSystem({ allowedPaths: ['/tmp'] });
     },
 });
 
