@@ -19,11 +19,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build abstractions
+        run: cd packages/abstractions && npx tsc
+
       - name: Build
         run: npm run build
 
+      - name: Publish abstractions
+        run: cd packages/abstractions && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

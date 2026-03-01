@@ -27,6 +27,7 @@ export {
     ICliCommandExecutorService,
     CliCommandExecutorService,
     CliEventSocketManager,
+    CliShellSessionManager,
 } from './services';
 
 // Controllers
