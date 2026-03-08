@@ -428,18 +428,18 @@ The server includes a pluggable file storage system exposed at `/api/cli/fs/*`. 
 ### Storage Providers
 
 ```typescript
-import { InMemoryProvider, OsProvider } from '@qodalis/cli-server-node';
-import { JsonFileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-json';
-import { SqliteFileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-sqlite';
-import { S3FileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-s3';
+import { InMemoryFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import { JsonFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-json';
+import { SqliteFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-sqlite';
+import { S3FileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-s3';
 
 const { app, eventSocketManager } = createCliServer({
     configure: (builder) => {
         // In-memory (default) — files lost on restart
-        builder.setFileStorageProvider(new InMemoryProvider());
+        builder.setFileStorageProvider(new InMemoryFileStorageProvider());
 
         // OS filesystem
-        builder.setFileStorageProvider(new OsProvider());
+        builder.setFileStorageProvider(new OsFileStorageProvider());
 
         // JSON file — persists to a single JSON file
         builder.setFileStorageProvider(
