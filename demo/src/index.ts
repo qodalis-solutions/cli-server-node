@@ -13,6 +13,13 @@ import { CliHelloCommandProcessor } from './processors/cli-hello-command-process
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '../../plugins/weather';
 
+// File storage providers — uncomment the one you want to use:
+import { InMemoryFileStorageProvider } from '../../plugins/filesystem';
+// import { OsFileStorageProvider } from '../../plugins/filesystem';
+// import { JsonFileStorageProvider } from '../../plugins/filesystem-json';
+// import { SqliteFileStorageProvider } from '../../plugins/filesystem-sqlite';
+// import { S3FileStorageProvider } from '../../plugins/filesystem-s3';
+
 const port = process.env.PORT ?? 8047;
 
 const { app, eventSocketManager } = createCliServer({
@@ -30,6 +37,40 @@ const { app, eventSocketManager } = createCliServer({
             .addProcessor(new CliUuidCommandProcessor())
             .addModule(new WeatherModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
+
+        // -----------------------------------------------------------
+        // File Storage Provider Configuration
+        // -----------------------------------------------------------
+        // By default, InMemoryFileStorageProvider is used. You can
+        // switch to a different provider using setFileStorageProvider().
+        //
+        // Option 1: In-memory (default — files are lost on restart)
+        builder.setFileStorageProvider(new InMemoryFileStorageProvider());
+
+        // Option 2: OS filesystem (reads/writes real files on disk)
+        // builder.setFileStorageProvider(
+        //     new OsFileStorageProvider({ allowedPaths: ['/tmp', '/app', '/home'] })
+        // );
+
+        // Option 3: JSON file (persists virtual filesystem to a single JSON file)
+        // builder.setFileStorageProvider(
+        //     new JsonFileStorageProvider({ filePath: './data.json' })
+        // );
+
+        // Option 4: SQLite (persists virtual filesystem to a SQLite database)
+        // builder.setFileStorageProvider(
+        //     new SqliteFileStorageProvider({ dbPath: './files.db' })
+        // );
+
+        // Option 5: Amazon S3 (store files in an S3 bucket)
+        // builder.setFileStorageProvider(
+        //     new S3FileStorageProvider({
+        //         bucket: 'my-cli-files',
+        //         region: 'us-east-1',
+        //         // accessKeyId and secretAccessKey can also come from
+        //         // environment variables or IAM roles
+        //     })
+        // );
     },
 });
 
