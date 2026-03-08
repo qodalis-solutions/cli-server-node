@@ -58,16 +58,16 @@ export {
     FileExistsError,
     NotADirectoryError,
     IsADirectoryError,
-} from '../plugins/filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 // Filesystem JSON provider
-export { JsonFileStorageProvider, JsonFileProviderOptions } from '../plugins/filesystem-json';
+export { JsonFileStorageProvider, JsonFileProviderOptions } from '@qodalis/cli-server-plugin-filesystem-json';
 
 // Filesystem SQLite provider
-export { SqliteFileStorageProvider, SqliteProviderOptions } from '../plugins/filesystem-sqlite';
+export { SqliteFileStorageProvider, SqliteProviderOptions } from '@qodalis/cli-server-plugin-filesystem-sqlite';
 
 // Filesystem S3 provider
-export { S3FileStorageProvider, S3ProviderOptions } from '../plugins/filesystem-s3';
+export { S3FileStorageProvider, S3ProviderOptions } from '@qodalis/cli-server-plugin-filesystem-s3';
 
 // Processors
 export { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';

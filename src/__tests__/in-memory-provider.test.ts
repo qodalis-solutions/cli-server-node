@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InMemoryFileStorageProvider } from '../../plugins/filesystem';
+import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import {
     FileNotFoundError,
     IsADirectoryError,
     NotADirectoryError,
     FileExistsError,
-} from '../../plugins/filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 describe('InMemoryFileStorageProvider', () => {
     let provider: InMemoryFileStorageProvider;

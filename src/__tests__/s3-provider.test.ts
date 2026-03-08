@@ -34,8 +34,8 @@ vi.mock('@aws-sdk/client-s3', () => {
     };
 });
 
-import { S3FileStorageProvider } from '../../plugins/filesystem-s3';
-import { FileNotFoundError } from '../../plugins/filesystem';
+import { S3FileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-s3';
+import { FileNotFoundError } from '@qodalis/cli-server-plugin-filesystem';
 
 describe('S3FileStorageProvider', () => {
     let provider: S3FileStorageProvider;
