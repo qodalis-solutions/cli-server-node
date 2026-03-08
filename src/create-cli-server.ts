@@ -3,6 +3,8 @@ import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager } from './services';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
+import { createCliControllerV2 } from './controllers/cli-controller-v2';
+import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '../plugins/filesystem';
 
@@ -46,11 +48,17 @@ export function createCliServer(options: CliServerOptions = {}): {
 
     const executor = new CliCommandExecutorService(registry);
 
+    // Version discovery endpoint
+    app.use('/api/cli', createCliVersionController());
+
     // API v1 routes
     app.use('/api/v1/cli', createCliController(registry, executor));
 
+    // API v2 routes
+    app.use('/api/v2/cli', createCliControllerV2(registry, executor));
+
     // Custom basePath fallback (when user overrides the default)
-    if (basePath !== '/api/v1/cli') {
+    if (basePath !== '/api/v1/cli' && basePath !== '/api/v2/cli') {
         app.use(basePath, createCliController(registry, executor));
     }
 
