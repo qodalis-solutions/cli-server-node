@@ -28,12 +28,9 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules/ node_modules/
 COPY --from=build /app/packages/abstractions/dist/ packages/abstractions/dist/
 COPY --from=build /app/packages/abstractions/package.json packages/abstractions/
-
-COPY --from=build /app/src/ src/
 COPY --from=build /app/plugins/ plugins/
-COPY --from=build /app/tsconfig.json ./
 
 ENV PORT=8047
 EXPOSE 8047
 
-CMD ["npx", "tsx", "src/server.ts"]
+CMD ["node", "dist/src/server.js"]

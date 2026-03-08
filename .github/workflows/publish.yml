@@ -69,6 +69,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
