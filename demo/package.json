@@ -9,7 +9,9 @@
         "dev": "tsx watch src/index.ts"
     },
     "dependencies": {
-        "@qodalis/cli-server-node": "file:.."
+        "@qodalis/cli-server-node": "file:..",
+        "@qodalis/cli-server-plugin-filesystem": "file:../plugins/filesystem",
+        "@qodalis/cli-server-plugin-weather": "file:../plugins/weather"
     },
     "devDependencies": {
         "tsx": "^4.19.0"
