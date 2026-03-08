@@ -26,22 +26,44 @@ export class OsFileStorageProvider implements IFileStorageProvider {
     private async validate(requestedPath: string): Promise<string> {
         const resolved = nodePath.resolve(requestedPath);
 
-        let realPath: string;
-        try {
-            realPath = await fs.realpath(resolved);
-        } catch {
-            // Path may not exist yet (e.g. for write/mkdir); fall back to resolved
-            realPath = resolved;
-        }
+        // Walk up to find the longest existing ancestor, realpath it,
+        // then reattach the remaining (non-existent) segments.
+        // This prevents symlink-based path traversal when the full path
+        // doesn't exist yet (e.g. write/mkdir to a new file under a symlink).
+        let existing = resolved;
+        const pendingSegments: string[] = [];
+        while (true) {
+            try {
+                const real = await fs.realpath(existing);
+                // Reattach pending segments
+                const fullReal = pendingSegments.length > 0
+                    ? nodePath.join(real, ...pendingSegments)
+                    : real;
 
-        const allowed = this.allowedPaths.some(
-            (ap) => realPath === ap || realPath.startsWith(ap + nodePath.sep),
-        );
-        if (!allowed) {
-            throw new PermissionDeniedError(requestedPath);
-        }
+                // Safety check: pending segments should never contain '..'
+                // after nodePath.resolve(), but guard against it anyway.
+                if (pendingSegments.some((seg) => seg === '..')) {
+                    throw new PermissionDeniedError(requestedPath);
+                }
 
-        return realPath;
+                const allowed = this.allowedPaths.some(
+                    (ap) => fullReal === ap || fullReal.startsWith(ap + nodePath.sep),
+                );
+                if (!allowed) {
+                    throw new PermissionDeniedError(requestedPath);
+                }
+                return fullReal;
+            } catch (err) {
+                if (err instanceof PermissionDeniedError) throw err;
+                const parent = nodePath.dirname(existing);
+                if (parent === existing) {
+                    // Reached filesystem root without finding an existing path
+                    throw new PermissionDeniedError(requestedPath);
+                }
+                pendingSegments.unshift(nodePath.basename(existing));
+                existing = parent;
+            }
+        }
     }
 
     async list(path: string): Promise<FileEntry[]> {
