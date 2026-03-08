@@ -2,15 +2,15 @@ import { Router } from 'express';
 import * as os from 'os';
 import * as path from 'path';
 
-const SERVER_VERSION = '1.0.0';
+const SERVER_VERSION = '2.0.0';
 
 export function createCliVersionController(): Router {
     const router = Router();
 
     router.get('/version', (_req, res) => {
         res.json({
-            supportedVersions: [1],
-            preferredVersion: 1,
+            supportedVersions: [1, 2],
+            preferredVersion: 2,
             serverVersion: SERVER_VERSION,
         });
     });
