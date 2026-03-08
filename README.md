@@ -1,6 +1,6 @@
 # Qodalis CLI Server (Node.js)
 
-A Node.js CLI server framework for the [Qodalis CLI](https://github.com/qodalis-solutions/angular-web-cli) ecosystem. Build custom server-side commands that integrate with the Qodalis web terminal.
+A Node.js CLI server framework for the [Qodalis CLI](https://github.com/qodalis-solutions/web-cli) ecosystem. Build custom server-side commands that integrate with the Qodalis web terminal.
 
 ## Installation
 
@@ -409,6 +409,89 @@ import {
 } from '@qodalis/cli-server-node';
 ```
 
+## File Storage
+
+The server includes a pluggable file storage system exposed at `/api/cli/fs/*`. Enable it with `setFileStorageProvider()` and choose a storage backend.
+
+### Filesystem API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/cli/fs/ls?path=/` | List directory contents |
+| GET | `/api/cli/fs/cat?path=/file.txt` | Read file content |
+| GET | `/api/cli/fs/stat?path=/file.txt` | File/directory metadata |
+| GET | `/api/cli/fs/download?path=/file.txt` | Download file |
+| POST | `/api/cli/fs/upload` | Upload file (multipart) |
+| POST | `/api/cli/fs/mkdir` | Create directory |
+| DELETE | `/api/cli/fs/rm?path=/file.txt` | Delete file or directory |
+
+### Storage Providers
+
+```typescript
+import { InMemoryProvider, OsProvider } from '@qodalis/cli-server-node';
+import { JsonFileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-json';
+import { SqliteFileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-sqlite';
+import { S3FileStorageProvider } from '@qodalis/cli-server-node/plugins/filesystem-s3';
+
+const { app, eventSocketManager } = createCliServer({
+    configure: (builder) => {
+        // In-memory (default) — files lost on restart
+        builder.setFileStorageProvider(new InMemoryProvider());
+
+        // OS filesystem
+        builder.setFileStorageProvider(new OsProvider());
+
+        // JSON file — persists to a single JSON file
+        builder.setFileStorageProvider(
+            new JsonFileStorageProvider({ filePath: './data/files.json' }),
+        );
+
+        // SQLite — persists to a SQLite database
+        builder.setFileStorageProvider(
+            new SqliteFileStorageProvider({ dbPath: './data/files.db' }),
+        );
+
+        // Amazon S3
+        builder.setFileStorageProvider(
+            new S3FileStorageProvider({
+                bucket: 'my-cli-files',
+                region: 'us-east-1',
+                prefix: 'uploads/',
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                },
+            }),
+        );
+    },
+});
+```
+
+### Custom Provider
+
+Implement `IFileStorageProvider` to add your own backend:
+
+```typescript
+import { IFileStorageProvider, FileEntry, FileStat } from '@qodalis/cli-server-node';
+
+class MyProvider implements IFileStorageProvider {
+    readonly name = 'my-provider';
+    async list(path: string): Promise<FileEntry[]> { /* ... */ }
+    async readFile(path: string): Promise<string> { /* ... */ }
+    async writeFile(path: string, content: string | Buffer): Promise<void> { /* ... */ }
+    async stat(path: string): Promise<FileStat> { /* ... */ }
+    async mkdir(path: string, recursive?: boolean): Promise<void> { /* ... */ }
+    async remove(path: string, recursive?: boolean): Promise<void> { /* ... */ }
+    async copy(src: string, dest: string): Promise<void> { /* ... */ }
+    async move(src: string, dest: string): Promise<void> { /* ... */ }
+    async exists(path: string): Promise<boolean> { /* ... */ }
+    async getDownloadStream(path: string): Promise<Readable> { /* ... */ }
+    async uploadFile(path: string, content: Buffer): Promise<void> { /* ... */ }
+}
+
+builder.setFileStorageProvider(new MyProvider());
+```
+
 ## Built-in Processors
 
 These processors ship with the library and are included in the standalone server:
@@ -457,6 +540,10 @@ packages/
       cli-command-parameter-descriptor.ts  # Parameter declaration
       cli-command-author.ts           # Author metadata
 plugins/
+  filesystem/                         # Core file storage abstraction (IFileStorageProvider, InMemory, OS)
+  filesystem-json/                    # JSON file persistence provider
+  filesystem-sqlite/                  # SQLite persistence provider (better-sqlite3)
+  filesystem-s3/                      # Amazon S3 storage provider (@aws-sdk/client-s3)
   weather/                            # Weather module (example plugin)
 src/
   abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
