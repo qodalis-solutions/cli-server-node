@@ -60,6 +60,15 @@ export {
     IsADirectoryError,
 } from '../plugins/filesystem';
 
+// Filesystem JSON provider
+export { JsonFileStorageProvider, JsonFileProviderOptions } from '../plugins/filesystem-json';
+
+// Filesystem SQLite provider
+export { SqliteFileStorageProvider, SqliteProviderOptions } from '../plugins/filesystem-sqlite';
+
+// Filesystem S3 provider
+export { S3FileStorageProvider, S3ProviderOptions } from '../plugins/filesystem-s3';
+
 // Processors
 export { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
 export { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
