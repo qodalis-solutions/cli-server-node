@@ -7,3 +7,4 @@ export {
     NotADirectoryError,
     IsADirectoryError,
 } from './errors';
+export { InMemoryFileStorageProvider } from './providers';
