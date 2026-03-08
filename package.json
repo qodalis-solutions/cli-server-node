@@ -9,6 +9,8 @@
     },
     "files": [
         "dist",
+        "!dist/src/__tests__",
+        "!dist/plugins",
         "LICENSE",
         "README.md"
     ],
@@ -35,8 +37,8 @@
     },
     "homepage": "https://qodalis.com/",
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.1004.0",
         "@qodalis/cli-server-abstractions": "file:packages/abstractions",
+        "@qodalis/cli-server-plugin-filesystem": "file:plugins/filesystem",
         "cors": "^2.8.5",
         "express": "^4.21.0",
         "multer": "^2.1.0",
@@ -44,6 +46,9 @@
         "ws": "^8.18.0"
     },
     "optionalDependencies": {
+        "@qodalis/cli-server-plugin-filesystem-json": "file:plugins/filesystem-json",
+        "@qodalis/cli-server-plugin-filesystem-sqlite": "file:plugins/filesystem-sqlite",
+        "@qodalis/cli-server-plugin-filesystem-s3": "file:plugins/filesystem-s3",
         "better-sqlite3": "^11.0.0"
     },
     "devDependencies": {

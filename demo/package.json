@@ -4,6 +4,7 @@
     "private": true,
     "description": "Demo server showcasing @qodalis/cli-server-node",
     "scripts": {
+        "build": "tsc",
         "start": "tsx src/index.ts",
         "dev": "tsx watch src/index.ts"
     },

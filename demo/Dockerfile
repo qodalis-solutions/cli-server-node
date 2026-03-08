@@ -18,9 +18,10 @@ COPY plugins/ plugins/
 RUN npm run build
 
 WORKDIR /app/demo
-COPY demo/package.json ./
+COPY demo/package.json demo/tsconfig.json ./
 COPY demo/src/ src/
 RUN npm install
+RUN npx tsc
 
 FROM node:22-alpine
 WORKDIR /app
@@ -35,11 +36,11 @@ COPY --from=build /app/packages/abstractions/dist/ packages/abstractions/dist/
 COPY --from=build /app/packages/abstractions/package.json packages/abstractions/
 
 COPY --from=build /app/plugins/ plugins/
-COPY --from=build /app/demo/src/ demo/src/
+COPY --from=build /app/demo/dist/ demo/dist/
 COPY --from=build /app/demo/package.json demo/
 COPY --from=build /app/demo/node_modules/ demo/node_modules/
 
 ENV PORT=8047
 EXPOSE 8047
 
-CMD ["npx", "tsx", "demo/src/index.ts"]
+CMD ["node", "demo/dist/src/index.js"]
