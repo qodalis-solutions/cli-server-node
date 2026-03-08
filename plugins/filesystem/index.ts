@@ -9,3 +9,4 @@ export {
 } from './errors';
 export { InMemoryFileStorageProvider } from './providers';
 export { OsFileStorageProvider, OsProviderOptions } from './providers';
+export { FileSystemModule } from './filesystem-module';

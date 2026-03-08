@@ -4,7 +4,7 @@ import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager } 
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
-import { FileSystemPathValidator } from './filesystem';
+import { OsFileStorageProvider } from '../plugins/filesystem';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/cli'. */
@@ -54,10 +54,14 @@ export function createCliServer(options: CliServerOptions = {}): {
         app.use(basePath, createCliController(registry, executor));
     }
 
-    // Filesystem API — only mounted when configured via builder.addFileSystem()
-    if (builder.fileSystemOptions) {
-        const validator = new FileSystemPathValidator(builder.fileSystemOptions);
-        app.use('/api/cli/fs', createFilesystemRouter(validator));
+    // Filesystem API — provider-based
+    let fsProvider = builder.fileStorageProvider;
+    if (!fsProvider && builder.fileSystemOptions) {
+        // Backward compatibility: create OsFileStorageProvider from old-style options
+        fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
+    }
+    if (fsProvider) {
+        app.use('/api/cli/fs', createFilesystemRouter(fsProvider));
     }
 
     const eventSocketManager = new CliEventSocketManager();

@@ -1,22 +1,42 @@
-import { Router } from 'express';
-import * as fs from 'fs';
-import * as path from 'path';
+import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { FileSystemPathValidator } from '../filesystem';
+import {
+    IFileStorageProvider,
+    FileNotFoundError,
+    PermissionDeniedError,
+    NotADirectoryError,
+    IsADirectoryError,
+    FileExistsError,
+} from '../../plugins/filesystem';
 
 /**
- * Creates an Express router that exposes filesystem operations.
- *
- * Every endpoint validates the requested path against the supplied
- * `FileSystemPathValidator` and returns 403 when access is denied.
+ * Maps provider errors to appropriate HTTP status codes and sends a JSON error response.
  */
-export function createFilesystemRouter(validator: FileSystemPathValidator): Router {
+function handleError(err: unknown, res: Response): void {
+    if (err instanceof FileNotFoundError) {
+        res.status(404).json({ error: err.message });
+    } else if (err instanceof PermissionDeniedError) {
+        res.status(403).json({ error: err.message });
+    } else if (err instanceof NotADirectoryError || err instanceof IsADirectoryError) {
+        res.status(400).json({ error: err.message });
+    } else if (err instanceof FileExistsError) {
+        res.status(409).json({ error: err.message });
+    } else {
+        res.status(500).json({ error: (err as Error).message });
+    }
+}
+
+/**
+ * Creates an Express router that exposes filesystem operations backed by
+ * a pluggable `IFileStorageProvider`.
+ */
+export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     const router = Router();
 
     const upload = multer({ storage: multer.memoryStorage() });
 
     // ------------------------------------------------------------------ ls
-    router.get('/ls', (req, res) => {
+    router.get('/ls', async (req: Request, res: Response) => {
         try {
             const dirPath = req.query.path as string | undefined;
             if (!dirPath) {
@@ -24,50 +44,15 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(dirPath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(dirPath);
-            if (!fs.existsSync(resolved)) {
-                res.status(404).json({ error: 'Directory not found' });
-                return;
-            }
-
-            const dirents = fs.readdirSync(resolved, { withFileTypes: true });
-            const entries = dirents.map((d) => {
-                const fullPath = path.join(resolved, d.name);
-                let size = 0;
-                let modified: string | null = null;
-                let permissions: string | null = null;
-
-                try {
-                    const stat = fs.statSync(fullPath);
-                    size = stat.size;
-                    modified = stat.mtime.toISOString();
-                    permissions = (stat.mode & 0o777).toString(8);
-                } catch {
-                    // Entry may have been removed between readdir and stat
-                }
-
-                return {
-                    name: d.name,
-                    type: d.isDirectory() ? 'directory' : d.isFile() ? 'file' : 'other',
-                    size,
-                    modified,
-                    permissions,
-                };
-            });
-
+            const entries = await provider.list(dirPath);
             res.json({ entries });
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // ----------------------------------------------------------------- cat
-    router.get('/cat', (req, res) => {
+    router.get('/cat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
             if (!filePath) {
@@ -75,26 +60,15 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(filePath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(filePath);
-            if (!fs.existsSync(resolved)) {
-                res.status(404).json({ error: 'File not found' });
-                return;
-            }
-
-            const content = fs.readFileSync(resolved, 'utf-8');
+            const content = await provider.readFile(filePath);
             res.json({ content });
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // ---------------------------------------------------------------- stat
-    router.get('/stat', (req, res) => {
+    router.get('/stat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
             if (!filePath) {
@@ -102,33 +76,15 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(filePath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(filePath);
-            if (!fs.existsSync(resolved)) {
-                res.status(404).json({ error: 'File not found' });
-                return;
-            }
-
-            const stat = fs.statSync(resolved);
-            res.json({
-                name: path.basename(resolved),
-                type: stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other',
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                created: stat.birthtime.toISOString(),
-                permissions: (stat.mode & 0o777).toString(8),
-            });
+            const fileStat = await provider.stat(filePath);
+            res.json(fileStat);
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // ------------------------------------------------------------ download
-    router.get('/download', (req, res) => {
+    router.get('/download', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
             if (!filePath) {
@@ -136,28 +92,20 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(filePath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
+            const stream = await provider.getDownloadStream(filePath);
 
-            const resolved = path.resolve(filePath);
-            if (!fs.existsSync(resolved)) {
-                res.status(404).json({ error: 'File not found' });
-                return;
-            }
-
-            const filename = path.basename(resolved);
+            // Extract filename from the path for Content-Disposition header
+            const filename = filePath.split('/').pop() || 'download';
             res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-            const stream = fs.createReadStream(resolved);
+
             stream.pipe(res);
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // -------------------------------------------------------------- upload
-    router.post('/upload', upload.single('file'), (req, res) => {
+    router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
         try {
             const targetPath = req.body?.path as string | undefined;
             if (!targetPath) {
@@ -170,28 +118,15 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(targetPath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(targetPath);
-
-            // Ensure parent directory exists
-            const dir = path.dirname(resolved);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            fs.writeFileSync(resolved, req.file.buffer);
-            res.json({ path: resolved, size: req.file.size });
+            await provider.uploadFile(targetPath, req.file.buffer);
+            res.json({ path: targetPath, size: req.file.size });
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // --------------------------------------------------------------- mkdir
-    router.post('/mkdir', (req, res) => {
+    router.post('/mkdir', async (req: Request, res: Response) => {
         try {
             const dirPath = req.body?.path as string | undefined;
             if (!dirPath) {
@@ -199,21 +134,15 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(dirPath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(dirPath);
-            fs.mkdirSync(resolved, { recursive: true });
-            res.json({ path: resolved });
+            await provider.mkdir(dirPath, true);
+            res.json({ path: dirPath });
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
     // ----------------------------------------------------------------- rm
-    router.delete('/rm', (req, res) => {
+    router.delete('/rm', async (req: Request, res: Response) => {
         try {
             const targetPath = req.query.path as string | undefined;
             if (!targetPath) {
@@ -221,21 +150,10 @@ export function createFilesystemRouter(validator: FileSystemPathValidator): Rout
                 return;
             }
 
-            if (!validator.isPathAllowed(targetPath)) {
-                res.status(403).json({ error: 'Access denied' });
-                return;
-            }
-
-            const resolved = path.resolve(targetPath);
-            if (!fs.existsSync(resolved)) {
-                res.status(404).json({ error: 'Path not found' });
-                return;
-            }
-
-            fs.rmSync(resolved, { recursive: true, force: true });
-            res.json({ deleted: resolved });
+            await provider.remove(targetPath, true);
+            res.json({ deleted: targetPath });
         } catch (err) {
-            res.status(500).json({ error: (err as Error).message });
+            handleError(err, res);
         }
     });
 
