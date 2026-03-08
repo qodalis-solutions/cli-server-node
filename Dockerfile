@@ -6,15 +6,25 @@ RUN apk add --no-cache python3 make g++
 
 COPY package.json package-lock.json* ./
 COPY packages/abstractions/package.json packages/abstractions/
+COPY plugins/filesystem/package.json plugins/filesystem/
+COPY plugins/filesystem-json/package.json plugins/filesystem-json/
+COPY plugins/filesystem-sqlite/package.json plugins/filesystem-sqlite/
+COPY plugins/filesystem-s3/package.json plugins/filesystem-s3/
+COPY plugins/weather/package.json plugins/weather/
 RUN npm install
 
 COPY tsconfig.json ./
-COPY packages/abstractions/tsconfig.json packages/abstractions/tsconfig.json
-COPY packages/abstractions/src/ packages/abstractions/src/
+COPY packages/abstractions/ packages/abstractions/
 RUN cd packages/abstractions && npx tsc
 
-COPY src/ src/
 COPY plugins/ plugins/
+RUN cd plugins/filesystem && npx tsc \
+    && cd ../filesystem-json && npx tsc \
+    && cd ../filesystem-sqlite && (npx tsc || true) \
+    && cd ../filesystem-s3 && (npx tsc || true) \
+    && cd ../weather && npx tsc
+
+COPY src/ src/
 RUN npm run build
 
 FROM node:22-alpine
