@@ -5,7 +5,7 @@ import {
     FileStat,
     FileNotFoundError,
     IsADirectoryError,
-} from '../filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 import {
     S3Client,
     ListObjectsV2Command,

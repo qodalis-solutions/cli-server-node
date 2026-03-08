@@ -11,14 +11,14 @@ import { CliStatusCommandProcessor } from './processors/cli-status-command-proce
 import { CliTimeCommandProcessor } from './processors/cli-time-command-processor';
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
-import { WeatherModule } from '../../plugins/weather';
+import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 
 // File storage providers — uncomment the one you want to use:
-import { InMemoryFileStorageProvider } from '../../plugins/filesystem';
-// import { OsFileStorageProvider } from '../../plugins/filesystem';
-// import { JsonFileStorageProvider } from '../../plugins/filesystem-json';
-// import { SqliteFileStorageProvider } from '../../plugins/filesystem-sqlite';
-// import { S3FileStorageProvider } from '../../plugins/filesystem-s3';
+import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+// import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+// import { JsonFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-json';
+// import { SqliteFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-sqlite';
+// import { S3FileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-s3';
 
 const port = process.env.PORT ?? 8047;
 

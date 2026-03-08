@@ -10,7 +10,7 @@ import {
     FileExistsError,
     NotADirectoryError,
     IsADirectoryError,
-} from '../filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 export interface SqliteProviderOptions {
     dbPath: string; // e.g. './data/files.db' or ':memory:'

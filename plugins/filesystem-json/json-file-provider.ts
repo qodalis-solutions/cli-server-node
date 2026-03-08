@@ -9,7 +9,7 @@ import {
     FileExistsError,
     NotADirectoryError,
     IsADirectoryError,
-} from '../filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 export interface JsonFileProviderOptions {
     filePath: string;

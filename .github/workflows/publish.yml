@@ -22,11 +22,44 @@ jobs:
       - name: Build abstractions
         run: cd packages/abstractions && npx tsc
 
+      - name: Build plugins (filesystem first, then dependents)
+        run: |
+          cd plugins/filesystem && npx tsc
+          cd ../weather && npx tsc
+          cd ../filesystem-json && npx tsc
+          cd ../filesystem-sqlite && npx tsc
+          cd ../filesystem-s3 && npx tsc
+
       - name: Build
         run: npm run build
 
       - name: Publish abstractions
         run: cd packages/abstractions && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish plugin - filesystem
+        run: cd plugins/filesystem && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish plugin - filesystem-json
+        run: cd plugins/filesystem-json && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish plugin - filesystem-sqlite
+        run: cd plugins/filesystem-sqlite && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish plugin - filesystem-s3
+        run: cd plugins/filesystem-s3 && npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish plugin - weather
+        run: cd plugins/weather && npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

@@ -6,7 +6,7 @@ import { createCliController } from './controllers/cli-controller';
 import { createCliControllerV2 } from './controllers/cli-controller-v2';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
-import { OsFileStorageProvider } from '../plugins/filesystem';
+import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/cli'. */

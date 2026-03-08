@@ -1,6 +1,6 @@
 import { ICliCommandProcessor, ICliModule } from '../abstractions';
 import { FileSystemOptions } from '../filesystem';
-import { IFileStorageProvider } from '../../plugins/filesystem';
+import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { CliCommandRegistry } from '../services';
 
 export class CliBuilder {
