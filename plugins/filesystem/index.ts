@@ -8,3 +8,4 @@ export {
     IsADirectoryError,
 } from './errors';
 export { InMemoryFileStorageProvider } from './providers';
+export { OsFileStorageProvider, OsProviderOptions } from './providers';
