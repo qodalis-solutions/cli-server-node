@@ -1,0 +1,31 @@
+name: Build & Test
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build abstractions
+        run: cd packages/abstractions && npx tsc
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
