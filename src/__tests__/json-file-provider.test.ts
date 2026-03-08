@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import { JsonFileStorageProvider } from '../../plugins/filesystem-json';
+import { JsonFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-json';
 import {
     FileNotFoundError,
     IsADirectoryError,
     NotADirectoryError,
     FileExistsError,
-} from '../../plugins/filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 const TEST_FILE = `/tmp/test-fs-${Date.now()}.json`;
 

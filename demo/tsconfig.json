@@ -7,7 +7,16 @@
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "resolveJsonModule": true
+        "resolveJsonModule": true,
+        "paths": {
+            "@qodalis/cli-server-node": ["../src/index.ts"],
+            "@qodalis/cli-server-abstractions": ["../packages/abstractions/src/index.ts"],
+            "@qodalis/cli-server-plugin-filesystem": ["../plugins/filesystem/index.ts"],
+            "@qodalis/cli-server-plugin-filesystem-json": ["../plugins/filesystem-json/index.ts"],
+            "@qodalis/cli-server-plugin-filesystem-sqlite": ["../plugins/filesystem-sqlite/index.ts"],
+            "@qodalis/cli-server-plugin-filesystem-s3": ["../plugins/filesystem-s3/index.ts"],
+            "@qodalis/cli-server-plugin-weather": ["../plugins/weather/index.ts"]
+        }
     },
     "include": ["src/**/*"]
 }

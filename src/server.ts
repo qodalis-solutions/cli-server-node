@@ -8,7 +8,7 @@ import { CliHttpCommandProcessor } from './processors/cli-http-command-processor
 import { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
 import { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
 import { CliUuidCommandProcessor } from './processors/cli-uuid-command-processor';
-import { WeatherModule } from '../plugins/weather';
+import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 
 const port = process.env.PORT ?? 8047;
 

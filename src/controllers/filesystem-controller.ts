@@ -7,7 +7,7 @@ import {
     NotADirectoryError,
     IsADirectoryError,
     FileExistsError,
-} from '../../plugins/filesystem';
+} from '@qodalis/cli-server-plugin-filesystem';
 
 /**
  * Maps provider errors to appropriate HTTP status codes and sends a JSON error response.

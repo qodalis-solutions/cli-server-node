@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createFilesystemRouter } from '../controllers/filesystem-controller';
-import { InMemoryFileStorageProvider } from '../../plugins/filesystem';
+import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 
 describe('Filesystem Controller', () => {
     let app: express.Express;
