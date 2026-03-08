@@ -1,7 +1,23 @@
 import { WebSocket } from 'ws';
 import * as os from 'os';
 import * as path from 'path';
-import * as pty from 'node-pty';
+
+// Lazy-load node-pty so that importing this module does not fail when the
+// native add-on is unavailable (e.g. in CI environments without build tools).
+let _pty: typeof import('node-pty') | undefined;
+function getPty(): typeof import('node-pty') {
+    if (!_pty) {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            _pty = require('node-pty');
+        } catch (err: any) {
+            throw new Error(
+                `node-pty is required for shell sessions but failed to load: ${err.message}`,
+            );
+        }
+    }
+    return _pty!;
+}
 
 type ClientMessage =
     | { type: 'stdin'; data: string }
@@ -23,9 +39,10 @@ export class CliShellSessionManager {
     ): Promise<void> {
         const { shell, args } = this.getShellInfo(command);
 
-        let ptyProcess: pty.IPty;
+        const nodePty = getPty();
+        let ptyProcess: import('node-pty').IPty;
         try {
-            ptyProcess = pty.spawn(shell, args, {
+            ptyProcess = nodePty.spawn(shell, args, {
                 name: 'xterm-256color',
                 cols,
                 rows,

@@ -1,14 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import { SqliteFileStorageProvider } from '../../plugins/filesystem-sqlite';
-import {
-    FileNotFoundError,
-    IsADirectoryError,
-    NotADirectoryError,
-    FileExistsError,
-} from '../../plugins/filesystem';
 
-describe('SqliteFileStorageProvider (in-memory)', () => {
+// Skip the entire suite when better-sqlite3 is not available (native module).
+let SqliteFileStorageProvider: typeof import('../../plugins/filesystem-sqlite').SqliteFileStorageProvider;
+let FileNotFoundError: typeof import('../../plugins/filesystem').FileNotFoundError;
+let IsADirectoryError: typeof import('../../plugins/filesystem').IsADirectoryError;
+let NotADirectoryError: typeof import('../../plugins/filesystem').NotADirectoryError;
+let FileExistsError: typeof import('../../plugins/filesystem').FileExistsError;
+
+let canRun = true;
+try {
+    ({ SqliteFileStorageProvider } = await import('../../plugins/filesystem-sqlite'));
+    ({ FileNotFoundError, IsADirectoryError, NotADirectoryError, FileExistsError } = await import('../../plugins/filesystem'));
+} catch {
+    canRun = false;
+}
+
+describe.skipIf(!canRun)('SqliteFileStorageProvider (in-memory)', () => {
     let provider: SqliteFileStorageProvider;
 
     beforeEach(() => {
@@ -342,7 +350,7 @@ describe('SqliteFileStorageProvider (in-memory)', () => {
     });
 });
 
-describe('SqliteFileStorageProvider (file-based persistence)', () => {
+describe.skipIf(!canRun)('SqliteFileStorageProvider (file-based persistence)', () => {
     const TEST_DB = `/tmp/test-sqlite-fs-${Date.now()}.db`;
 
     afterEach(() => {
