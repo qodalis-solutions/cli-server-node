@@ -41,8 +41,24 @@ export { createFilesystemRouter } from './controllers/filesystem-controller';
 // Extensions
 export { CliBuilder } from './extensions';
 
-// Filesystem
+// Filesystem (legacy)
 export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
+
+// Filesystem plugin
+export {
+    IFileStorageProvider,
+    FileEntry,
+    FileStat,
+    InMemoryFileStorageProvider,
+    OsFileStorageProvider,
+    OsProviderOptions,
+    FileSystemModule,
+    FileNotFoundError,
+    PermissionDeniedError,
+    FileExistsError,
+    NotADirectoryError,
+    IsADirectoryError,
+} from '../plugins/filesystem';
 
 // Processors
 export { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
