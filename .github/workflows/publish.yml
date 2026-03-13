@@ -16,6 +16,16 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Verify npm authentication
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set. Cannot publish packages."
+            exit 1
+          fi
+          npm whoami --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Install dependencies
         run: npm ci
 
@@ -33,38 +43,37 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish abstractions
-        run: cd packages/abstractions && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish all packages
+        run: |
+          publish_pkg() {
+            local dir="$1"
+            local name
+            name=$(node -p "require('./$dir/package.json').name")
+            echo "::group::Publishing $name from $dir"
+            local output
+            if output=$(cd "$dir" && npm publish --access public 2>&1); then
+              echo "$output"
+              echo "Successfully published $name"
+            else
+              echo "$output"
+              if echo "$output" | grep -qE "previously published|already exists|EPUBLISHCONFLICT|cannot publish over"; then
+                echo "Version already published, skipping $name."
+              else
+                echo "::error::Failed to publish $name"
+                echo "::endgroup::"
+                return 1
+              fi
+            fi
+            echo "::endgroup::"
+          }
 
-      - name: Publish plugin - filesystem
-        run: cd plugins/filesystem && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish plugin - filesystem-json
-        run: cd plugins/filesystem-json && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish plugin - filesystem-sqlite
-        run: cd plugins/filesystem-sqlite && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish plugin - filesystem-s3
-        run: cd plugins/filesystem-s3 && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish plugin - weather
-        run: cd plugins/weather && npm publish --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish
-        run: npm publish --access public || true
+          publish_pkg packages/abstractions
+          publish_pkg plugins/filesystem
+          publish_pkg plugins/filesystem-json
+          publish_pkg plugins/filesystem-sqlite
+          publish_pkg plugins/filesystem-s3
+          publish_pkg plugins/weather
+          publish_pkg .
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
