@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-abstractions",
-    "version": "1.0.0-beta.1",
+    "version": "1.0.0-beta.2",
     "description": "Shared interfaces and base classes for Qodalis CLI command processors — zero framework dependencies",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
