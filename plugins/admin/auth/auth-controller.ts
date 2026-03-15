@@ -88,7 +88,7 @@ export function createAuthController(config: AdminConfig, jwtSecret?: string): R
 
         res.json({
             token,
-            expiresIn: '24h',
+            expiresIn: 86400,
             username,
         });
     });

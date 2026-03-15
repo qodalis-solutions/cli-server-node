@@ -4,7 +4,7 @@
 
 export interface LogEntry {
     timestamp: string;
-    level: 'info' | 'warn' | 'error' | 'debug';
+    level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
     message: string;
     source: string;
 }
@@ -68,7 +68,8 @@ export class LogRingBuffer {
         let entries = this.getAll();
 
         if (level) {
-            entries = entries.filter((e) => e.level === level);
+            const upperLevel = level.toUpperCase();
+            entries = entries.filter((e) => e.level === upperLevel);
         }
 
         if (search) {
@@ -107,7 +108,7 @@ export class LogRingBuffer {
         console.log = (...args: unknown[]) => {
             this.push({
                 timestamp: new Date().toISOString(),
-                level: 'info',
+                level: 'INFO',
                 message: args.map(String).join(' '),
                 source: 'console',
             });
@@ -117,7 +118,7 @@ export class LogRingBuffer {
         console.warn = (...args: unknown[]) => {
             this.push({
                 timestamp: new Date().toISOString(),
-                level: 'warn',
+                level: 'WARN',
                 message: args.map(String).join(' '),
                 source: 'console',
             });
@@ -127,7 +128,7 @@ export class LogRingBuffer {
         console.error = (...args: unknown[]) => {
             this.push({
                 timestamp: new Date().toISOString(),
-                level: 'error',
+                level: 'ERROR',
                 message: args.map(String).join(' '),
                 source: 'console',
             });

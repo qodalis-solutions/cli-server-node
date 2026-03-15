@@ -6,12 +6,18 @@ export interface AdminCredentials {
     password: string;
 }
 
-export interface ConfigSection {
+export interface ConfigEntry {
     key: string;
-    label: string;
+    value: string | number | boolean | string[];
+    type: 'string' | 'number' | 'boolean' | 'string[]';
     description: string;
-    values: Record<string, unknown>;
     mutable: boolean;
+}
+
+export interface ConfigSection {
+    name: string;
+    mutable: boolean;
+    settings: ConfigEntry[];
 }
 
 export class AdminConfig {
@@ -44,35 +50,39 @@ export class AdminConfig {
     }
 
     getConfigSections(): ConfigSection[] {
+        const customEntries: ConfigEntry[] = Object.entries(this._mutableSettings).map(
+            ([key, val]) => ({
+                key,
+                value: val as string | number | boolean | string[],
+                type: inferType(val),
+                description: '',
+                mutable: true,
+            }),
+        );
+
         return [
             {
-                key: 'server',
-                label: 'Server',
-                description: 'Server runtime configuration',
-                values: {
-                    platform: 'node',
-                    platformVersion: process.version,
-                    nodeEnv: process.env.NODE_ENV ?? 'development',
-                    pid: process.pid,
-                },
+                name: 'server',
                 mutable: false,
+                settings: [
+                    { key: 'platform', value: 'node', type: 'string', description: 'Server platform', mutable: false },
+                    { key: 'platformVersion', value: process.version, type: 'string', description: 'Node.js version', mutable: false },
+                    { key: 'nodeEnv', value: process.env.NODE_ENV ?? 'development', type: 'string', description: 'NODE_ENV', mutable: false },
+                    { key: 'pid', value: process.pid, type: 'number', description: 'Process ID', mutable: false },
+                ],
             },
             {
-                key: 'auth',
-                label: 'Authentication',
-                description: 'Admin authentication settings',
-                values: {
-                    username: this._username,
-                    jwtSecretConfigured: !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET,
-                },
+                name: 'auth',
                 mutable: false,
+                settings: [
+                    { key: 'username', value: this._username, type: 'string', description: 'Admin username', mutable: false },
+                    { key: 'jwtSecretConfigured', value: !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET, type: 'boolean', description: 'Whether JWT secret is explicitly set', mutable: false },
+                ],
             },
             {
-                key: 'custom',
-                label: 'Custom Settings',
-                description: 'User-defined mutable settings',
-                values: { ...this._mutableSettings },
+                name: 'custom',
                 mutable: true,
+                settings: customEntries,
             },
         ];
     }
@@ -84,4 +94,11 @@ export class AdminConfig {
     updateMutableSettings(values: Record<string, unknown>): void {
         Object.assign(this._mutableSettings, values);
     }
+}
+
+function inferType(val: unknown): 'string' | 'number' | 'boolean' | 'string[]' {
+    if (typeof val === 'boolean') return 'boolean';
+    if (typeof val === 'number') return 'number';
+    if (Array.isArray(val)) return 'string[]';
+    return 'string';
 }

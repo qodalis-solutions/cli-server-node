@@ -12,7 +12,7 @@ export function createConfigController(config: AdminConfig): Router {
     const router = Router();
 
     router.get('/', (_req: Request, res: Response): void => {
-        res.json(config.getConfigSections());
+        res.json({ sections: config.getConfigSections() });
     });
 
     router.put('/', (req: Request, res: Response): void => {
