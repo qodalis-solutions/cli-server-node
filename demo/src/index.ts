@@ -12,6 +12,7 @@ import { CliTimeCommandProcessor } from './processors/cli-time-command-processor
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
+import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -23,7 +24,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, eventSocketManager, jobScheduler } = createCliServer({
+const { app, eventSocketManager } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -72,18 +73,22 @@ const { app, eventSocketManager, jobScheduler } = createCliServer({
         //         // environment variables or IAM roles
         //     })
         // );
-
-        // -----------------------------------------------------------
-        // Background Jobs
-        // -----------------------------------------------------------
-        builder.addJob(new SampleHealthCheckJob(), {
-            name: 'health-check',
-            description: 'Periodic health check',
-            group: 'monitoring',
-            interval: '30s',
-        });
     },
 });
+
+// -----------------------------------------------------------
+// Background Jobs (via plugin)
+// -----------------------------------------------------------
+const jobsPlugin = new CliJobsBuilder()
+    .addJob(new SampleHealthCheckJob(), {
+        name: 'health-check',
+        description: 'Periodic health check',
+        group: 'monitoring',
+        interval: '30s',
+    })
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+
+app.use('/api/v1/qcli/jobs', jobsPlugin.router);
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
@@ -92,7 +97,7 @@ const server = app.listen(port, () => {
     console.log(`  Jobs:     http://localhost:${port}/api/v1/qcli/jobs`);
     console.log(`  Events:   ws://localhost:${port}/ws/qcli/events`);
 
-    jobScheduler.start().catch((err) => {
+    jobsPlugin.scheduler.start().catch((err) => {
         console.error('Failed to start job scheduler:', err);
     });
 });
@@ -101,14 +106,14 @@ eventSocketManager.attach(server);
 
 process.on('SIGINT', async () => {
     console.log('\nShutting down...');
-    await jobScheduler.stop();
+    await jobsPlugin.scheduler.stop();
     await eventSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    await jobScheduler.stop();
+    await jobsPlugin.scheduler.stop();
     await eventSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { CliJobScheduler, JobError } from '../jobs/cli-job-scheduler';
+import { CliJobScheduler, JobError } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 
 export function createCliJobsController(

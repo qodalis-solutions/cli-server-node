@@ -1,1 +1,1 @@
-export { CliBuilder, JobRegistrationEntry } from './cli-builder';
+export { CliBuilder } from './cli-builder';

@@ -6,9 +6,7 @@ import { createCliController } from './controllers/cli-controller';
 import { createCliControllerV2 } from './controllers/cli-controller-v2';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
-import { createCliJobsController } from './controllers/cli-jobs-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
-import { CliJobScheduler, InMemoryJobStorageProvider } from './jobs';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/qcli'. */
@@ -30,7 +28,6 @@ export function createCliServer(options: CliServerOptions = {}): {
     registry: CliCommandRegistry;
     builder: CliBuilder;
     eventSocketManager: CliEventSocketManager;
-    jobScheduler: CliJobScheduler;
 } {
     const { basePath = '/api/qcli', cors: corsOption = true, configure } = options;
 
@@ -75,22 +72,7 @@ export function createCliServer(options: CliServerOptions = {}): {
         app.use('/api/qcli/fs', createFilesystemRouter(fsProvider));
     }
 
-    // Jobs system
-    const jobStorage = builder.jobStorageProvider ?? new InMemoryJobStorageProvider();
-    const jobScheduler = new CliJobScheduler(jobStorage);
-
-    for (const { job, options: jobOpts } of builder.jobRegistrations) {
-        jobScheduler.register(job, jobOpts);
-    }
-
-    app.use('/api/v1/qcli/jobs', createCliJobsController(jobScheduler, jobStorage));
-
     const eventSocketManager = new CliEventSocketManager();
 
-    // Wire broadcast from scheduler to event socket manager
-    jobScheduler.setBroadcastFn((message) => {
-        eventSocketManager.broadcastMessage(message);
-    });
-
-    return { app, registry, builder, eventSocketManager, jobScheduler };
+    return { app, registry, builder, eventSocketManager };
 }

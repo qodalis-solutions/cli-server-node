@@ -37,13 +37,13 @@ export { createCliController } from './controllers/cli-controller';
 export { createCliControllerV2 } from './controllers/cli-controller-v2';
 export { createCliVersionController } from './controllers/cli-version-controller';
 export { createFilesystemRouter } from './controllers/filesystem-controller';
-export { createCliJobsController } from './controllers/cli-jobs-controller';
 
 // Extensions
-export { CliBuilder, JobRegistrationEntry } from './extensions';
+export { CliBuilder } from './extensions';
 
-// Jobs
+// Jobs plugin (re-export for backward compatibility)
 export {
+    CliJobsBuilder,
     CliJobScheduler,
     CliJobExecutionContext,
     CliJobLogger,
@@ -51,7 +51,8 @@ export {
     JobDto,
     JobError,
     parseInterval,
-} from './jobs';
+    createCliJobsController,
+} from '@qodalis/cli-server-plugin-jobs';
 
 // Filesystem (legacy)
 export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
