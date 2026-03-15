@@ -12,6 +12,7 @@ import { CliTimeCommandProcessor } from './processors/cli-time-command-processor
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
+import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
 import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
@@ -22,7 +23,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, eventSocketManager } = createCliServer({
+const { app, eventSocketManager, jobScheduler } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -71,6 +72,16 @@ const { app, eventSocketManager } = createCliServer({
         //         // environment variables or IAM roles
         //     })
         // );
+
+        // -----------------------------------------------------------
+        // Background Jobs
+        // -----------------------------------------------------------
+        builder.addJob(new SampleHealthCheckJob(), {
+            name: 'health-check',
+            description: 'Periodic health check',
+            group: 'monitoring',
+            interval: '30s',
+        });
     },
 });
 
@@ -78,19 +89,26 @@ const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
     console.log(`  Commands: http://localhost:${port}/api/qcli/commands`);
     console.log(`  Execute:  http://localhost:${port}/api/qcli/execute`);
+    console.log(`  Jobs:     http://localhost:${port}/api/v1/qcli/jobs`);
     console.log(`  Events:   ws://localhost:${port}/ws/qcli/events`);
+
+    jobScheduler.start().catch((err) => {
+        console.error('Failed to start job scheduler:', err);
+    });
 });
 
 eventSocketManager.attach(server);
 
 process.on('SIGINT', async () => {
     console.log('\nShutting down...');
+    await jobScheduler.stop();
     await eventSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
+    await jobScheduler.stop();
     await eventSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);

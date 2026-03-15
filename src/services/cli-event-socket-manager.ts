@@ -72,6 +72,18 @@ export class CliEventSocketManager {
     }
 
     /**
+     * Broadcast an arbitrary message to all connected event clients.
+     */
+    broadcastMessage(message: Record<string, unknown>): void {
+        const data = JSON.stringify(message);
+        for (const ws of this._clients) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(data);
+            }
+        }
+    }
+
+    /**
      * Broadcast a disconnect event to all connected clients and close sockets.
      */
     async broadcastDisconnect(): Promise<void> {

@@ -37,9 +37,21 @@ export { createCliController } from './controllers/cli-controller';
 export { createCliControllerV2 } from './controllers/cli-controller-v2';
 export { createCliVersionController } from './controllers/cli-version-controller';
 export { createFilesystemRouter } from './controllers/filesystem-controller';
+export { createCliJobsController } from './controllers/cli-jobs-controller';
 
 // Extensions
-export { CliBuilder } from './extensions';
+export { CliBuilder, JobRegistrationEntry } from './extensions';
+
+// Jobs
+export {
+    CliJobScheduler,
+    CliJobExecutionContext,
+    CliJobLogger,
+    InMemoryJobStorageProvider,
+    JobDto,
+    JobError,
+    parseInterval,
+} from './jobs';
 
 // Filesystem (legacy)
 export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
