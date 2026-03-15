@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-jobs",
-    "version": "1.0.0-beta.2",
+    "version": "1.0.0-beta.3",
     "description": "Background job scheduler plugin for Qodalis CLI server — provides job scheduling, execution history, and REST API",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -29,7 +29,7 @@
         "directory": "plugins/jobs"
     },
     "dependencies": {
-        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2",
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
         "cron-parser": "^5.5.0",
         "express": "^4.21.0"
     },

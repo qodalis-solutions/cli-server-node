@@ -39,6 +39,8 @@ export interface JobDto {
     interval?: string;
     enabled: boolean;
     maxRetries: number;
+    retryDelay: string;
+    retryStrategy: string;
     timeout?: string;
     overlapPolicy: string;
     currentExecutionId?: string;
@@ -200,7 +202,7 @@ export class CliJobScheduler {
 
     async updateOptionsAsync(
         id: string,
-        updates: Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'timeout' | 'overlapPolicy'>>,
+        updates: Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy'>>,
     ): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -231,6 +233,8 @@ export class CliJobScheduler {
         if (updates.description !== undefined) reg.options.description = updates.description;
         if (updates.group !== undefined) reg.options.group = updates.group;
         if (updates.maxRetries !== undefined) reg.options.maxRetries = updates.maxRetries;
+        if (updates.retryDelay !== undefined) reg.options.retryDelay = updates.retryDelay;
+        if (updates.retryStrategy !== undefined) reg.options.retryStrategy = updates.retryStrategy;
         if (updates.timeout !== undefined) reg.options.timeout = updates.timeout;
         if (updates.overlapPolicy !== undefined) reg.options.overlapPolicy = updates.overlapPolicy;
 
@@ -275,7 +279,9 @@ export class CliJobScheduler {
             schedule: reg.options.schedule,
             interval: reg.options.interval,
             enabled: reg.options.enabled !== false,
-            maxRetries: reg.options.maxRetries ?? 0,
+            maxRetries: reg.options.maxRetries ?? 1,
+            retryDelay: reg.options.retryDelay ?? '5s',
+            retryStrategy: reg.options.retryStrategy ?? 'exponential',
             timeout: reg.options.timeout,
             overlapPolicy: reg.options.overlapPolicy ?? 'skip',
             currentExecutionId: reg.currentExecutionId,
@@ -441,7 +447,21 @@ export class CliJobScheduler {
         }
 
         // Handle retry on failure
-        if (finalStatus === 'failed' && retryAttempt < (reg.options.maxRetries ?? 0)) {
+        if (finalStatus === 'failed' && retryAttempt < (reg.options.maxRetries ?? 1)) {
+            const baseDelay = parseInterval(reg.options.retryDelay ?? '5s') ?? 5000;
+            const strategy = reg.options.retryStrategy ?? 'exponential';
+            const delay = strategy === 'fixed' ? baseDelay
+                : strategy === 'linear' ? baseDelay * (retryAttempt + 1)
+                : baseDelay * Math.pow(2, retryAttempt);
+            this._broadcast({
+                type: 'job:retrying',
+                jobId: reg.id,
+                executionId,
+                attempt: retryAttempt + 1,
+                maxRetries: reg.options.maxRetries ?? 1,
+                delayMs: delay,
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
             await this._executeJobAsync(reg, retryAttempt + 1);
             return;
         }

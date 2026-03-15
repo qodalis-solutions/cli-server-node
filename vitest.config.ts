@@ -28,6 +28,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/weather/index.ts',
             ),
+            '@qodalis/cli-server-plugin-jobs': path.resolve(
+                __dirname,
+                'plugins/jobs/index.ts',
+            ),
         },
     },
     test: {

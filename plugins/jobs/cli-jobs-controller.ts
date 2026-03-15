@@ -76,13 +76,15 @@ export function createCliJobsController(
     // PUT /:id — update options (patch semantics)
     router.put('/:id', async (req, res) => {
         try {
-            const { description, group, schedule, interval, maxRetries, timeout, overlapPolicy } = req.body ?? {};
+            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy } = req.body ?? {};
             await scheduler.updateOptionsAsync(req.params.id, {
                 description,
                 group,
                 schedule,
                 interval,
                 maxRetries,
+                retryDelay,
+                retryStrategy,
                 timeout,
                 overlapPolicy,
             });

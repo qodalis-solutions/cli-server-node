@@ -1,4 +1,5 @@
 export type JobOverlapPolicy = 'skip' | 'queue' | 'cancel';
+export type JobRetryStrategy = 'fixed' | 'linear' | 'exponential';
 
 export interface CliJobOptions {
     /** Display name for the job. Defaults to class name. */
@@ -13,8 +14,12 @@ export interface CliJobOptions {
     interval?: string;
     /** Whether the job starts in active state. Default true. */
     enabled?: boolean;
-    /** Number of retries on failure. Default 0. */
+    /** Number of retries on failure. Default 1. */
     maxRetries?: number;
+    /** Delay before first retry (e.g., "5s", "1m"). Default "5s". */
+    retryDelay?: string;
+    /** Retry backoff strategy: 'fixed' (constant delay), 'linear' (delay * attempt), 'exponential' (delay * 2^attempt). Default 'exponential'. */
+    retryStrategy?: JobRetryStrategy;
     /** Maximum execution time before cancellation (e.g., "5m"). */
     timeout?: string;
     /** Behavior when timer fires while job is already running. Default 'skip'. */
