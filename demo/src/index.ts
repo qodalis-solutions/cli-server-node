@@ -13,6 +13,7 @@ import { CliHelloCommandProcessor } from './processors/cli-hello-command-process
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
+import { CliAdminBuilder } from '../../plugins/admin';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -24,7 +25,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, eventSocketManager } = createCliServer({
+const { app, registry, builder, eventSocketManager } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -90,11 +91,25 @@ const jobsPlugin = new CliJobsBuilder()
 
 app.use('/api/v1/qcli/jobs', jobsPlugin.router);
 
+// -----------------------------------------------------------
+// Admin Dashboard (via plugin)
+// -----------------------------------------------------------
+const adminPlugin = new CliAdminBuilder()
+    .setCredentials(
+        process.env.QCLI_ADMIN_USERNAME ?? 'admin',
+        process.env.QCLI_ADMIN_PASSWORD ?? 'admin',
+    )
+    .setRegisteredJobs(1) // number of registered jobs above
+    .build({ registry, eventSocketManager, builder });
+
+app.use('/api/v1/qcli', adminPlugin.router);
+
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
     console.log(`  Commands: http://localhost:${port}/api/qcli/commands`);
     console.log(`  Execute:  http://localhost:${port}/api/qcli/execute`);
     console.log(`  Jobs:     http://localhost:${port}/api/v1/qcli/jobs`);
+    console.log(`  Admin:    http://localhost:${port}/api/v1/qcli/status`);
     console.log(`  Events:   ws://localhost:${port}/ws/qcli/events`);
 
     jobsPlugin.scheduler.start().catch((err) => {
