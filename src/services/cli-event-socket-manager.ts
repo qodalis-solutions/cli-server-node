@@ -1,12 +1,27 @@
 import { WebSocket, WebSocketServer } from 'ws';
-import type { Server } from 'http';
+import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
+
+export interface CliWebSocketClientInfo {
+    id: string;
+    connectedAt: string;
+    remoteAddress: string;
+    type: 'events';
+}
+
+interface ClientEntry {
+    id: string;
+    connectedAt: Date;
+    remoteAddress: string;
+}
 
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
+    private readonly _clientMeta = new Map<WebSocket, ClientEntry>();
     private readonly _shellManager = new CliShellSessionManager();
+    private _nextClientId = 1;
 
     private static readonly EVENT_PATHS = new Set([
         '/ws/v1/qcli/events',
@@ -57,16 +72,23 @@ export class CliEventSocketManager {
             // Not our path — let other handlers deal with it
         });
 
-        this._wss.on('connection', (ws) => {
+        this._wss.on('connection', (ws, request: IncomingMessage) => {
             this._clients.add(ws);
+            this._clientMeta.set(ws, {
+                id: `evt-${this._nextClientId++}`,
+                connectedAt: new Date(),
+                remoteAddress: request.socket.remoteAddress ?? 'unknown',
+            });
             ws.send(JSON.stringify({ type: 'connected' }));
 
             ws.on('close', () => {
                 this._clients.delete(ws);
+                this._clientMeta.delete(ws);
             });
 
             ws.on('error', () => {
                 this._clients.delete(ws);
+                this._clientMeta.delete(ws);
             });
         });
     }
@@ -106,6 +128,28 @@ export class CliEventSocketManager {
 
         await Promise.all(promises);
         this._clients.clear();
+        this._clientMeta.clear();
+    }
+
+    /**
+     * Return information about all currently connected event clients.
+     */
+    getClients(): CliWebSocketClientInfo[] {
+        const result: CliWebSocketClientInfo[] = [];
+        for (const ws of this._clients) {
+            if (ws.readyState === WebSocket.OPEN) {
+                const meta = this._clientMeta.get(ws);
+                if (meta) {
+                    result.push({
+                        id: meta.id,
+                        connectedAt: meta.connectedAt.toISOString(),
+                        remoteAddress: meta.remoteAddress,
+                        type: 'events',
+                    });
+                }
+            }
+        }
+        return result;
     }
 
     dispose(): void {
@@ -113,6 +157,7 @@ export class CliEventSocketManager {
             ws.terminate();
         }
         this._clients.clear();
+        this._clientMeta.clear();
         this._wss?.close();
     }
 }
