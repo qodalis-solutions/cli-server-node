@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { signToken } from './jwt-service';
-import { AuthenticatedRequest } from './auth-middleware';
+import { AuthenticatedRequest, createAuthMiddleware } from './auth-middleware';
 import { AdminConfig } from '../services/admin-config';
 
 interface FailedAttempt {
@@ -20,6 +20,7 @@ const WINDOW_MS = 60_000; // 1 minute
  */
 export function createAuthController(config: AdminConfig, jwtSecret?: string): Router {
     const router = Router();
+    const authMiddleware = createAuthMiddleware(jwtSecret);
     const failedAttempts = new Map<string, FailedAttempt>();
 
     // Periodically clean up expired entries (every 5 minutes)
@@ -92,7 +93,7 @@ export function createAuthController(config: AdminConfig, jwtSecret?: string): R
         });
     });
 
-    router.get('/me', (req: Request, res: Response): void => {
+    router.get('/me', authMiddleware, (req: Request, res: Response): void => {
         const authReq = req as AuthenticatedRequest;
         if (!authReq.user) {
             res.status(401).json({ error: 'Not authenticated' });

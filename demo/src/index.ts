@@ -103,14 +103,16 @@ const adminPlugin = new CliAdminBuilder()
     .build({ registry, eventSocketManager, builder });
 
 app.use('/api/v1/qcli', adminPlugin.router);
+app.use('/qcli/admin', adminPlugin.dashboardRouter);
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
-    console.log(`  Commands: http://localhost:${port}/api/qcli/commands`);
-    console.log(`  Execute:  http://localhost:${port}/api/qcli/execute`);
-    console.log(`  Jobs:     http://localhost:${port}/api/v1/qcli/jobs`);
-    console.log(`  Admin:    http://localhost:${port}/api/v1/qcli/status`);
-    console.log(`  Events:   ws://localhost:${port}/ws/qcli/events`);
+    console.log(`  Commands:  http://localhost:${port}/api/qcli/commands`);
+    console.log(`  Execute:   http://localhost:${port}/api/qcli/execute`);
+    console.log(`  Jobs:      http://localhost:${port}/api/v1/qcli/jobs`);
+    console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
+    console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
+    console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
 
     jobsPlugin.scheduler.start().catch((err) => {
         console.error('Failed to start job scheduler:', err);
