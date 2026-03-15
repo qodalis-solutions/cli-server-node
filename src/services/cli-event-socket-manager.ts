@@ -9,13 +9,13 @@ export class CliEventSocketManager {
     private readonly _shellManager = new CliShellSessionManager();
 
     private static readonly EVENT_PATHS = new Set([
-        '/ws/v1/cli/events',
-        '/ws/cli/events',
+        '/ws/v1/qcli/events',
+        '/ws/qcli/events',
     ]);
 
     private static readonly SHELL_PATHS = new Set([
-        '/ws/v1/cli/shell',
-        '/ws/cli/shell',
+        '/ws/v1/qcli/shell',
+        '/ws/qcli/shell',
     ]);
 
     /**

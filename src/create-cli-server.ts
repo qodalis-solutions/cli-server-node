@@ -9,7 +9,7 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 
 export interface CliServerOptions {
-    /** Base path for CLI routes. Defaults to '/api/cli'. */
+    /** Base path for CLI routes. Defaults to '/api/qcli'. */
     basePath?: string;
     /** CORS configuration. Pass `true` for permissive, `false` to disable, or a cors options object. */
     cors?: boolean | cors.CorsOptions;
@@ -29,7 +29,7 @@ export function createCliServer(options: CliServerOptions = {}): {
     builder: CliBuilder;
     eventSocketManager: CliEventSocketManager;
 } {
-    const { basePath = '/api/cli', cors: corsOption = true, configure } = options;
+    const { basePath = '/api/qcli', cors: corsOption = true, configure } = options;
 
     const app = express();
 
@@ -49,16 +49,16 @@ export function createCliServer(options: CliServerOptions = {}): {
     const executor = new CliCommandExecutorService(registry);
 
     // Version discovery endpoint
-    app.use('/api/cli', createCliVersionController());
+    app.use('/api/qcli', createCliVersionController());
 
     // API v1 routes
-    app.use('/api/v1/cli', createCliController(registry, executor));
+    app.use('/api/v1/qcli', createCliController(registry, executor));
 
     // API v2 routes
-    app.use('/api/v2/cli', createCliControllerV2(registry, executor));
+    app.use('/api/v2/qcli', createCliControllerV2(registry, executor));
 
     // Custom basePath fallback (when user overrides the default)
-    if (basePath !== '/api/v1/cli' && basePath !== '/api/v2/cli') {
+    if (basePath !== '/api/v1/qcli' && basePath !== '/api/v2/qcli') {
         app.use(basePath, createCliController(registry, executor));
     }
 
@@ -69,7 +69,7 @@ export function createCliServer(options: CliServerOptions = {}): {
         fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
     }
     if (fsProvider) {
-        app.use('/api/cli/fs', createFilesystemRouter(fsProvider));
+        app.use('/api/qcli/fs', createFilesystemRouter(fsProvider));
     }
 
     const eventSocketManager = new CliEventSocketManager();

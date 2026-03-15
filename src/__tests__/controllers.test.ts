@@ -43,9 +43,9 @@ describe('CLI Controllers (integration)', () => {
         app = server.app;
     });
 
-    describe('GET /api/cli/version (discovery endpoint)', () => {
+    describe('GET /api/qcli/version (discovery endpoint)', () => {
         it('should return supportedVersions, preferredVersion, and serverVersion', async () => {
-            const res = await request(app).get('/api/cli/version').expect(200);
+            const res = await request(app).get('/api/qcli/version').expect(200);
 
             expect(res.body).toEqual({
                 supportedVersions: [1, 2],
@@ -55,17 +55,17 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('GET /api/v1/cli/version', () => {
+    describe('GET /api/v1/qcli/version', () => {
         it('should return v1 version info', async () => {
-            const res = await request(app).get('/api/v1/cli/version').expect(200);
+            const res = await request(app).get('/api/v1/qcli/version').expect(200);
 
             expect(res.body).toEqual({ version: '1.0.0' });
         });
     });
 
-    describe('GET /api/v2/cli/version', () => {
+    describe('GET /api/v2/qcli/version', () => {
         it('should return v2 version info', async () => {
-            const res = await request(app).get('/api/v2/cli/version').expect(200);
+            const res = await request(app).get('/api/v2/qcli/version').expect(200);
 
             expect(res.body).toEqual({
                 apiVersion: 2,
@@ -74,9 +74,9 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('GET /api/v1/cli/commands', () => {
+    describe('GET /api/v1/qcli/commands', () => {
         it('should return all registered commands', async () => {
-            const res = await request(app).get('/api/v1/cli/commands').expect(200);
+            const res = await request(app).get('/api/v1/qcli/commands').expect(200);
 
             expect(res.body).toHaveLength(3);
             const commands = res.body.map((c: any) => c.command);
@@ -86,9 +86,9 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('GET /api/v2/cli/commands', () => {
+    describe('GET /api/v2/qcli/commands', () => {
         it('should return only apiVersion >= 2 commands', async () => {
-            const res = await request(app).get('/api/v2/cli/commands').expect(200);
+            const res = await request(app).get('/api/v2/qcli/commands').expect(200);
 
             expect(res.body).toHaveLength(1);
             expect(res.body[0].command).toBe('v2cmd');
@@ -96,10 +96,10 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('POST /api/v1/cli/execute', () => {
+    describe('POST /api/v1/qcli/execute', () => {
         it('should execute a known command and return success', async () => {
             const res = await request(app)
-                .post('/api/v1/cli/execute')
+                .post('/api/v1/qcli/execute')
                 .send({
                     command: 'echo',
                     chainCommands: [],
@@ -116,7 +116,7 @@ describe('CLI Controllers (integration)', () => {
 
         it('should return error for unknown command', async () => {
             const res = await request(app)
-                .post('/api/v1/cli/execute')
+                .post('/api/v1/qcli/execute')
                 .send({
                     command: 'doesnotexist',
                     chainCommands: [],
@@ -134,10 +134,10 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('POST /api/v2/cli/execute', () => {
+    describe('POST /api/v2/qcli/execute', () => {
         it('should execute a command via v2 endpoint', async () => {
             const res = await request(app)
-                .post('/api/v2/cli/execute')
+                .post('/api/v2/qcli/execute')
                 .send({
                     command: 'greet',
                     chainCommands: [],

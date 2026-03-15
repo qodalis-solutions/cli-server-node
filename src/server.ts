@@ -28,10 +28,10 @@ const { app, eventSocketManager } = createCliServer({
 
 const server = app.listen(port, () => {
     console.log(`CLI server (Node.js) listening on http://localhost:${port}`);
-    console.log(`  Commands:     http://localhost:${port}/api/v1/cli/commands`);
-    console.log(`  Execute:      http://localhost:${port}/api/v1/cli/execute`);
-    console.log(`  Capabilities: http://localhost:${port}/api/v1/cli/capabilities`);
-    console.log(`  Events:       ws://localhost:${port}/ws/v1/cli/events`);
+    console.log(`  Commands:     http://localhost:${port}/api/v1/qcli/commands`);
+    console.log(`  Execute:      http://localhost:${port}/api/v1/qcli/execute`);
+    console.log(`  Capabilities: http://localhost:${port}/api/v1/qcli/capabilities`);
+    console.log(`  Events:       ws://localhost:${port}/ws/v1/qcli/events`);
 });
 
 eventSocketManager.attach(server);
