@@ -9,13 +9,13 @@ export class CliEventSocketManager {
     private readonly _shellManager = new CliShellSessionManager();
 
     private static readonly EVENT_PATHS = new Set([
-        '/ws/v1/cli/events',
-        '/ws/cli/events',
+        '/ws/v1/qcli/events',
+        '/ws/qcli/events',
     ]);
 
     private static readonly SHELL_PATHS = new Set([
-        '/ws/v1/cli/shell',
-        '/ws/cli/shell',
+        '/ws/v1/qcli/shell',
+        '/ws/qcli/shell',
     ]);
 
     /**
@@ -69,6 +69,18 @@ export class CliEventSocketManager {
                 this._clients.delete(ws);
             });
         });
+    }
+
+    /**
+     * Broadcast an arbitrary message to all connected event clients.
+     */
+    broadcastMessage(message: Record<string, unknown>): void {
+        const data = JSON.stringify(message);
+        for (const ws of this._clients) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(data);
+            }
+        }
     }
 
     /**

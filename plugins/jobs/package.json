@@ -1,0 +1,40 @@
+{
+    "name": "@qodalis/cli-server-plugin-jobs",
+    "version": "1.0.0-beta.3",
+    "description": "Background job scheduler plugin for Qodalis CLI server — provides job scheduling, execution history, and REST API",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "jobs",
+        "scheduler",
+        "background-jobs",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/jobs"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
+        "cron-parser": "^5.5.0",
+        "express": "^4.21.0"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "typescript": "^5.6.0"
+    }
+}

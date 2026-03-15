@@ -11,6 +11,7 @@
     "dependencies": {
         "@qodalis/cli-server-node": "file:..",
         "@qodalis/cli-server-plugin-filesystem": "file:../plugins/filesystem",
+        "@qodalis/cli-server-plugin-jobs": "file:../plugins/jobs",
         "@qodalis/cli-server-plugin-weather": "file:../plugins/weather"
     },
     "devDependencies": {

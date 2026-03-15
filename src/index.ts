@@ -41,6 +41,19 @@ export { createFilesystemRouter } from './controllers/filesystem-controller';
 // Extensions
 export { CliBuilder } from './extensions';
 
+// Jobs plugin (re-export for backward compatibility)
+export {
+    CliJobsBuilder,
+    CliJobScheduler,
+    CliJobExecutionContext,
+    CliJobLogger,
+    InMemoryJobStorageProvider,
+    JobDto,
+    JobError,
+    parseInterval,
+    createCliJobsController,
+} from '@qodalis/cli-server-plugin-jobs';
+
 // Filesystem (legacy)
 export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
 
