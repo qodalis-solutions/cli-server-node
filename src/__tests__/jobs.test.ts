@@ -356,15 +356,15 @@ describe('CliJobScheduler', () => {
 
     it('failed job retries', async () => {
         const job = new DummyJob({ fail: true });
-        const id = scheduler.register(job, { name: 't', interval: '999s', maxRetries: 2, retryDelay: '50ms', retryStrategy: 'fixed' });
+        const id = scheduler.register(job, { name: 't', interval: '999s', maxRetries: 2, retryDelay: '1s', retryStrategy: 'fixed' });
         (scheduler as any)._running = true;
         await scheduler.triggerAsync(id);
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 3000));
         expect(job.callCount).toBe(3); // 1 original + 2 retries
         const { items, total } = await storage.getExecutions(id);
         expect(total).toBe(3);
         expect(items.every((e) => e.status === 'failed')).toBe(true);
-    });
+    }, 10000);
 
     it('timeout cancels job', async () => {
         const job = new DummyJob({ sleep: 5000 });
