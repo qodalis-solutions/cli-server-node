@@ -33,6 +33,8 @@ export interface IRegistryLike {
  */
 export interface IBuilderLike {
     readonly modules: ReadonlyArray<ICliModule>;
+    readonly fileStorageProvider?: unknown;
+    readonly fileSystemOptions?: unknown;
 }
 
 /**

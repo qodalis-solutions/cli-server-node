@@ -57,6 +57,7 @@ export class CliAdminBuilder {
     private _jwtSecret?: string;
     private _registeredJobs = 0;
     private _dashboardDir?: string;
+    private _enabledFeatures: string[] = [];
 
     /**
      * Set admin credentials.
@@ -81,6 +82,16 @@ export class CliAdminBuilder {
      */
     setRegisteredJobs(count: number): CliAdminBuilder {
         this._registeredJobs = count;
+        return this;
+    }
+
+    /**
+     * Set additional enabled features (for status endpoint).
+     * Features like 'filesystem' and 'jobs' are auto-detected;
+     * use this to add custom features.
+     */
+    setEnabledFeatures(features: string[]): CliAdminBuilder {
+        this._enabledFeatures = features;
         return this;
     }
 
@@ -117,11 +128,23 @@ export class CliAdminBuilder {
 
         // Status
         const registeredJobs = this._registeredJobs;
+        const enabledFeatures = this._enabledFeatures;
+        const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
         const statusDeps: StatusDeps = {
             getActiveWsConnections: () => eventSocketManager.getClients().length,
             getActiveShellSessions: () => 0, // Shell sessions are managed internally
             getRegisteredCommands: () => registry.processors.length,
             getRegisteredJobs: () => registeredJobs,
+            getEnabledFeatures: () => {
+                const features: string[] = [...enabledFeatures];
+                if (hasFilesystem && !features.includes('filesystem')) {
+                    features.push('filesystem');
+                }
+                if (registeredJobs > 0 && !features.includes('jobs')) {
+                    features.push('jobs');
+                }
+                return features;
+            },
         };
         router.use('/status', createStatusController(statusDeps));
 

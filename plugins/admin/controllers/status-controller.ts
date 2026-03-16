@@ -5,6 +5,7 @@ export interface StatusDeps {
     getActiveShellSessions: () => number;
     getRegisteredCommands: () => number;
     getRegisteredJobs: () => number;
+    getEnabledFeatures: () => string[];
 }
 
 const startedAt = new Date().toISOString();
@@ -33,6 +34,7 @@ export function createStatusController(deps: StatusDeps): Router {
             registeredCommands: deps.getRegisteredCommands(),
             registeredJobs: deps.getRegisteredJobs(),
             os: process.platform,
+            enabledFeatures: deps.getEnabledFeatures(),
         });
     });
 
