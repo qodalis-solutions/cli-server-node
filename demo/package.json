@@ -9,6 +9,7 @@
         "dev": "tsx watch src/index.ts"
     },
     "dependencies": {
+        "@qodalis/cli-server-dashboard": "^1.0.0-beta.1",
         "@qodalis/cli-server-node": "file:..",
         "@qodalis/cli-server-plugin-filesystem": "file:../plugins/filesystem",
         "@qodalis/cli-server-plugin-jobs": "file:../plugins/jobs",
