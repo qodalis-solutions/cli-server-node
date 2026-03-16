@@ -151,7 +151,7 @@ export class CliAdminBuilder {
         } else {
             dashboardRouter.get('*', (_req, res) => {
                 res.status(404).json({
-                    error: 'Admin dashboard not installed. Install @qodalis/cli-server-dashboard.',
+                    error: 'Admin dashboard not found. Ensure the package was built with "npm run copy-dashboard" or install @qodalis/cli-server-dashboard.',
                 });
             });
         }
@@ -180,7 +180,11 @@ export class CliAdminBuilder {
             return resolve(this._dashboardDir);
         }
 
-        // Try resolving from node_modules (published package)
+        // Try bundled dashboard directory (embedded in this package)
+        const bundledPath = resolve(__dirname, '..', 'dashboard');
+        if (existsSync(bundledPath)) return bundledPath;
+
+        // Try resolving from node_modules (published package — legacy fallback)
         try {
             const pkgDir = require.resolve('@qodalis/cli-server-dashboard/package.json');
             const distDir = join(pkgDir, '..', 'dist');

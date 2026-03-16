@@ -6,11 +6,15 @@
     "types": "dist/index.d.ts",
     "files": [
         "dist",
+        "dashboard",
         "LICENSE",
         "README.md"
     ],
     "scripts": {
-        "build": "tsc"
+        "copy-dashboard": "node scripts/copy-dashboard.js",
+        "prebuild": "npm run copy-dashboard",
+        "build": "tsc",
+        "prepublishOnly": "npm run copy-dashboard"
     },
     "keywords": [
         "cli",
@@ -29,7 +33,6 @@
     },
     "dependencies": {
         "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
-        "@qodalis/cli-server-dashboard": "^1.0.0-beta.1",
         "express": "^4.21.0",
         "jsonwebtoken": "^9.0.0"
     },
