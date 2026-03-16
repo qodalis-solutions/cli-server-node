@@ -30,6 +30,7 @@ export {
     CliCommandExecutorService,
     CliEventSocketManager,
     CliShellSessionManager,
+    CliLogSocketManager,
 } from './services';
 
 // Controllers
