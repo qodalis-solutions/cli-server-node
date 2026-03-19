@@ -5,6 +5,7 @@ import { CliCommandRegistry } from '../services';
 
 export class CliBuilder {
     private readonly _registry: CliCommandRegistry;
+    private readonly _modules: ICliModule[] = [];
     private _fileSystemOptions?: FileSystemOptions;
     private _fileStorageProvider?: IFileStorageProvider;
 
@@ -18,10 +19,15 @@ export class CliBuilder {
     }
 
     addModule(module: ICliModule): CliBuilder {
+        this._modules.push(module);
         for (const processor of module.processors) {
             this._registry.register(processor);
         }
         return this;
+    }
+
+    get modules(): ReadonlyArray<ICliModule> {
+        return this._modules;
     }
 
     addFileSystem(options: FileSystemOptions): CliBuilder {

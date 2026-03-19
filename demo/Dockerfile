@@ -12,6 +12,7 @@ COPY plugins/filesystem-sqlite/package.json plugins/filesystem-sqlite/
 COPY plugins/filesystem-s3/package.json plugins/filesystem-s3/
 COPY plugins/weather/package.json plugins/weather/
 COPY plugins/jobs/package.json plugins/jobs/
+COPY plugins/admin/package.json plugins/admin/
 RUN npm install
 
 COPY tsconfig.json ./
@@ -24,7 +25,8 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../filesystem-sqlite && (npx tsc || true) \
     && cd ../filesystem-s3 && (npx tsc || true) \
     && cd ../weather && npx tsc \
-    && cd ../jobs && npx tsc
+    && cd ../jobs && npx tsc \
+    && cd ../admin && npm install && node scripts/copy-dashboard.js
 
 COPY src/ src/
 RUN npm run build

@@ -27,3 +27,4 @@ coverage/
 # Environment
 .env
 .env.local
+plugins/filesystem-sqlite/package-lock.json

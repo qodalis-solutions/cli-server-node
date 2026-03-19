@@ -7,7 +7,6 @@ import { CliSystemCommandProcessor } from './processors/cli-system-command-proce
 import { CliHttpCommandProcessor } from './processors/cli-http-command-processor';
 import { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
 import { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
-import { CliUuidCommandProcessor } from './processors/cli-uuid-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 
 const port = process.env.PORT ?? 8047;
@@ -21,7 +20,6 @@ const { app, eventSocketManager } = createCliServer({
             .addProcessor(new CliHttpCommandProcessor())
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
-            .addProcessor(new CliUuidCommandProcessor())
             .addModule(new WeatherModule());
     },
 });

@@ -1,0 +1,44 @@
+{
+    "name": "@qodalis/cli-server-plugin-admin",
+    "version": "1.0.0-beta.1",
+    "description": "Admin dashboard plugin for Qodalis CLI server — provides auth, status, plugins, config, logs, and WebSocket client management endpoints",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "dashboard",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "copy-dashboard": "node scripts/copy-dashboard.js",
+        "prebuild": "npm run copy-dashboard",
+        "build": "tsc",
+        "prepublishOnly": "npm run copy-dashboard"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "admin",
+        "dashboard",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/admin"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
+        "express": "^4.21.0",
+        "jsonwebtoken": "^9.0.0"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "@types/jsonwebtoken": "^9.0.0",
+        "typescript": "^5.6.0"
+    }
+}

@@ -4,7 +4,6 @@ import {
     CliHttpCommandProcessor,
     CliHashCommandProcessor,
     CliBase64CommandProcessor,
-    CliUuidCommandProcessor,
 } from '@qodalis/cli-server-node';
 import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
 import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
@@ -13,6 +12,7 @@ import { CliHelloCommandProcessor } from './processors/cli-hello-command-process
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
+import { CliAdminBuilder } from '../../plugins/admin';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -24,7 +24,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, eventSocketManager } = createCliServer({
+const { app, registry, builder, eventSocketManager, logSocketManager } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -36,7 +36,6 @@ const { app, eventSocketManager } = createCliServer({
             .addProcessor(new CliHttpCommandProcessor())
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
-            .addProcessor(new CliUuidCommandProcessor())
             .addModule(new WeatherModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
 
@@ -90,12 +89,44 @@ const jobsPlugin = new CliJobsBuilder()
 
 app.use('/api/v1/qcli/jobs', jobsPlugin.router);
 
+// -----------------------------------------------------------
+// Admin Dashboard (via plugin)
+// -----------------------------------------------------------
+const adminPlugin = new CliAdminBuilder()
+    .setCredentials(
+        process.env.QCLI_ADMIN_USERNAME ?? 'admin',
+        process.env.QCLI_ADMIN_PASSWORD ?? 'admin',
+    )
+    .setRegisteredJobs(1) // number of registered jobs above
+    .build({
+        registry,
+        eventSocketManager,
+        builder,
+        broadcastFn: (msg) => {
+            eventSocketManager.broadcastMessage(msg);
+            // Also stream to dedicated log WebSocket clients
+            if (msg.type === 'log:entry') {
+                logSocketManager.broadcastLog(
+                    String(msg.level ?? 'information'),
+                    String(msg.message ?? ''),
+                    msg.source ? String(msg.source) : undefined,
+                );
+            }
+        },
+    });
+
+app.use('/api/v1/qcli', adminPlugin.router);
+app.use('/qcli/admin', adminPlugin.dashboardRouter);
+
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
-    console.log(`  Commands: http://localhost:${port}/api/qcli/commands`);
-    console.log(`  Execute:  http://localhost:${port}/api/qcli/execute`);
-    console.log(`  Jobs:     http://localhost:${port}/api/v1/qcli/jobs`);
-    console.log(`  Events:   ws://localhost:${port}/ws/qcli/events`);
+    console.log(`  Commands:  http://localhost:${port}/api/qcli/commands`);
+    console.log(`  Execute:   http://localhost:${port}/api/qcli/execute`);
+    console.log(`  Jobs:      http://localhost:${port}/api/v1/qcli/jobs`);
+    console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
+    console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
+    console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
+    console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
 
     jobsPlugin.scheduler.start().catch((err) => {
         console.error('Failed to start job scheduler:', err);
@@ -103,11 +134,13 @@ const server = app.listen(port, () => {
 });
 
 eventSocketManager.attach(server);
+logSocketManager.attach(server);
 
 process.on('SIGINT', async () => {
     console.log('\nShutting down...');
     await jobsPlugin.scheduler.stop();
     await eventSocketManager.broadcastDisconnect();
+    await logSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);
 });
@@ -115,6 +148,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
     await jobsPlugin.scheduler.stop();
     await eventSocketManager.broadcastDisconnect();
+    await logSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);
 });

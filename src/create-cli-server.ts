@@ -1,6 +1,6 @@
 import express, { Express } from 'express';
 import cors from 'cors';
-import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager } from './services';
+import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager, CliLogSocketManager } from './services';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
 import { createCliControllerV2 } from './controllers/cli-controller-v2';
@@ -28,6 +28,7 @@ export function createCliServer(options: CliServerOptions = {}): {
     registry: CliCommandRegistry;
     builder: CliBuilder;
     eventSocketManager: CliEventSocketManager;
+    logSocketManager: CliLogSocketManager;
 } {
     const { basePath = '/api/qcli', cors: corsOption = true, configure } = options;
 
@@ -73,6 +74,7 @@ export function createCliServer(options: CliServerOptions = {}): {
     }
 
     const eventSocketManager = new CliEventSocketManager();
+    const logSocketManager = new CliLogSocketManager();
 
-    return { app, registry, builder, eventSocketManager };
+    return { app, registry, builder, eventSocketManager, logSocketManager };
 }
