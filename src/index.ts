@@ -90,7 +90,6 @@ export { CliSystemCommandProcessor } from './processors/cli-system-command-proce
 export { CliHttpCommandProcessor } from './processors/cli-http-command-processor';
 export { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
 export { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
-export { CliUuidCommandProcessor } from './processors/cli-uuid-command-processor';
 
 // Server factory
 export { createCliServer, CliServerOptions } from './create-cli-server';

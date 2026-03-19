@@ -4,7 +4,6 @@ import {
     CliHttpCommandProcessor,
     CliHashCommandProcessor,
     CliBase64CommandProcessor,
-    CliUuidCommandProcessor,
 } from '@qodalis/cli-server-node';
 import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
 import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
@@ -37,7 +36,6 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
             .addProcessor(new CliHttpCommandProcessor())
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
-            .addProcessor(new CliUuidCommandProcessor())
             .addModule(new WeatherModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
 
