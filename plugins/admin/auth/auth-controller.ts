@@ -11,6 +11,11 @@ interface FailedAttempt {
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60_000; // 1 minute
 
+export interface AuthControllerResult {
+    router: Router;
+    cleanupInterval: ReturnType<typeof setInterval>;
+}
+
 /**
  * Creates the auth controller router.
  *
@@ -18,7 +23,7 @@ const WINDOW_MS = 60_000; // 1 minute
  * - POST /login — authenticate and receive JWT
  * - GET  /me    — get current user info from token
  */
-export function createAuthController(config: AdminConfig, jwtSecret?: string): Router {
+export function createAuthController(config: AdminConfig, jwtSecret: string): AuthControllerResult {
     const router = Router();
     const authMiddleware = createAuthMiddleware(jwtSecret);
     const failedAttempts = new Map<string, FailedAttempt>();
@@ -106,5 +111,5 @@ export function createAuthController(config: AdminConfig, jwtSecret?: string): R
         });
     });
 
-    return router;
+    return { router, cleanupInterval };
 }

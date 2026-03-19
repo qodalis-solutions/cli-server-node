@@ -1,3 +1,15 @@
+import { timingSafeEqual, createHash } from 'crypto';
+
+/**
+ * Timing-safe string comparison. Hashes both strings with SHA-256
+ * to normalize length, then uses timingSafeEqual.
+ */
+function safeCompare(a: string, b: string): boolean {
+    const hashA = createHash('sha256').update(a).digest();
+    const hashB = createHash('sha256').update(b).digest();
+    return timingSafeEqual(hashA, hashB);
+}
+
 /**
  * Admin configuration — reads credentials and settings from environment variables.
  */
@@ -30,6 +42,10 @@ export class AdminConfig {
         this._username = process.env.QCLI_ADMIN_USERNAME ?? 'admin';
         this._password = process.env.QCLI_ADMIN_PASSWORD ?? 'admin';
         this._jwtSecret = process.env.QCLI_ADMIN_JWT_SECRET;
+
+        if (this._username === 'admin' && this._password === 'admin') {
+            console.warn('[qcli-admin] WARNING: Using default admin credentials. Set QCLI_ADMIN_USERNAME and QCLI_ADMIN_PASSWORD environment variables.');
+        }
     }
 
     setCredentials(username: string, password: string): void {
@@ -46,7 +62,10 @@ export class AdminConfig {
     }
 
     validateCredentials(username: string, password: string): boolean {
-        return username === this._username && password === this._password;
+        // Evaluate both comparisons to avoid short-circuit timing leaks
+        const usernameMatch = safeCompare(username, this._username);
+        const passwordMatch = safeCompare(password, this._password);
+        return usernameMatch && passwordMatch;
     }
 
     getConfigSections(): ConfigSection[] {

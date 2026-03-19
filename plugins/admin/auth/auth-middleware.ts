@@ -13,12 +13,12 @@ export interface AuthenticatedRequest extends Request {
  *
  * Skips authentication for the `/auth/login` path.
  *
- * @param secret Optional JWT secret override. If not provided, uses the default from jwt-service.
+ * @param secret JWT secret used to verify tokens.
  */
-export function createAuthMiddleware(secret?: string): RequestHandler {
+export function createAuthMiddleware(secret: string): RequestHandler {
     return (req: Request, res: Response, next: NextFunction): void => {
         // Skip auth for login endpoint
-        if (req.path === '/auth/login' || req.path.endsWith('/auth/login')) {
+        if (req.path === '/auth/login') {
             next();
             return;
         }

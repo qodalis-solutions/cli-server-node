@@ -45,6 +45,7 @@ export class LogRingBuffer {
      * Add a log entry to the buffer.
      */
     push(entry: LogEntry): void {
+        entry.level = entry.level.toUpperCase() as LogEntry['level'];
         this._buffer[this._head] = entry;
         this._head = (this._head + 1) % this._capacity;
         if (this._count < this._capacity) {

@@ -11,6 +11,7 @@ export interface ModuleInfo {
     author: string;
     enabled: boolean;
     processorCount: number;
+    processors: string[];
 }
 
 interface TrackedModule {
@@ -74,6 +75,7 @@ export class ModuleRegistry {
                 : t.module.author?.name ?? 'Unknown',
             enabled: t.enabled,
             processorCount: t.processors.length,
+            processors: t.processors.map(p => p.command),
         }));
     }
 
@@ -82,11 +84,13 @@ export class ModuleRegistry {
      * When disabled, its processors are removed from the command registry.
      * When enabled, they are re-registered.
      */
-    toggle(id: string): ModuleInfo | undefined {
+    toggle(id: string): (ModuleInfo & { warning?: string }) | undefined {
         const tracked = this._tracked.get(id);
         if (!tracked) return undefined;
 
         tracked.enabled = !tracked.enabled;
+
+        let warning: string | undefined;
 
         if (tracked.enabled) {
             // Re-register processors
@@ -95,12 +99,11 @@ export class ModuleRegistry {
             }
         } else {
             // We can't "unregister" from the current CliCommandRegistry directly
-            // since it only has register(). We'll track the state and the processors
-            // won't be findable by command if we remove them.
-            // For now, we track the state — actual removal would need registry support.
+            // since it only has register(). We track the state but processors remain active.
+            warning = 'Module state tracked but command unregistration is not yet supported. Processors remain active.';
         }
 
-        return this.toInfo(tracked);
+        return { ...this.toInfo(tracked), warning };
     }
 
     private moduleId(mod: ICliModule): string {
@@ -118,6 +121,7 @@ export class ModuleRegistry {
                 : t.module.author?.name ?? 'Unknown',
             enabled: t.enabled,
             processorCount: t.processors.length,
+            processors: t.processors.map(p => p.command),
         };
     }
 }

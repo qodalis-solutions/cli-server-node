@@ -2,7 +2,6 @@ import { Router, RequestHandler, static as expressStatic } from 'express';
 import { ICliModule, ICliCommandProcessor } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
-import { setDefaultSecret } from './auth/jwt-service';
 import { createStatusController, StatusDeps } from './controllers/status-controller';
 import { createPluginsController } from './controllers/plugins-controller';
 import { createConfigController } from './controllers/config-controller';
@@ -13,6 +12,7 @@ import { LogRingBuffer } from './services/log-ring-buffer';
 import { AdminConfig } from './services/admin-config';
 import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
+import * as crypto from 'crypto';
 
 export interface CliAdminBuildDeps {
     /** The command registry instance. */
@@ -36,6 +36,8 @@ export interface CliAdminPluginResult {
     authMiddleware: RequestHandler;
     /** The log ring buffer, in case you need to push entries programmatically. */
     logBuffer: LogRingBuffer;
+    /** Clean up timers and restore console. Call when shutting down. */
+    dispose: () => void;
 }
 
 /**
@@ -101,10 +103,10 @@ export class CliAdminBuilder {
     build(deps: CliAdminBuildDeps): CliAdminPluginResult {
         const { registry, eventSocketManager, builder, broadcastFn } = deps;
 
-        // Set up JWT secret if provided
-        if (this._jwtSecret) {
-            setDefaultSecret(this._jwtSecret);
-        }
+        // Resolve JWT secret: explicit > env var > random
+        const secret = this._jwtSecret
+            ?? process.env.QCLI_ADMIN_JWT_SECRET
+            ?? crypto.randomBytes(32).toString('hex');
 
         // Create services
         const moduleRegistry = new ModuleRegistry(registry, builder);
@@ -115,13 +117,14 @@ export class CliAdminBuilder {
         logBuffer.interceptConsole();
 
         // Create auth middleware
-        const authMiddleware = createAuthMiddleware(this._jwtSecret);
+        const authMiddleware = createAuthMiddleware(secret);
 
         // Create main router
         const router = Router();
 
         // Auth routes (login is unauthenticated, /me requires auth)
-        router.use('/auth', createAuthController(this._config, this._jwtSecret));
+        const authResult = createAuthController(this._config, secret);
+        router.use('/auth', authResult.router);
 
         // Apply auth middleware to all routes below
         router.use(authMiddleware);
@@ -132,7 +135,8 @@ export class CliAdminBuilder {
         const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
         const statusDeps: StatusDeps = {
             getActiveWsConnections: () => eventSocketManager.getClients().length,
-            getActiveShellSessions: () => 0, // Shell sessions are managed internally
+            // TODO: expose getActiveShellSessions() on CliEventSocketManager
+            getActiveShellSessions: () => 0,
             getRegisteredCommands: () => registry.processors.length,
             getRegisteredJobs: () => registeredJobs,
             getEnabledFeatures: () => {
@@ -179,7 +183,12 @@ export class CliAdminBuilder {
             });
         }
 
-        return { router, dashboardRouter, authMiddleware, logBuffer };
+        const dispose = () => {
+            clearInterval(authResult.cleanupInterval);
+            logBuffer.restoreConsole();
+        };
+
+        return { router, dashboardRouter, authMiddleware, logBuffer, dispose };
     }
 
     /**

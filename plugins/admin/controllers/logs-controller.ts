@@ -15,7 +15,15 @@ export function createLogsController(logBuffer: LogRingBuffer): Router {
         const level = req.query.level as string | undefined;
         const search = req.query.search as string | undefined;
         const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+        if (limit !== undefined && isNaN(limit)) {
+            res.status(400).json({ error: 'limit must be a valid integer' });
+            return;
+        }
         const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+        if (offset !== undefined && isNaN(offset)) {
+            res.status(400).json({ error: 'offset must be a valid integer' });
+            return;
+        }
 
         const result = logBuffer.query({ level, search, limit, offset });
         res.json(result);

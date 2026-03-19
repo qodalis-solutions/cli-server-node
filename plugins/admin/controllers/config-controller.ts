@@ -18,7 +18,7 @@ export function createConfigController(config: AdminConfig): Router {
     router.put('/', (req: Request, res: Response): void => {
         const body = req.body;
 
-        if (!body || typeof body !== 'object') {
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
             res.status(400).json({ error: 'Request body must be a JSON object' });
             return;
         }

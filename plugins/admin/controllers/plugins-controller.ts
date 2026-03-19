@@ -24,7 +24,8 @@ export function createPluginsController(moduleRegistry: ModuleRegistry): Router 
             return;
         }
 
-        res.json(result);
+        const { warning, ...moduleInfo } = result;
+        res.json(warning ? { ...moduleInfo, warning } : moduleInfo);
     });
 
     return router;
