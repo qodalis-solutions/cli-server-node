@@ -52,11 +52,15 @@ export default defineConfig({
                 __dirname,
                 'plugins/data-explorer-mssql/index.ts',
             ),
+            '@qodalis/cli-server-plugin-aws': path.resolve(
+                __dirname,
+                'plugins/aws/src/index.ts',
+            ),
         },
     },
     test: {
         globals: true,
         environment: 'node',
-        exclude: ['dist/**', 'node_modules/**', 'packages/**', 'demo/**'],
+        exclude: ['dist/**', '**/node_modules/**', 'packages/**', 'demo/**'],
     },
 });
