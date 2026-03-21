@@ -64,6 +64,40 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
         );
 
         // -----------------------------------------------------------
+        // Data Explorer — MongoDB Provider
+        // -----------------------------------------------------------
+        const mongoConnectionString = process.env.MONGO_CONNECTION_STRING;
+        if (mongoConnectionString) {
+            const { MongoDataExplorerProvider } = require('@qodalis/cli-server-plugin-data-explorer-mongo');
+            builder.addDataExplorerProvider(
+                new MongoDataExplorerProvider({
+                    connectionString: mongoConnectionString,
+                    database: 'demo',
+                }),
+                {
+                    name: 'demo-mongo',
+                    description: 'Demo MongoDB database',
+                    language: DataExplorerLanguage.Json,
+                    defaultOutputFormat: DataExplorerOutputFormat.Json,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [
+                        {
+                            name: 'show_collections',
+                            query: 'show collections',
+                            description: 'List all collections',
+                        },
+                        {
+                            name: 'find_all',
+                            query: 'db.users.find({})',
+                            description: 'Find all documents in users collection',
+                        },
+                    ],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
         // File Storage Provider Configuration
         // -----------------------------------------------------------
         // By default, InMemoryFileStorageProvider is used. You can

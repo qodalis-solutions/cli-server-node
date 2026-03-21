@@ -15,6 +15,7 @@ COPY plugins/jobs/package.json plugins/jobs/
 COPY plugins/admin/package.json plugins/admin/
 COPY plugins/data-explorer/package.json plugins/data-explorer/
 COPY plugins/data-explorer-sql/package.json plugins/data-explorer-sql/
+COPY plugins/data-explorer-mongo/package.json plugins/data-explorer-mongo/
 RUN npm install
 
 COPY tsconfig.json ./
@@ -30,6 +31,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../jobs && npx tsc \
     && cd ../data-explorer && npx tsc \
     && cd ../data-explorer-sql && npx tsc \
+    && cd ../data-explorer-mongo && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/
