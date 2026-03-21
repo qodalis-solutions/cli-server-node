@@ -1,6 +1,7 @@
-import { ICliCommandProcessor, ICliModule } from '../abstractions';
+import { ICliCommandProcessor, ICliModule, IDataExplorerProvider, DataExplorerProviderOptions } from '../abstractions';
 import { FileSystemOptions } from '../filesystem';
 import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
 import { CliCommandRegistry } from '../services';
 
 export class CliBuilder {
@@ -8,6 +9,7 @@ export class CliBuilder {
     private readonly _modules: ICliModule[] = [];
     private _fileSystemOptions?: FileSystemOptions;
     private _fileStorageProvider?: IFileStorageProvider;
+    private _dataExplorerBuilder?: DataExplorerBuilder;
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
@@ -50,5 +52,20 @@ export class CliBuilder {
 
     get fileStorageProvider(): IFileStorageProvider | undefined {
         return this._fileStorageProvider;
+    }
+
+    addDataExplorerProvider(
+        providerOrFactory: IDataExplorerProvider | DataExplorerProviderFactory,
+        options: DataExplorerProviderOptions,
+    ): CliBuilder {
+        if (!this._dataExplorerBuilder) {
+            this._dataExplorerBuilder = new DataExplorerBuilder();
+        }
+        this._dataExplorerBuilder.addProvider(providerOrFactory, options);
+        return this;
+    }
+
+    get dataExplorerBuilder(): DataExplorerBuilder | undefined {
+        return this._dataExplorerBuilder;
     }
 }

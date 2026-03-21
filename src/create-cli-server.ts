@@ -7,6 +7,7 @@ import { createCliControllerV2 } from './controllers/cli-controller-v2';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/qcli'. */
@@ -71,6 +72,13 @@ export function createCliServer(options: CliServerOptions = {}): {
     }
     if (fsProvider) {
         app.use('/api/qcli/fs', createFilesystemRouter(fsProvider));
+    }
+
+    // Data Explorer API
+    const deBuilder = builder.dataExplorerBuilder;
+    if (deBuilder && deBuilder.registry.size > 0) {
+        const deExecutor = new DataExplorerExecutor(deBuilder.registry);
+        app.use('/api/qcli/data-explorer', createDataExplorerController(deBuilder.registry, deExecutor));
     }
 
     const eventSocketManager = new CliEventSocketManager();
