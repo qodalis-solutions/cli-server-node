@@ -17,3 +17,15 @@ export {
     JobLogEntry,
     JobLogLevel,
 } from './jobs';
+export {
+    DataExplorerLanguage,
+    DataExplorerOutputFormat,
+    DataExplorerTemplate,
+    DataExplorerParameterDescriptor,
+    DataExplorerProviderOptions,
+    DataExplorerExecutionContext,
+    DataExplorerResult,
+    DataExplorerExecuteRequest,
+    DataExplorerSourceInfo,
+} from './data-explorer-types';
+export { IDataExplorerProvider } from './data-explorer-provider';
