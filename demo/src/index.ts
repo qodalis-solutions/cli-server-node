@@ -14,7 +14,7 @@ import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
 import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
-import { CliAdminBuilder } from '../../plugins/admin';
+import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:

@@ -13,6 +13,8 @@ COPY plugins/filesystem-s3/package.json plugins/filesystem-s3/
 COPY plugins/weather/package.json plugins/weather/
 COPY plugins/jobs/package.json plugins/jobs/
 COPY plugins/admin/package.json plugins/admin/
+COPY plugins/data-explorer/package.json plugins/data-explorer/
+COPY plugins/data-explorer-sql/package.json plugins/data-explorer-sql/
 RUN npm install
 
 COPY tsconfig.json ./
@@ -26,7 +28,9 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../filesystem-s3 && (npx tsc || true) \
     && cd ../weather && npx tsc \
     && cd ../jobs && npx tsc \
-    && cd ../admin && npm install && node scripts/copy-dashboard.js
+    && cd ../data-explorer && npx tsc \
+    && cd ../data-explorer-sql && npx tsc \
+    && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/
 RUN npm run build

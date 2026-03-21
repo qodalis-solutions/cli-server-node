@@ -15,7 +15,8 @@
         "@qodalis/cli-server-plugin-jobs": "file:../plugins/jobs",
         "@qodalis/cli-server-plugin-data-explorer": "file:../plugins/data-explorer",
         "@qodalis/cli-server-plugin-data-explorer-sql": "file:../plugins/data-explorer-sql",
-        "@qodalis/cli-server-plugin-weather": "file:../plugins/weather"
+        "@qodalis/cli-server-plugin-weather": "file:../plugins/weather",
+        "@qodalis/cli-server-plugin-admin": "file:../plugins/admin"
     },
     "devDependencies": {
         "tsx": "^4.19.0"
