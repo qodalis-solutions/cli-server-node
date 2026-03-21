@@ -17,7 +17,8 @@
             "@qodalis/cli-server-plugin-filesystem-sqlite": ["../plugins/filesystem-sqlite/index.ts"],
             "@qodalis/cli-server-plugin-filesystem-s3": ["../plugins/filesystem-s3/index.ts"],
             "@qodalis/cli-server-plugin-jobs": ["../plugins/jobs/index.ts"],
-            "@qodalis/cli-server-plugin-weather": ["../plugins/weather/index.ts"]
+            "@qodalis/cli-server-plugin-weather": ["../plugins/weather/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-sql": ["../plugins/data-explorer-sql/index.ts"]
         }
     },
     "include": ["src/**/*"]

@@ -11,6 +11,8 @@ import { CliTimeCommandProcessor } from './processors/cli-time-command-processor
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
+import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
+import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '../../plugins/admin';
 import { SampleHealthCheckJob } from './sample-health-check-job';
@@ -38,6 +40,28 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
             .addProcessor(new CliBase64CommandProcessor())
             .addModule(new WeatherModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
+
+        // -----------------------------------------------------------
+        // Data Explorer — SQL Provider
+        // -----------------------------------------------------------
+        builder.addDataExplorerProvider(
+            new SqlDataExplorerProvider({ type: 'sqlite', filename: './demo.db' }),
+            {
+                name: 'demo-sqlite',
+                description: 'Demo SQLite database',
+                language: DataExplorerLanguage.Sql,
+                defaultOutputFormat: DataExplorerOutputFormat.Table,
+                timeout: 30000,
+                maxRows: 1000,
+                templates: [
+                    {
+                        name: 'list_tables',
+                        query: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+                        description: 'List all tables in the database',
+                    },
+                ],
+            },
+        );
 
         // -----------------------------------------------------------
         // File Storage Provider Configuration
