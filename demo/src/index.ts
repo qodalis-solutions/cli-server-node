@@ -189,7 +189,7 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
                     name: 'demo-elasticsearch',
                     description: 'Demo Elasticsearch cluster',
                     language: DataExplorerLanguage.Elasticsearch,
-                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    defaultOutputFormat: DataExplorerOutputFormat.Json,
                     timeout: 30000,
                     maxRows: 1000,
                     templates: [],
