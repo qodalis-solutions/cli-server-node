@@ -1,6 +1,7 @@
 import { ICliCommandAuthor, DefaultLibraryAuthor } from './cli-command-author';
 import { ICliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
 import { CliProcessCommand } from './cli-process-command';
+import { CliStructuredResponse } from './cli-structured-response';
 
 export interface ICliCommandProcessor {
     command: string;
@@ -14,6 +15,7 @@ export interface ICliCommandProcessor {
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
     handleAsync(command: CliProcessCommand): Promise<string>;
+    handleStructuredAsync?(command: CliProcessCommand): Promise<CliStructuredResponse>;
 }
 
 export abstract class CliCommandProcessor implements ICliCommandProcessor {
@@ -28,4 +30,5 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     parameters?: ICliCommandParameterDescriptor[];
 
     abstract handleAsync(command: CliProcessCommand): Promise<string>;
+    handleStructuredAsync?(command: CliProcessCommand): Promise<CliStructuredResponse>;
 }
