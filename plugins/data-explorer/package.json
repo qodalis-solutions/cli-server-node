@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-data-explorer",
-    "version": "1.0.0-beta.2",
+    "version": "1.0.0-beta.5",
     "description": "Data explorer plugin for Qodalis CLI server — query and browse data sources",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
