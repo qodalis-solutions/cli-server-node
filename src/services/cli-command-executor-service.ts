@@ -29,6 +29,10 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
         }
 
         try {
+            if (processor.handleStructuredAsync) {
+                return await processor.handleStructuredAsync(command);
+            }
+
             const result = await processor.handleAsync(command);
             return {
                 exitCode: 0,

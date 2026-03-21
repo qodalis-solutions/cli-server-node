@@ -21,6 +21,8 @@ export {
     JobStatus,
     JobLogEntry,
     JobLogLevel,
+    CliStructuredOutput,
+    CliStructuredResponse,
     IDataExplorerProvider,
     DataExplorerProviderOptions,
     DataExplorerLanguage,
