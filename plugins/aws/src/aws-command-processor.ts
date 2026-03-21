@@ -22,6 +22,7 @@ import { AwsLambdaProcessor } from './processors/lambda-processor';
 import { AwsCloudWatchProcessor } from './processors/cloudwatch-processor';
 import { AwsSnsProcessor } from './processors/sns-processor';
 import { AwsSqsProcessor } from './processors/sqs-processor';
+import { AwsIamProcessor } from './processors/iam-processor';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -247,6 +248,7 @@ export class AwsCommandProcessor extends CliCommandProcessor {
             new AwsCloudWatchProcessor(this.credentialManager),
             new AwsSnsProcessor(this.credentialManager),
             new AwsSqsProcessor(this.credentialManager),
+            new AwsIamProcessor(this.credentialManager),
         ];
     }
 
