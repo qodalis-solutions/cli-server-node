@@ -2,6 +2,9 @@ import {
     IDataExplorerProvider,
     DataExplorerExecutionContext,
     DataExplorerResult,
+    DataExplorerSchemaResult,
+    DataExplorerSchemaTable,
+    DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 
 export interface SqlConnectionOptions {
@@ -41,6 +44,39 @@ export class SqlDataExplorerProvider implements IDataExplorerProvider {
                 truncated: false,
                 error: error instanceof Error ? error.message : String(error),
             };
+        }
+    }
+
+    async getSchemaAsync(options: DataExplorerProviderOptions): Promise<DataExplorerSchemaResult> {
+        const Database = (await import('better-sqlite3')).default;
+        const db = new Database(this.connectionOptions.filename ?? ':memory:');
+        try {
+            const tables = db.prepare(
+                "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).all() as { name: string; type: string }[];
+
+            const result: DataExplorerSchemaTable[] = tables.map((t) => {
+                const columns = db.prepare(`PRAGMA table_info("${t.name}")`).all() as {
+                    name: string;
+                    type: string;
+                    notnull: number;
+                    pk: number;
+                }[];
+                return {
+                    name: t.name,
+                    type: t.type,
+                    columns: columns.map((c) => ({
+                        name: c.name,
+                        type: c.type || 'TEXT',
+                        nullable: c.notnull === 0,
+                        primaryKey: c.pk > 0,
+                    })),
+                };
+            });
+
+            return { source: options.name, tables: result };
+        } finally {
+            db.close();
         }
     }
 

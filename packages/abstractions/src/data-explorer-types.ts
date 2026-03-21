@@ -71,3 +71,21 @@ export interface DataExplorerSourceInfo {
     templates: DataExplorerTemplate[];
     parameters: DataExplorerParameterDescriptor[];
 }
+
+export interface DataExplorerSchemaColumn {
+    name: string;
+    type: string;
+    nullable: boolean;
+    primaryKey: boolean;
+}
+
+export interface DataExplorerSchemaTable {
+    name: string;
+    type: string;
+    columns: DataExplorerSchemaColumn[];
+}
+
+export interface DataExplorerSchemaResult {
+    source: string;
+    tables: DataExplorerSchemaTable[];
+}

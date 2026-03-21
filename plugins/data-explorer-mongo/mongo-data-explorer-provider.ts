@@ -2,6 +2,10 @@ import {
     IDataExplorerProvider,
     DataExplorerExecutionContext,
     DataExplorerResult,
+    DataExplorerSchemaResult,
+    DataExplorerSchemaTable,
+    DataExplorerSchemaColumn,
+    DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { MongoClient } from 'mongodb';
 
@@ -15,6 +19,37 @@ export class MongoDataExplorerProvider implements IDataExplorerProvider {
 
     constructor(connectionOptions: MongoConnectionOptions) {
         this.connectionOptions = connectionOptions;
+    }
+
+    async getSchemaAsync(options: DataExplorerProviderOptions): Promise<DataExplorerSchemaResult> {
+        const client = new MongoClient(this.connectionOptions.connectionString);
+        try {
+            await client.connect();
+            const db = client.db(this.connectionOptions.database);
+            const collections = await db.listCollections().toArray();
+
+            const tables: DataExplorerSchemaTable[] = [];
+            for (const coll of collections) {
+                const sample = await db.collection(coll.name).findOne();
+                const columns: DataExplorerSchemaColumn[] = sample
+                    ? Object.entries(sample).map(([key, value]) => ({
+                          name: key,
+                          type: Array.isArray(value) ? 'array' : typeof value === 'object' && value !== null ? 'object' : typeof value,
+                          nullable: true,
+                          primaryKey: key === '_id',
+                      }))
+                    : [];
+                tables.push({
+                    name: coll.name,
+                    type: coll.type ?? 'collection',
+                    columns,
+                });
+            }
+
+            return { source: options.name, tables };
+        } finally {
+            await client.close();
+        }
     }
 
     async executeAsync(context: DataExplorerExecutionContext): Promise<DataExplorerResult> {

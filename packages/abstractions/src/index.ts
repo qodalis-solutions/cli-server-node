@@ -27,5 +27,8 @@ export {
     DataExplorerResult,
     DataExplorerExecuteRequest,
     DataExplorerSourceInfo,
+    DataExplorerSchemaColumn,
+    DataExplorerSchemaTable,
+    DataExplorerSchemaResult,
 } from './data-explorer-types';
 export { IDataExplorerProvider } from './data-explorer-provider';
