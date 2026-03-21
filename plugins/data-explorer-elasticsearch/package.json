@@ -1,0 +1,37 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer-elasticsearch",
+    "version": "1.0.0-beta.1",
+    "description": "Elasticsearch data explorer provider plugin for Qodalis CLI server",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "data-explorer",
+        "elasticsearch",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer-elasticsearch"
+    },
+    "dependencies": {
+        "@elastic/elasticsearch": "^8.16.0",
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2"
+    },
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}
