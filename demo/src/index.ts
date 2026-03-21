@@ -20,6 +20,7 @@ import { ElasticsearchDataExplorerProvider } from '@qodalis/cli-server-plugin-da
 import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
+import { AwsModule } from '@qodalis/cli-server-plugin-aws';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -44,6 +45,7 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
             .addModule(new WeatherModule())
+            .addModule(new AwsModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
 
         // -----------------------------------------------------------

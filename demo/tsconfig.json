@@ -25,7 +25,8 @@
             "@qodalis/cli-server-plugin-data-explorer-mssql": ["../plugins/data-explorer-mssql/index.ts"],
             "@qodalis/cli-server-plugin-data-explorer-redis": ["../plugins/data-explorer-redis/index.ts"],
             "@qodalis/cli-server-plugin-data-explorer-elasticsearch": ["../plugins/data-explorer-elasticsearch/index.ts"],
-            "@qodalis/cli-server-plugin-admin": ["../plugins/admin/index.ts"]
+            "@qodalis/cli-server-plugin-admin": ["../plugins/admin/index.ts"],
+            "@qodalis/cli-server-plugin-aws": ["../plugins/aws/src/index.ts"]
         }
     },
     "include": ["src/**/*"]
