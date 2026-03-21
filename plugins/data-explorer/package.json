@@ -1,0 +1,36 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer",
+    "version": "1.0.0-beta.1",
+    "description": "Data explorer plugin for Qodalis CLI server — query and browse data sources",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "data-explorer",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "typescript": "^5.6.0"
+    }
+}
