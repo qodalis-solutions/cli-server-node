@@ -1,0 +1,24 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer-mssql",
+    "version": "1.0.0-beta.1",
+    "description": "MS SQL Server data explorer provider plugin for Qodalis CLI server",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": ["dist", "LICENSE", "README.md"],
+    "scripts": { "build": "tsc" },
+    "keywords": ["cli", "qodalis", "data-explorer", "mssql", "sql-server", "plugin"],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer-mssql"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2",
+        "mssql": "^11.0.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}

@@ -1,0 +1,24 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer-mysql",
+    "version": "1.0.0-beta.1",
+    "description": "MySQL data explorer provider plugin for Qodalis CLI server",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": ["dist", "LICENSE", "README.md"],
+    "scripts": { "build": "tsc" },
+    "keywords": ["cli", "qodalis", "data-explorer", "mysql", "plugin"],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer-mysql"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2",
+        "mysql2": "^3.11.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}
