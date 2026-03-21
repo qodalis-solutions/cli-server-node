@@ -17,6 +17,7 @@ import {
 
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 import { AwsS3Processor } from './processors/s3-processor';
+import { AwsEc2Processor } from './processors/ec2-processor';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -237,6 +238,7 @@ export class AwsCommandProcessor extends CliCommandProcessor {
             new AwsConfigureProcessor(this.configService, this.credentialManager),
             new AwsStatusProcessor(this.credentialManager),
             new AwsS3Processor(this.credentialManager),
+            new AwsEc2Processor(this.credentialManager),
         ];
     }
 
