@@ -39,6 +39,7 @@
     "dependencies": {
         "@qodalis/cli-server-abstractions": "file:packages/abstractions",
         "@qodalis/cli-server-plugin-filesystem": "file:plugins/filesystem",
+        "@qodalis/cli-server-plugin-data-explorer": "file:plugins/data-explorer",
         "@qodalis/cli-server-plugin-jobs": "file:plugins/jobs",
         "cors": "^2.8.5",
         "express": "^4.21.0",

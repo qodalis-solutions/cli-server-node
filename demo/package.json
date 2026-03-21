@@ -13,6 +13,8 @@
         "@qodalis/cli-server-node": "file:..",
         "@qodalis/cli-server-plugin-filesystem": "file:../plugins/filesystem",
         "@qodalis/cli-server-plugin-jobs": "file:../plugins/jobs",
+        "@qodalis/cli-server-plugin-data-explorer": "file:../plugins/data-explorer",
+        "@qodalis/cli-server-plugin-data-explorer-sql": "file:../plugins/data-explorer-sql",
         "@qodalis/cli-server-plugin-weather": "file:../plugins/weather"
     },
     "devDependencies": {
