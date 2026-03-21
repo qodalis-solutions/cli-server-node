@@ -12,6 +12,11 @@ import { CliHelloCommandProcessor } from './processors/cli-hello-command-process
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
+import { PostgresDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-postgres';
+import { MysqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mysql';
+import { MssqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mssql';
+import { RedisDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-redis';
+import { ElasticsearchDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-elasticsearch';
 import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
@@ -93,6 +98,101 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
                             description: 'Find all documents in users collection',
                         },
                     ],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — PostgreSQL Provider
+        // -----------------------------------------------------------
+        const pgConnectionString = process.env.POSTGRES_CONNECTION_STRING;
+        if (pgConnectionString) {
+            builder.addDataExplorerProvider(
+                new PostgresDataExplorerProvider({ connectionString: pgConnectionString }),
+                {
+                    name: 'demo-postgres',
+                    description: 'Demo PostgreSQL database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — MySQL Provider
+        // -----------------------------------------------------------
+        const mysqlConnectionString = process.env.MYSQL_CONNECTION_STRING;
+        if (mysqlConnectionString) {
+            builder.addDataExplorerProvider(
+                new MysqlDataExplorerProvider({ connectionString: mysqlConnectionString }),
+                {
+                    name: 'demo-mysql',
+                    description: 'Demo MySQL database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — MS SQL Provider
+        // -----------------------------------------------------------
+        const mssqlConnectionString = process.env.MSSQL_CONNECTION_STRING;
+        if (mssqlConnectionString) {
+            builder.addDataExplorerProvider(
+                new MssqlDataExplorerProvider({ connectionString: mssqlConnectionString }),
+                {
+                    name: 'demo-mssql',
+                    description: 'Demo MS SQL Server database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — Redis Provider
+        // -----------------------------------------------------------
+        const redisConnectionString = process.env.REDIS_CONNECTION_STRING;
+        if (redisConnectionString) {
+            builder.addDataExplorerProvider(
+                new RedisDataExplorerProvider({ connectionString: redisConnectionString }),
+                {
+                    name: 'demo-redis',
+                    description: 'Demo Redis instance',
+                    language: DataExplorerLanguage.Redis,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — Elasticsearch Provider
+        // -----------------------------------------------------------
+        const esNode = process.env.ELASTICSEARCH_NODE;
+        if (esNode) {
+            builder.addDataExplorerProvider(
+                new ElasticsearchDataExplorerProvider({ node: esNode }),
+                {
+                    name: 'demo-elasticsearch',
+                    description: 'Demo Elasticsearch cluster',
+                    language: DataExplorerLanguage.Elasticsearch,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
                 },
             );
         }
