@@ -16,6 +16,11 @@ COPY plugins/admin/package.json plugins/admin/
 COPY plugins/data-explorer/package.json plugins/data-explorer/
 COPY plugins/data-explorer-sql/package.json plugins/data-explorer-sql/
 COPY plugins/data-explorer-mongo/package.json plugins/data-explorer-mongo/
+COPY plugins/data-explorer-postgres/package.json plugins/data-explorer-postgres/
+COPY plugins/data-explorer-mysql/package.json plugins/data-explorer-mysql/
+COPY plugins/data-explorer-mssql/package.json plugins/data-explorer-mssql/
+COPY plugins/data-explorer-redis/package.json plugins/data-explorer-redis/
+COPY plugins/data-explorer-elasticsearch/package.json plugins/data-explorer-elasticsearch/
 RUN npm install
 
 COPY tsconfig.json ./
@@ -32,6 +37,11 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../data-explorer && npx tsc \
     && cd ../data-explorer-sql && npx tsc \
     && cd ../data-explorer-mongo && npx tsc \
+    && cd ../data-explorer-postgres && npx tsc \
+    && cd ../data-explorer-mysql && npx tsc \
+    && cd ../data-explorer-mssql && npx tsc \
+    && cd ../data-explorer-redis && npx tsc \
+    && cd ../data-explorer-elasticsearch && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/

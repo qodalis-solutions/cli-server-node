@@ -17,7 +17,12 @@
         "@qodalis/cli-server-plugin-data-explorer-sql": "file:../plugins/data-explorer-sql",
         "@qodalis/cli-server-plugin-weather": "file:../plugins/weather",
         "@qodalis/cli-server-plugin-admin": "file:../plugins/admin",
-        "@qodalis/cli-server-plugin-data-explorer-mongo": "file:../plugins/data-explorer-mongo"
+        "@qodalis/cli-server-plugin-data-explorer-mongo": "file:../plugins/data-explorer-mongo",
+        "@qodalis/cli-server-plugin-data-explorer-postgres": "file:../plugins/data-explorer-postgres",
+        "@qodalis/cli-server-plugin-data-explorer-mysql": "file:../plugins/data-explorer-mysql",
+        "@qodalis/cli-server-plugin-data-explorer-mssql": "file:../plugins/data-explorer-mssql",
+        "@qodalis/cli-server-plugin-data-explorer-redis": "file:../plugins/data-explorer-redis",
+        "@qodalis/cli-server-plugin-data-explorer-elasticsearch": "file:../plugins/data-explorer-elasticsearch"
     },
     "devDependencies": {
         "tsx": "^4.19.0"
