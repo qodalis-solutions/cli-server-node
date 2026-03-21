@@ -492,6 +492,104 @@ class MyProvider implements IFileStorageProvider {
 builder.setFileStorageProvider(new MyProvider());
 ```
 
+## Data Explorer
+
+The Data Explorer plugin provides interactive, full-screen REPL access to data sources. It exposes a provider-based API where each data source type (SQL, MongoDB, etc.) is a separate plugin implementing `IDataExplorerProvider`.
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/qcli/data-explorer/sources` | List registered data sources with metadata |
+| POST | `/api/qcli/data-explorer/execute` | Execute a query against a named source |
+
+### SQL Provider
+
+```typescript
+import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
+import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
+
+const { app } = createCliServer({
+    configure: (builder) => {
+        builder.addDataExplorerProvider(
+            new SqlDataExplorerProvider({ type: 'sqlite', filename: './data.db' }),
+            {
+                name: 'my-database',
+                description: 'Application database',
+                language: DataExplorerLanguage.Sql,
+                defaultOutputFormat: DataExplorerOutputFormat.Table,
+                timeout: 30000,
+                maxRows: 1000,
+                templates: [
+                    {
+                        name: 'list_tables',
+                        query: "SELECT name FROM sqlite_master WHERE type='table'",
+                        description: 'List all tables',
+                    },
+                ],
+            },
+        );
+    },
+});
+```
+
+### MongoDB Provider
+
+```typescript
+import { MongoDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mongo';
+
+builder.addDataExplorerProvider(
+    new MongoDataExplorerProvider({
+        connectionString: 'mongodb://localhost:27017',
+        database: 'myapp',
+    }),
+    {
+        name: 'mongo-primary',
+        description: 'Primary MongoDB database',
+        language: DataExplorerLanguage.Json,
+        defaultOutputFormat: DataExplorerOutputFormat.Json,
+        templates: [
+            { name: 'show_collections', query: 'show collections', description: 'List all collections' },
+            { name: 'find_users', query: 'db.users.find({})', description: 'Find all users' },
+        ],
+    },
+);
+```
+
+**Supported MongoDB operations:** `db.collection.find({...})`, `findOne`, `aggregate([...])`, `insertOne`, `insertMany`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `countDocuments`, `distinct`. Convenience commands: `show collections`, `show dbs`.
+
+### Custom Provider
+
+Implement `IDataExplorerProvider` to add your own data source:
+
+```typescript
+import { IDataExplorerProvider, DataExplorerExecutionContext, DataExplorerResult } from '@qodalis/cli-server-abstractions';
+
+class MyProvider implements IDataExplorerProvider {
+    async executeAsync(context: DataExplorerExecutionContext): Promise<DataExplorerResult> {
+        // context.query — the user's query string
+        // context.parameters — key-value parameters
+        // context.options — provider options (name, language, etc.)
+        return {
+            success: true,
+            source: context.options.name,
+            language: context.options.language,
+            defaultOutputFormat: context.options.defaultOutputFormat,
+            executionTime: 0,
+            columns: ['id', 'name'],       // null for document-oriented results
+            rows: [[1, 'Alice'], [2, 'Bob']], // objects when columns is null
+            rowCount: 2,
+            truncated: false,
+            error: null,
+        };
+    }
+}
+
+builder.addDataExplorerProvider(new MyProvider(), { name: 'custom', ... });
+```
+
+The same provider class can be registered multiple times with different configurations (e.g., two databases with different names).
+
 ## Built-in Processors
 
 These processors ship with the library and are included in the standalone server:
