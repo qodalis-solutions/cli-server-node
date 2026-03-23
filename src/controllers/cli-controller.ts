@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as os from 'os';
-import { ICliCommandProcessor } from '../abstractions';
+import { CliStructuredOutput, ICliCommandProcessor, isStreamCapable } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
 import { createLogger } from '../utils/logger';
@@ -41,6 +41,7 @@ export function createCliController(
             os: detectedOs,
             shellPath,
             version: SERVER_VERSION,
+            streaming: true,
         });
     });
 
@@ -54,6 +55,64 @@ export function createCliController(
         logger.debug('Executing command: %s', command.command);
         const response = await executor.executeAsync(command);
         res.json(response);
+    });
+
+    router.post('/execute/stream', async (req, res) => {
+        const command = req.body;
+        logger.debug('Stream executing command: %s', command.command);
+
+        // SSE headers
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+
+        const emit = (output: CliStructuredOutput) => {
+            res.write(`event: output\ndata: ${JSON.stringify(output)}\n\n`);
+        };
+
+        try {
+            const processor = registry.findProcessor(
+                command.command,
+                command.chainCommands?.length ? command.chainCommands : undefined,
+            );
+
+            if (!processor) {
+                res.write(`event: error\ndata: ${JSON.stringify({ message: `Unknown command: ${command.command}` })}\n\n`);
+                res.end();
+                return;
+            }
+
+            if (executor.isBlocked(processor)) {
+                res.write(`event: error\ndata: ${JSON.stringify({ message: `Command '${command.command}' is currently disabled.` })}\n\n`);
+                res.end();
+                return;
+            }
+
+            let exitCode: number;
+
+            if (isStreamCapable(processor)) {
+                exitCode = await processor.handleStreamAsync(command, emit);
+            } else if (processor.handleStructuredAsync) {
+                const response = await processor.handleStructuredAsync(command);
+                for (const output of response.outputs) {
+                    emit(output);
+                }
+                exitCode = response.exitCode;
+            } else {
+                const result = await processor.handleAsync(command);
+                emit({ type: 'text', value: result });
+                exitCode = 0;
+            }
+
+            res.write(`event: done\ndata: ${JSON.stringify({ exitCode })}\n\n`);
+        } catch (err: any) {
+            logger.error('Stream execution failed: %s - %s', command.command, err.message ?? err);
+            res.write(`event: error\ndata: ${JSON.stringify({ message: `Error executing command: ${err.message ?? err}` })}\n\n`);
+        }
+
+        res.end();
     });
 
     return router;

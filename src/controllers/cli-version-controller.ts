@@ -40,6 +40,7 @@ export function createCliVersionController(): Router {
             os: detectedOs,
             shellPath,
             version: SERVER_VERSION,
+            streaming: true,
         });
     });
 

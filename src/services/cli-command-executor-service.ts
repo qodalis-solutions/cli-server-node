@@ -1,4 +1,4 @@
-import { CliProcessCommand, ICliProcessorFilter } from '../abstractions';
+import { CliProcessCommand, ICliCommandProcessor, ICliProcessorFilter } from '../abstractions';
 import { CliServerResponse } from '../models';
 import { ICliCommandRegistry } from './cli-command-registry';
 import { createLogger } from '../utils/logger';
@@ -19,6 +19,12 @@ export interface ICliCommandExecutorService {
      * @param filter - The filter to add.
      */
     addFilter(filter: ICliProcessorFilter): void;
+
+    /**
+     * Returns true if any registered filter blocks the given processor.
+     * @param processor - The processor to check.
+     */
+    isBlocked(processor: ICliCommandProcessor): boolean;
 }
 
 /** Default executor that resolves processors from the registry and delegates command handling. */
@@ -29,6 +35,10 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
 
     addFilter(filter: ICliProcessorFilter): void {
         this._filters.push(filter);
+    }
+
+    isBlocked(processor: ICliCommandProcessor): boolean {
+        return this._filters.some(f => !f.isAllowed(processor));
     }
 
     async executeAsync(command: CliProcessCommand): Promise<CliServerResponse> {
@@ -51,7 +61,7 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
             };
         }
 
-        if (this._filters.some(f => !f.isAllowed(processor))) {
+        if (this.isBlocked(processor)) {
             logger.warn('Command blocked by filter (plugin disabled): %s', command.command);
             return {
                 exitCode: 1,
