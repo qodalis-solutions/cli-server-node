@@ -32,7 +32,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, registry, builder, eventSocketManager, logSocketManager } = createCliServer({
+const { app, registry, builder, executor, eventSocketManager, logSocketManager } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -262,6 +262,7 @@ const adminPlugin = new CliAdminBuilder()
         registry,
         eventSocketManager,
         builder,
+        executor,
         broadcastFn: (msg) => {
             eventSocketManager.broadcastMessage(msg);
             // Also stream to dedicated log WebSocket clients

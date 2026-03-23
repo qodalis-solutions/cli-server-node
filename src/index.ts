@@ -10,6 +10,7 @@ export {
     CliCommandProcessor,
     ICliModule,
     CliModule,
+    ICliProcessorFilter,
 } from './abstractions';
 
 // Models

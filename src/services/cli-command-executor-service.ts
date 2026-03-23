@@ -1,4 +1,4 @@
-import { CliProcessCommand } from '../abstractions';
+import { CliProcessCommand, ICliProcessorFilter } from '../abstractions';
 import { CliServerResponse } from '../models';
 import { ICliCommandRegistry } from './cli-command-registry';
 import { createLogger } from '../utils/logger';
@@ -13,11 +13,23 @@ export interface ICliCommandExecutorService {
      * @returns Structured response with exit code and outputs.
      */
     executeAsync(command: CliProcessCommand): Promise<CliServerResponse>;
+
+    /**
+     * Adds a processor filter that can block command execution at runtime.
+     * @param filter - The filter to add.
+     */
+    addFilter(filter: ICliProcessorFilter): void;
 }
 
 /** Default executor that resolves processors from the registry and delegates command handling. */
 export class CliCommandExecutorService implements ICliCommandExecutorService {
+    private readonly _filters: ICliProcessorFilter[] = [];
+
     constructor(private readonly _registry: ICliCommandRegistry) {}
+
+    addFilter(filter: ICliProcessorFilter): void {
+        this._filters.push(filter);
+    }
 
     async executeAsync(command: CliProcessCommand): Promise<CliServerResponse> {
         logger.debug('Executing command: %s', command.command);
@@ -33,6 +45,20 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
                     {
                         type: 'text',
                         value: `Unknown command: ${command.command}`,
+                        style: 'error',
+                    },
+                ],
+            };
+        }
+
+        if (this._filters.some(f => !f.isAllowed(processor))) {
+            logger.warn('Command blocked by filter (plugin disabled): %s', command.command);
+            return {
+                exitCode: 1,
+                outputs: [
+                    {
+                        type: 'text',
+                        value: `Command '${command.command}' is currently disabled.`,
                         style: 'error',
                     },
                 ],

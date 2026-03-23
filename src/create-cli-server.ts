@@ -32,6 +32,7 @@ export function createCliServer(options: CliServerOptions = {}): {
     app: Express;
     registry: CliCommandRegistry;
     builder: CliBuilder;
+    executor: CliCommandExecutorService;
     eventSocketManager: CliEventSocketManager;
     logSocketManager: CliLogSocketManager;
 } {
@@ -90,5 +91,5 @@ export function createCliServer(options: CliServerOptions = {}): {
 
     logger.info('CLI server created with %d processors', registry.processors.length);
 
-    return { app, registry, builder, eventSocketManager, logSocketManager };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager };
 }

@@ -33,4 +33,5 @@ export {
     DataExplorerResult,
     DataExplorerExecuteRequest,
     DataExplorerSourceInfo,
+    ICliProcessorFilter,
 } from '@qodalis/cli-server-abstractions';

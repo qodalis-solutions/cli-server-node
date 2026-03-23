@@ -33,3 +33,4 @@ export {
     DataExplorerSchemaResult,
 } from './data-explorer-types';
 export { IDataExplorerProvider } from './data-explorer-provider';
+export { ICliProcessorFilter } from './cli-processor-filter';
