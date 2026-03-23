@@ -51,7 +51,7 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     allowUnlistedCommands?: boolean;
     valueRequired?: boolean;
     version: string = '1.0.0';
-    apiVersion: number = 1;
+    apiVersion: number = 2;
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
 
