@@ -43,15 +43,19 @@ describe('CLI Controllers (integration)', () => {
         app = server.app;
     });
 
-    describe('GET /api/qcli/version (discovery endpoint)', () => {
+    describe('GET /api/qcli/versions (discovery endpoint)', () => {
         it('should return supportedVersions, preferredVersion, and serverVersion', async () => {
-            const res = await request(app).get('/api/qcli/version').expect(200);
+            const res = await request(app).get('/api/qcli/versions').expect(200);
 
             expect(res.body).toEqual({
-                supportedVersions: [1, 2],
-                preferredVersion: 2,
+                supportedVersions: [1],
+                preferredVersion: 1,
                 serverVersion: '2.0.0',
             });
+        });
+
+        it('should redirect /version to /versions', async () => {
+            await request(app).get('/api/qcli/version').expect(301);
         });
     });
 
