@@ -34,3 +34,4 @@ export {
 } from './data-explorer-types';
 export { IDataExplorerProvider } from './data-explorer-provider';
 export { ICliProcessorFilter } from './cli-processor-filter';
+export { ICliStreamCommandProcessor, isStreamCapable } from './cli-stream-command-processor';

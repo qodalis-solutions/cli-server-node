@@ -34,4 +34,6 @@ export {
     DataExplorerExecuteRequest,
     DataExplorerSourceInfo,
     ICliProcessorFilter,
+    ICliStreamCommandProcessor,
+    isStreamCapable,
 } from '@qodalis/cli-server-abstractions';
