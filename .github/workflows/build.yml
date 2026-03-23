@@ -24,6 +24,18 @@ jobs:
       - name: Build abstractions
         run: cd packages/abstractions && npx tsc
 
+      - name: Install plugin dependencies
+        run: |
+          cd plugins/data-explorer-sql && npm install --omit=dev
+          cd ../data-explorer-mongo && npm install --omit=dev
+          cd ../data-explorer-postgres && npm install --omit=dev
+          cd ../data-explorer-mysql && npm install --omit=dev
+          cd ../data-explorer-mssql && npm install --omit=dev
+          cd ../data-explorer-redis && npm install --omit=dev
+          cd ../data-explorer-elasticsearch && npm install --omit=dev
+          cd ../admin && npm install --omit=dev
+          cd ../aws && npm install --omit=dev
+
       - name: Build plugins
         run: |
           cd plugins/filesystem && npx tsc
@@ -33,15 +45,15 @@ jobs:
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
           cd ../data-explorer && npx tsc
-          cd ../data-explorer-sql && npm install && npx tsc
-          cd ../data-explorer-mongo && npm install && npx tsc
-          cd ../data-explorer-postgres && npm install && npx tsc
-          cd ../data-explorer-mysql && npm install && npx tsc
-          cd ../data-explorer-mssql && npm install && npx tsc
-          cd ../data-explorer-redis && npm install && npx tsc
-          cd ../data-explorer-elasticsearch && npm install && npx tsc
-          cd ../admin && npm install && npx tsc
-          cd ../aws && npm install && npx tsc
+          cd ../data-explorer-sql && npx tsc
+          cd ../data-explorer-mongo && npx tsc
+          cd ../data-explorer-postgres && npx tsc
+          cd ../data-explorer-mysql && npx tsc
+          cd ../data-explorer-mssql && npx tsc
+          cd ../data-explorer-redis && npx tsc
+          cd ../data-explorer-elasticsearch && npx tsc
+          cd ../admin && npx tsc
+          cd ../aws && npx tsc
 
       - name: Build
         run: npm run build
