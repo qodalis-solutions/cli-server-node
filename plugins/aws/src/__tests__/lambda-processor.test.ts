@@ -103,7 +103,7 @@ describe('AwsLambdaProcessor', () => {
             lambdaMock.on(InvokeCommand).resolves({
                 StatusCode: 200,
                 ExecutedVersion: '$LATEST',
-                Payload: new TextEncoder().encode(responsePayload),
+                Payload: new TextEncoder().encode(responsePayload) as any,
             });
 
             const sub = findSub('invoke');
@@ -123,7 +123,7 @@ describe('AwsLambdaProcessor', () => {
             lambdaMock.on(InvokeCommand).resolves({
                 StatusCode: 200,
                 FunctionError: 'Unhandled',
-                Payload: new TextEncoder().encode(errorPayload),
+                Payload: new TextEncoder().encode(errorPayload) as any,
             });
 
             const sub = findSub('invoke');
