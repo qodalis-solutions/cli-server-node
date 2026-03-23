@@ -53,13 +53,21 @@ export function createCliController(
     router.post('/execute', async (req, res) => {
         const command = req.body;
         logger.debug('Executing command: %s', command.command);
-        const response = await executor.executeAsync(command);
+
+        const abortController = new AbortController();
+        req.on('close', () => abortController.abort());
+
+        const response = await executor.executeAsync(command, abortController.signal);
         res.json(response);
     });
 
     router.post('/execute/stream', async (req, res) => {
         const command = req.body;
         logger.debug('Stream executing command: %s', command.command);
+
+        const abortController = new AbortController();
+        req.on('close', () => abortController.abort());
+        const signal = abortController.signal;
 
         // SSE headers
         res.setHeader('Content-Type', 'text/event-stream');
@@ -93,23 +101,27 @@ export function createCliController(
             let exitCode: number;
 
             if (isStreamCapable(processor)) {
-                exitCode = await processor.handleStreamAsync(command, emit);
+                exitCode = await processor.handleStreamAsync(command, emit, signal);
             } else if (processor.handleStructuredAsync) {
-                const response = await processor.handleStructuredAsync(command);
+                const response = await processor.handleStructuredAsync(command, signal);
                 for (const output of response.outputs) {
                     emit(output);
                 }
                 exitCode = response.exitCode;
             } else {
-                const result = await processor.handleAsync(command);
+                const result = await processor.handleAsync(command, signal);
                 emit({ type: 'text', value: result });
                 exitCode = 0;
             }
 
             res.write(`event: done\ndata: ${JSON.stringify({ exitCode })}\n\n`);
         } catch (err: any) {
-            logger.error('Stream execution failed: %s - %s', command.command, err.message ?? err);
-            res.write(`event: error\ndata: ${JSON.stringify({ message: `Error executing command: ${err.message ?? err}` })}\n\n`);
+            if (signal.aborted) {
+                logger.debug('Stream cancelled for command: %s', command.command);
+            } else {
+                logger.error('Stream execution failed: %s - %s', command.command, err.message ?? err);
+                res.write(`event: error\ndata: ${JSON.stringify({ message: `Error executing command: ${err.message ?? err}` })}\n\n`);
+            }
         }
 
         res.end();

@@ -17,11 +17,13 @@ export interface ICliStreamCommandProcessor {
      * Execute the command, emitting output chunks as they become available.
      * @param command - Parsed command with arguments.
      * @param emit - Callback to send a single output chunk to the client.
+     * @param signal - Optional AbortSignal to cancel the operation.
      * @returns Exit code (0 for success).
      */
     handleStreamAsync(
         command: CliProcessCommand,
         emit: (output: CliStructuredOutput) => void,
+        signal?: AbortSignal,
     ): Promise<number>;
 }
 

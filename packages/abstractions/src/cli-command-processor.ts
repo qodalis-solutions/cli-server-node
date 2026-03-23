@@ -26,16 +26,18 @@ export interface ICliCommandProcessor {
     /**
      * Executes the command and returns a plain-text result.
      * @param command - Parsed command with arguments.
+     * @param signal - Optional AbortSignal to cancel the operation.
      * @returns Plain-text output string.
      */
-    handleAsync(command: CliProcessCommand): Promise<string>;
+    handleAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<string>;
     /**
      * Executes the command and returns a structured response with typed outputs.
      * When implemented, takes precedence over {@link handleAsync}.
      * @param command - Parsed command with arguments.
+     * @param signal - Optional AbortSignal to cancel the operation.
      * @returns Structured response containing exit code and typed outputs.
      */
-    handleStructuredAsync?(command: CliProcessCommand): Promise<CliStructuredResponse>;
+    handleStructuredAsync?(command: CliProcessCommand, signal?: AbortSignal): Promise<CliStructuredResponse>;
 }
 
 /**
@@ -53,6 +55,6 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
 
-    abstract handleAsync(command: CliProcessCommand): Promise<string>;
-    handleStructuredAsync?(command: CliProcessCommand): Promise<CliStructuredResponse>;
+    abstract handleAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<string>;
+    handleStructuredAsync?(command: CliProcessCommand, signal?: AbortSignal): Promise<CliStructuredResponse>;
 }

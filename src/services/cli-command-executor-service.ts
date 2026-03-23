@@ -10,9 +10,10 @@ export interface ICliCommandExecutorService {
     /**
      * Executes a parsed command by routing it to the appropriate processor.
      * @param command - Parsed command to execute.
+     * @param signal - Optional AbortSignal to cancel the operation.
      * @returns Structured response with exit code and outputs.
      */
-    executeAsync(command: CliProcessCommand): Promise<CliServerResponse>;
+    executeAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<CliServerResponse>;
 
     /**
      * Adds a processor filter that can block command execution at runtime.
@@ -41,7 +42,7 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
         return this._filters.some(f => !f.isAllowed(processor));
     }
 
-    async executeAsync(command: CliProcessCommand): Promise<CliServerResponse> {
+    async executeAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<CliServerResponse> {
         logger.debug('Executing command: %s', command.command);
         const processor = this._registry.findProcessor(
             command.command,
@@ -77,12 +78,12 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
 
         try {
             if (processor.handleStructuredAsync) {
-                const response = await processor.handleStructuredAsync(command);
+                const response = await processor.handleStructuredAsync(command, signal);
                 logger.debug('Command completed: %s (exitCode=%d)', command.command, response.exitCode);
                 return response;
             }
 
-            const result = await processor.handleAsync(command);
+            const result = await processor.handleAsync(command, signal);
             const response: CliServerResponse = {
                 exitCode: 0,
                 outputs: [{ type: 'text', value: result }],
