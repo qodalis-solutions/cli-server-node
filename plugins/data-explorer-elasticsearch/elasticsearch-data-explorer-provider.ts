@@ -9,7 +9,9 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { Client } from '@elastic/elasticsearch';
 
+/** Connection configuration for the Elasticsearch data explorer provider. */
 export interface ElasticsearchConnectionOptions {
+    /** Elasticsearch node URL (e.g. 'http://localhost:9200'). */
     node: string;
 }
 
@@ -24,6 +26,7 @@ interface MappingProperty {
     fields?: Record<string, MappingProperty>;
 }
 
+/** Recursively flatten nested Elasticsearch mapping properties into a flat column list. */
 function flattenMappingProperties(
     properties: Record<string, MappingProperty>,
     prefix = '',
@@ -45,6 +48,10 @@ function flattenMappingProperties(
     return columns;
 }
 
+/**
+ * Data explorer provider for Elasticsearch. Queries use the REST API format
+ * (`VERB /path` followed by optional JSON body). Supports `_search` and `_cat` endpoints.
+ */
 export class ElasticsearchDataExplorerProvider implements IDataExplorerProvider {
     private readonly client: Client;
 

@@ -24,10 +24,7 @@ import {
     isDryRun,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// ec2 list
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists all EC2 instances. */
 class Ec2ListProcessor extends CliCommandProcessor {
     command = 'list';
     description = 'List all EC2 instances';
@@ -40,10 +37,12 @@ class Ec2ListProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(EC2Client, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -79,10 +78,7 @@ class Ec2ListProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 describe
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that describes a single EC2 instance in detail. */
 class Ec2DescribeProcessor extends CliCommandProcessor {
     command = 'describe';
     description = 'Describe an EC2 instance';
@@ -95,10 +91,12 @@ class Ec2DescribeProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const instanceId = command.value?.trim();
         if (!instanceId) {
@@ -144,10 +142,7 @@ class Ec2DescribeProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 start
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that starts an EC2 instance. */
 class Ec2StartProcessor extends CliCommandProcessor {
     command = 'start';
     description = 'Start an EC2 instance';
@@ -160,10 +155,12 @@ class Ec2StartProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const instanceId = command.value?.trim();
         if (!instanceId) {
@@ -183,10 +180,7 @@ class Ec2StartProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 stop
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that stops an EC2 instance, with optional dry-run support. */
 class Ec2StopProcessor extends CliCommandProcessor {
     command = 'stop';
     description = 'Stop an EC2 instance';
@@ -200,10 +194,12 @@ class Ec2StopProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const instanceId = command.value?.trim();
         if (!instanceId) {
@@ -229,10 +225,7 @@ class Ec2StopProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 reboot
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that reboots an EC2 instance, with optional dry-run support. */
 class Ec2RebootProcessor extends CliCommandProcessor {
     command = 'reboot';
     description = 'Reboot an EC2 instance';
@@ -246,10 +239,12 @@ class Ec2RebootProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const instanceId = command.value?.trim();
         if (!instanceId) {
@@ -275,10 +270,7 @@ class Ec2RebootProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 sg list
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists all EC2 security groups. */
 class Ec2SgListProcessor extends CliCommandProcessor {
     command = 'list';
     description = 'List all security groups';
@@ -291,10 +283,12 @@ class Ec2SgListProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(EC2Client, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -326,10 +320,7 @@ class Ec2SgListProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 sg (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for EC2 security group sub-commands. */
 class Ec2SgProcessor extends CliCommandProcessor {
     command = 'sg';
     description = 'EC2 security group operations';
@@ -342,15 +333,13 @@ class Ec2SgProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 }
 
-// ---------------------------------------------------------------------------
-// ec2 (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for all EC2 sub-commands (list, describe, start, stop, reboot, sg). */
 export class AwsEc2Processor extends CliCommandProcessor {
     command = 'ec2';
     description = 'Amazon EC2 operations — manage instances and security groups';
@@ -368,6 +357,7 @@ export class AwsEc2Processor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

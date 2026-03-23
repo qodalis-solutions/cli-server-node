@@ -4,6 +4,10 @@ import * as path from 'path';
 
 const SERVER_VERSION = '2.0.0';
 
+/**
+ * Creates an Express router for API version discovery and server capabilities.
+ * @returns Router with `/version` and `/capabilities` endpoints.
+ */
 export function createCliVersionController(): Router {
     const router = Router();
 

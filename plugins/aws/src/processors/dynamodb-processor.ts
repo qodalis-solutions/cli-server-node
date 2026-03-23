@@ -22,10 +22,7 @@ import {
     applyOutputFormat,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// dynamodb tables
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists DynamoDB tables. */
 class DynamoDbTablesProcessor extends CliCommandProcessor {
     command = 'tables';
     description = 'List DynamoDB tables';
@@ -38,10 +35,12 @@ class DynamoDbTablesProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(DynamoDBClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -63,10 +62,7 @@ class DynamoDbTablesProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// dynamodb describe
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that describes a DynamoDB table's metadata (key schema, item count, etc.). */
 class DynamoDbDescribeProcessor extends CliCommandProcessor {
     command = 'describe';
     description = 'Describe a DynamoDB table';
@@ -79,10 +75,12 @@ class DynamoDbDescribeProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const tableName = command.value?.trim();
         if (!tableName) {
@@ -121,10 +119,7 @@ class DynamoDbDescribeProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// dynamodb scan
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that scans items from a DynamoDB table. */
 class DynamoDbScanProcessor extends CliCommandProcessor {
     command = 'scan';
     description = 'Scan items from a DynamoDB table';
@@ -138,10 +133,12 @@ class DynamoDbScanProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const tableName = command.value?.trim();
         if (!tableName) {
@@ -170,10 +167,7 @@ class DynamoDbScanProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// dynamodb query
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that queries items from a DynamoDB table using a key condition expression. */
 class DynamoDbQueryProcessor extends CliCommandProcessor {
     command = 'query';
     description = 'Query items from a DynamoDB table';
@@ -188,10 +182,12 @@ class DynamoDbQueryProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const tableName = command.value?.trim();
         if (!tableName) {
@@ -226,10 +222,7 @@ class DynamoDbQueryProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// dynamodb (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for DynamoDB sub-commands (tables, describe, scan, query). */
 export class AwsDynamoDbProcessor extends CliCommandProcessor {
     command = 'dynamodb';
     description = 'AWS DynamoDB operations — tables, describe, scan, query';
@@ -245,6 +238,7 @@ export class AwsDynamoDbProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

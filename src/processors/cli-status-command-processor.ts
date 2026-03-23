@@ -1,6 +1,7 @@
 import { CliCommandProcessor, CliProcessCommand } from '../abstractions';
 import os from 'os';
 
+/** Command processor that reports server status including uptime, OS, and Node.js version. */
 export class CliStatusCommandProcessor extends CliCommandProcessor {
     command = 'status';
     description = 'Shows server status information';

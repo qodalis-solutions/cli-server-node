@@ -11,7 +11,9 @@ import {
     IsADirectoryError,
 } from '@qodalis/cli-server-plugin-filesystem';
 
+/** Configuration for the JSON-backed file storage provider. */
 export interface JsonFileProviderOptions {
+    /** Path to the JSON file that persists the virtual filesystem tree. */
     filePath: string;
 }
 
@@ -52,6 +54,10 @@ function createFileNode(name: string, content: string): FileNode {
     };
 }
 
+/**
+ * File storage provider that persists a virtual filesystem tree to a single JSON file.
+ * The entire tree is loaded on construction and flushed to disk after every mutation.
+ */
 export class JsonFileStorageProvider implements IFileStorageProvider {
     readonly name = 'json-file';
 

@@ -1,11 +1,21 @@
 import { ICliCommandProcessor } from '../abstractions';
 
+/** Registry that stores and looks up CLI command processors by command name. */
 export interface ICliCommandRegistry {
+    /** All registered top-level processors. */
     readonly processors: ReadonlyArray<ICliCommandProcessor>;
+    /** Registers a command processor. */
     register(processor: ICliCommandProcessor): void;
+    /**
+     * Finds a processor by command name, optionally resolving a sub-command chain.
+     * @param command - Top-level command name.
+     * @param chainCommands - Optional sub-command chain to resolve.
+     * @returns Matching processor, or undefined if not found.
+     */
     findProcessor(command: string, chainCommands?: string[]): ICliCommandProcessor | undefined;
 }
 
+/** Default in-memory implementation of {@link ICliCommandRegistry}. */
 export class CliCommandRegistry implements ICliCommandRegistry {
     private _processors: Map<string, ICliCommandProcessor> = new Map();
 
@@ -26,6 +36,7 @@ export class CliCommandRegistry implements ICliCommandRegistry {
         return this.resolveChain(processor, chainCommands);
     }
 
+    /** Walks the sub-processor tree to resolve a chain of sub-commands. */
     private resolveChain(
         processor: ICliCommandProcessor,
         chainCommands: string[],

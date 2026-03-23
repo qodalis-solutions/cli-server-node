@@ -22,10 +22,7 @@ import {
     applyOutputFormat,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// ecs clusters
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists ECS clusters with their status and task counts. */
 class EcsClustersProcessor extends CliCommandProcessor {
     command = 'clusters';
     description = 'List ECS clusters';
@@ -38,10 +35,12 @@ class EcsClustersProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(ECSClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -76,10 +75,7 @@ class EcsClustersProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ecs services
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists ECS services within a specified cluster. */
 class EcsServicesProcessor extends CliCommandProcessor {
     command = 'services';
     description = 'List ECS services in a cluster';
@@ -93,10 +89,12 @@ class EcsServicesProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const cluster = command.value?.trim();
         if (!cluster) {
@@ -137,10 +135,7 @@ class EcsServicesProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ecs tasks
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists ECS tasks within a specified cluster. */
 class EcsTasksProcessor extends CliCommandProcessor {
     command = 'tasks';
     description = 'List ECS tasks in a cluster';
@@ -154,10 +149,12 @@ class EcsTasksProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const cluster = command.value?.trim();
         if (!cluster) {
@@ -197,10 +194,7 @@ class EcsTasksProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ecs (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for ECS sub-commands (clusters, services, tasks). */
 export class AwsEcsProcessor extends CliCommandProcessor {
     command = 'ecs';
     description = 'AWS ECS operations — clusters, services, tasks';
@@ -215,6 +209,7 @@ export class AwsEcsProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

@@ -7,12 +7,17 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 
+/** Connection configuration for the SQL data explorer provider. */
 export interface SqlConnectionOptions {
+    /** Database engine type. */
     type: 'sqlite' | 'postgres' | 'mysql';
+    /** Connection string (used for postgres/mysql). */
     connectionString?: string;
+    /** SQLite database file path (defaults to ':memory:'). */
     filename?: string;
 }
 
+/** Data explorer provider for SQLite databases using better-sqlite3. */
 export class SqlDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: SqlConnectionOptions;
 

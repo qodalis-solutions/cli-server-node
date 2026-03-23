@@ -3,6 +3,18 @@ import { DataExplorerExecuteRequest } from '@qodalis/cli-server-abstractions';
 import { DataExplorerRegistry } from './data-explorer-registry';
 import { DataExplorerExecutor } from './data-explorer-executor';
 
+/**
+ * Creates the data explorer REST controller router.
+ *
+ * Routes (relative to mount point):
+ * - GET  /sources  - list registered data sources
+ * - GET  /schema   - introspect a source's schema (tables/columns)
+ * - POST /execute  - execute a query against a source
+ *
+ * @param registry - Registry of available data sources.
+ * @param executor - Service that runs queries with timeout enforcement.
+ * @returns An Express router.
+ */
 export function createDataExplorerController(
     registry: DataExplorerRegistry,
     executor: DataExplorerExecutor,

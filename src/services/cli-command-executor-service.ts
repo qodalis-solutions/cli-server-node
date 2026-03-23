@@ -2,10 +2,17 @@ import { CliProcessCommand } from '../abstractions';
 import { CliServerResponse } from '../models';
 import { ICliCommandRegistry } from './cli-command-registry';
 
+/** Service contract for executing parsed CLI commands. */
 export interface ICliCommandExecutorService {
+    /**
+     * Executes a parsed command by routing it to the appropriate processor.
+     * @param command - Parsed command to execute.
+     * @returns Structured response with exit code and outputs.
+     */
     executeAsync(command: CliProcessCommand): Promise<CliServerResponse>;
 }
 
+/** Default executor that resolves processors from the registry and delegates command handling. */
 export class CliCommandExecutorService implements ICliCommandExecutorService {
     constructor(private readonly _registry: ICliCommandRegistry) {}
 

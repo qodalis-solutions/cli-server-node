@@ -22,10 +22,7 @@ import {
     applyOutputFormat,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// sns topics
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists SNS topics. */
 class SnsTopicsProcessor extends CliCommandProcessor {
     command = 'topics';
     description = 'List SNS topics';
@@ -38,10 +35,12 @@ class SnsTopicsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(SNSClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -64,10 +63,7 @@ class SnsTopicsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sns publish
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that publishes a message to an SNS topic. */
 class SnsPublishProcessor extends CliCommandProcessor {
     command = 'publish';
     description = 'Publish a message to an SNS topic';
@@ -81,10 +77,12 @@ class SnsPublishProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const topicArn = command.value?.trim();
         if (!topicArn) {
@@ -115,10 +113,7 @@ class SnsPublishProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sns subscriptions
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists SNS subscriptions, optionally filtered by topic ARN. */
 class SnsSubscriptionsProcessor extends CliCommandProcessor {
     command = 'subscriptions';
     description = 'List SNS subscriptions (optionally filtered by topic ARN)';
@@ -131,10 +126,12 @@ class SnsSubscriptionsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const topicArn = command.value?.trim();
 
@@ -174,10 +171,7 @@ class SnsSubscriptionsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sns (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for SNS sub-commands (topics, publish, subscriptions). */
 export class AwsSnsProcessor extends CliCommandProcessor {
     command = 'sns';
     description = 'AWS SNS operations — topics, publish, subscriptions';
@@ -192,6 +186,7 @@ export class AwsSnsProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

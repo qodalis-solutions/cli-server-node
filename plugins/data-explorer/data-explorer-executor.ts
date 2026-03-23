@@ -7,9 +7,18 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { DataExplorerRegistry } from './data-explorer-registry';
 
+/**
+ * Executes data explorer queries with timeout enforcement and row-limit truncation.
+ */
 export class DataExplorerExecutor {
     constructor(private readonly registry: DataExplorerRegistry) {}
 
+    /**
+     * Execute a query against the named data source.
+     *
+     * @param request - Contains the source name, query string, and optional parameters.
+     * @returns The query result, including rows and metadata. Never throws; errors are returned in the result.
+     */
     async executeAsync(request: DataExplorerExecuteRequest): Promise<DataExplorerResult> {
         const entry = this.registry.get(request.source);
         if (!entry) {

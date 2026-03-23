@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 
+/** Information about a connected WebSocket log-streaming client. */
 export interface CliLogWebSocketClientInfo {
     id: string;
     connectedAt: string;
@@ -181,6 +182,7 @@ export class CliLogSocketManager {
         return result;
     }
 
+    /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
         for (const entry of this._clients.values()) {
             entry.ws.terminate();

@@ -5,6 +5,7 @@ import {
     JobState,
 } from '@qodalis/cli-server-abstractions';
 
+/** Volatile, in-memory storage for job executions and state (lost on restart). */
 export class InMemoryJobStorageProvider implements ICliJobStorageProvider {
     private readonly _executions = new Map<string, JobExecution>();
     /** jobId -> execution IDs in insertion order */

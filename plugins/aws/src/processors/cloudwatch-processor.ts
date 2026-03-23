@@ -22,10 +22,7 @@ import {
     applyOutputFormat,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// cloudwatch alarms
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists CloudWatch alarms. */
 class CloudWatchAlarmsProcessor extends CliCommandProcessor {
     command = 'alarms';
     description = 'List CloudWatch alarms';
@@ -38,10 +35,12 @@ class CloudWatchAlarmsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(CloudWatchClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -70,10 +69,7 @@ class CloudWatchAlarmsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// cloudwatch logs <log-group>
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that fetches log events from a CloudWatch log group. */
 class CloudWatchLogsProcessor extends CliCommandProcessor {
     command = 'logs';
     description = 'Fetch log events from a CloudWatch log group';
@@ -88,10 +84,12 @@ class CloudWatchLogsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const logGroupName = command.value?.trim();
         if (!logGroupName) {
@@ -133,10 +131,7 @@ class CloudWatchLogsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// cloudwatch metrics <namespace>
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists CloudWatch metrics for a given namespace. */
 class CloudWatchMetricsProcessor extends CliCommandProcessor {
     command = 'metrics';
     description = 'List CloudWatch metrics for a namespace';
@@ -150,10 +145,12 @@ class CloudWatchMetricsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const namespace = command.value?.trim();
         if (!namespace) {
@@ -190,10 +187,7 @@ class CloudWatchMetricsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// cloudwatch (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for CloudWatch sub-commands (alarms, logs, metrics). */
 export class AwsCloudWatchProcessor extends CliCommandProcessor {
     command = 'cloudwatch';
     description = 'Amazon CloudWatch — alarms, logs, and metrics';
@@ -208,6 +202,7 @@ export class AwsCloudWatchProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

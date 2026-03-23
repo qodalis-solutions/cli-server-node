@@ -2,6 +2,7 @@
  * Circular buffer capturing application logs for the admin dashboard.
  */
 
+/** A single log entry captured by the ring buffer. */
 export interface LogEntry {
     timestamp: string;
     level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
@@ -9,6 +10,7 @@ export interface LogEntry {
     source: string;
 }
 
+/** Filtering and pagination parameters for querying the log buffer. */
 export interface LogQueryParams {
     level?: string;
     search?: string;
@@ -16,6 +18,7 @@ export interface LogQueryParams {
     offset?: number;
 }
 
+/** Result of a log buffer query, including matched entries and total count. */
 export interface LogQueryResult {
     entries: LogEntry[];
     total: number;
@@ -37,6 +40,7 @@ export class LogRingBuffer {
         this._buffer = new Array(capacity);
     }
 
+    /** Set the function used to broadcast new log entries (e.g. via WebSocket). */
     setBroadcastFn(fn: (message: Record<string, unknown>) => void): void {
         this._broadcastFn = fn;
     }

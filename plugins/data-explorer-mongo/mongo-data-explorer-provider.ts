@@ -9,11 +9,18 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { MongoClient } from 'mongodb';
 
+/** Connection configuration for the MongoDB data explorer provider. */
 export interface MongoConnectionOptions {
+    /** MongoDB connection URI. */
     connectionString: string;
+    /** Database name to operate on. */
     database: string;
 }
 
+/**
+ * Data explorer provider for MongoDB. Supports `db.collection.operation()` syntax
+ * as well as convenience commands like `show collections` and `show dbs`.
+ */
 export class MongoDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: MongoConnectionOptions;
 

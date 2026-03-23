@@ -9,6 +9,7 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 
+/** Options for creating a standalone CLI server instance. */
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/qcli'. */
     basePath?: string;

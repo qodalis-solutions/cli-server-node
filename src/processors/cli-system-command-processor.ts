@@ -4,6 +4,7 @@ import { CliProcessCommand } from '../abstractions/cli-process-command';
 
 const startTime = Date.now();
 
+/** Command processor that displays detailed system information (hostname, OS, CPU, memory, uptime). */
 export class CliSystemCommandProcessor extends CliCommandProcessor {
     command = 'system';
     description = 'Shows server system information';

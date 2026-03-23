@@ -12,6 +12,7 @@ import {
 import { CliJobExecutionContext } from './cli-job-execution-context';
 import { parseInterval } from './interval-parser';
 
+/** Internal state for a registered job, including timers and execution queue. */
 export interface JobRegistration {
     id: string;
     job: ICliJob;
@@ -29,6 +30,7 @@ export interface JobRegistration {
     queue: Array<{ resolve: () => void }>;
 }
 
+/** Data transfer object exposing job metadata and current state to API consumers. */
 export interface JobDto {
     id: string;
     name: string;
@@ -52,6 +54,10 @@ export interface JobDto {
 
 type BroadcastFn = (message: Record<string, unknown>) => void;
 
+/**
+ * Manages job registration, scheduling (cron / interval), execution with
+ * retry logic, overlap policies, and state persistence.
+ */
 export class CliJobScheduler {
     private readonly _registrations = new Map<string, JobRegistration>();
     private readonly _storage: ICliJobStorageProvider;
@@ -62,10 +68,18 @@ export class CliJobScheduler {
         this._storage = storage;
     }
 
+    /** Set the function used to broadcast job lifecycle events (e.g. via WebSocket). */
     setBroadcastFn(fn: BroadcastFn): void {
         this._broadcastFn = fn;
     }
 
+    /**
+     * Register a job with the scheduler.
+     *
+     * @param job - The job implementation.
+     * @param options - Scheduling and retry configuration.
+     * @returns The generated job ID.
+     */
     register(job: ICliJob, options: CliJobOptions): string {
         const id = randomUUID();
         const enabled = options.enabled !== false;
@@ -80,6 +94,7 @@ export class CliJobScheduler {
         return id;
     }
 
+    /** Load persisted job states and start timers for all active jobs. */
     async start(): Promise<void> {
         this._running = true;
 
@@ -98,6 +113,7 @@ export class CliJobScheduler {
         }
     }
 
+    /** Stop all timers, cancel running executions, and persist final states. */
     async stop(): Promise<void> {
         this._running = false;
 
@@ -118,19 +134,27 @@ export class CliJobScheduler {
         }
     }
 
+    /** Return DTOs for all registered jobs. */
     getAll(): JobDto[] {
         return Array.from(this._registrations.values()).map((reg) => this._toDto(reg));
     }
 
+    /** Return the DTO for a single job, or `undefined` if not found. */
     get(id: string): JobDto | undefined {
         const reg = this._registrations.get(id);
         return reg ? this._toDto(reg) : undefined;
     }
 
+    /** Return the internal registration for a job (used by the controller for history lookups). */
     getRegistration(id: string): JobRegistration | undefined {
         return this._registrations.get(id);
     }
 
+    /**
+     * Trigger an immediate execution of a job, respecting the configured overlap policy.
+     *
+     * @throws {JobError} If the job is not found or is already running with a 'skip' policy.
+     */
     async triggerAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -155,6 +179,7 @@ export class CliJobScheduler {
         await this._executeJobAsync(reg, 0);
     }
 
+    /** Pause a running job's schedule without cancelling the current execution. */
     async pauseAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -166,6 +191,7 @@ export class CliJobScheduler {
         this._broadcast({ type: 'job:paused', jobId: reg.id });
     }
 
+    /** Resume a paused job, restarting its schedule timer. */
     async resumeAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -177,6 +203,7 @@ export class CliJobScheduler {
         this._broadcast({ type: 'job:resumed', jobId: reg.id });
     }
 
+    /** Stop a job entirely, cancelling any running execution and clearing its timer. */
     async stopJobAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -192,6 +219,7 @@ export class CliJobScheduler {
         this._broadcast({ type: 'job:stopped', jobId: reg.id });
     }
 
+    /** Cancel the currently running execution of a job without changing its schedule. */
     async cancelCurrentAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
@@ -200,6 +228,7 @@ export class CliJobScheduler {
         reg.currentAbortController?.abort();
     }
 
+    /** Update mutable job options (schedule, retry policy, etc.) and restart timers if active. */
     async updateOptionsAsync(
         id: string,
         updates: Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy'>>,
@@ -266,8 +295,6 @@ export class CliJobScheduler {
     get storage(): ICliJobStorageProvider {
         return this._storage;
     }
-
-    // ── Private ────────────────────────────────────────────────────
 
     private _toDto(reg: JobRegistration): JobDto {
         return {
@@ -502,6 +529,7 @@ export class CliJobScheduler {
     }
 }
 
+/** Typed error thrown by the scheduler, carrying an error code and HTTP status. */
 export class JobError extends Error {
     readonly code: string;
     readonly statusCode: number;

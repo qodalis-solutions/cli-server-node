@@ -45,6 +45,7 @@ function createFileNode(name: string, content: string): FileNode {
     };
 }
 
+/** File storage provider backed by an in-memory tree structure (volatile, lost on restart). */
 export class InMemoryFileStorageProvider implements IFileStorageProvider {
     readonly name = 'in-memory';
 

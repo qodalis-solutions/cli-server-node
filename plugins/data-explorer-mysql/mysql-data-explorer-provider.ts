@@ -9,10 +9,13 @@ import {
 import * as mysql from 'mysql2/promise';
 import type { FieldPacket, RowDataPacket } from 'mysql2/promise';
 
+/** Connection configuration for the MySQL data explorer provider. */
 export interface MysqlConnectionOptions {
+    /** MySQL connection URI. */
     connectionString: string;
 }
 
+/** Data explorer provider for MySQL databases using mysql2. */
 export class MysqlDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: MysqlConnectionOptions;
 

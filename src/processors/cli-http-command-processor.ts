@@ -3,6 +3,7 @@ import { CliCommandParameterDescriptor } from '../abstractions/cli-command-param
 import { CliProcessCommand } from '../abstractions/cli-process-command';
 import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
 
+/** Sub-processor that performs HTTP GET requests. */
 class HttpGetProcessor extends CliCommandProcessor {
     command = 'get';
     description = 'Performs an HTTP GET request';
@@ -17,6 +18,7 @@ class HttpGetProcessor extends CliCommandProcessor {
     }
 }
 
+/** Sub-processor that performs HTTP POST requests. */
 class HttpPostProcessor extends CliCommandProcessor {
     command = 'post';
     description = 'Performs an HTTP POST request';
@@ -33,6 +35,14 @@ class HttpPostProcessor extends CliCommandProcessor {
     }
 }
 
+/**
+ * Executes an HTTP request and formats the response as a human-readable string.
+ * @param url - Target URL.
+ * @param method - HTTP method (GET, POST, etc.).
+ * @param body - Optional JSON request body.
+ * @param showHeaders - Whether to include response headers in output.
+ * @returns Formatted response string (truncated to 5000 chars).
+ */
 async function doRequest(url: string, method: string, body?: string, showHeaders?: boolean): Promise<string> {
     try {
         const init: RequestInit = {
@@ -73,6 +83,7 @@ async function doRequest(url: string, method: string, body?: string, showHeaders
     }
 }
 
+/** Command processor for server-side HTTP requests with `get` and `post` sub-commands. */
 export class CliHttpCommandProcessor extends CliCommandProcessor {
     command = 'http';
     description = 'Makes HTTP requests from the server';

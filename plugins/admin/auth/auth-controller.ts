@@ -3,6 +3,7 @@ import { signToken } from './jwt-service';
 import { AuthenticatedRequest, createAuthMiddleware } from './auth-middleware';
 import { AdminConfig } from '../services/admin-config';
 
+/** Tracks consecutive failed login attempts from a single IP. */
 interface FailedAttempt {
     count: number;
     firstAttemptAt: number;
@@ -11,8 +12,11 @@ interface FailedAttempt {
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60_000; // 1 minute
 
+/** Return value of {@link createAuthController}. */
 export interface AuthControllerResult {
+    /** Express router with login and user-info routes. */
     router: Router;
+    /** Interval handle for cleaning up expired rate-limit entries; clear on shutdown. */
     cleanupInterval: ReturnType<typeof setInterval>;
 }
 

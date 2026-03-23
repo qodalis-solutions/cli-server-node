@@ -14,10 +14,7 @@ import {
     applyOutputFormat,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// iam users
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists IAM users. */
 class IamUsersProcessor extends CliCommandProcessor {
     command = 'users';
     description = 'List IAM users';
@@ -30,10 +27,12 @@ class IamUsersProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(IAMClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -65,10 +64,7 @@ class IamUsersProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// iam roles
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists IAM roles. */
 class IamRolesProcessor extends CliCommandProcessor {
     command = 'roles';
     description = 'List IAM roles';
@@ -81,10 +77,12 @@ class IamRolesProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(IAMClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -116,10 +114,7 @@ class IamRolesProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// iam policies
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists customer-managed IAM policies. */
 class IamPoliciesProcessor extends CliCommandProcessor {
     command = 'policies';
     description = 'List IAM policies (local/customer-managed)';
@@ -132,10 +127,12 @@ class IamPoliciesProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(IAMClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -166,10 +163,7 @@ class IamPoliciesProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// iam (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for IAM sub-commands (users, roles, policies). */
 export class AwsIamProcessor extends CliCommandProcessor {
     command = 'iam';
     description = 'AWS IAM operations — users, roles, policies';
@@ -184,6 +178,7 @@ export class AwsIamProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

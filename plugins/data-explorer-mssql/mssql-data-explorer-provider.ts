@@ -8,10 +8,13 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import * as sql from 'mssql';
 
+/** Connection configuration for the MSSQL data explorer provider. */
 export interface MssqlConnectionOptions {
+    /** SQL Server connection string. */
     connectionString: string;
 }
 
+/** Data explorer provider for Microsoft SQL Server using the mssql package. */
 export class MssqlDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: MssqlConnectionOptions;
 

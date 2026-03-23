@@ -6,6 +6,12 @@ import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
 
 const SERVER_VERSION = '1.0.0';
 
+/**
+ * Creates an Express router for the v1 CLI API with version, capabilities, commands, and execute endpoints.
+ * @param registry - Command registry to list available processors.
+ * @param executor - Service that dispatches commands to processors.
+ * @returns Configured Express router.
+ */
 export function createCliController(
     registry: ICliCommandRegistry,
     executor: ICliCommandExecutorService,
@@ -50,6 +56,7 @@ export function createCliController(
     return router;
 }
 
+/** Maps an {@link ICliCommandProcessor} to its serializable DTO representation. */
 function mapToDescriptor(processor: ICliCommandProcessor): CliServerCommandDescriptor {
     const descriptor: CliServerCommandDescriptor = {
         command: processor.command,

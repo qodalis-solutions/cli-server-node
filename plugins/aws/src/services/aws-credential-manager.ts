@@ -1,15 +1,23 @@
 import { AwsConfigService } from './aws-config-service';
 
+/** Options for overriding region or profile when creating AWS SDK clients. */
 export interface AwsClientOptions {
     region?: string;
     profile?: string;
 }
 
+/** Manages AWS SDK client instantiation and caching based on the current configuration. */
 export class AwsCredentialManager {
     private readonly _clientCache = new Map<string, any>();
 
+    /** @param config - The AWS configuration service providing credentials and region. */
     constructor(private readonly config: AwsConfigService) {}
 
+    /**
+     * Builds an AWS SDK client configuration object from the current settings and overrides.
+     * @param overrides - Optional region/profile overrides.
+     * @returns A configuration record suitable for passing to an AWS SDK client constructor.
+     */
     getClientConfig(overrides?: AwsClientOptions): Record<string, any> {
         const config: Record<string, any> = {};
         const region = overrides?.region ?? this.config.getRegion() ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
@@ -22,6 +30,12 @@ export class AwsCredentialManager {
         return config;
     }
 
+    /**
+     * Returns a cached AWS SDK client instance, creating one if necessary.
+     * @param ClientClass - The AWS SDK client class to instantiate.
+     * @param overrides - Optional region/profile overrides for client configuration.
+     * @returns A cached instance of the requested client class.
+     */
     getClient<T>(ClientClass: new (config: Record<string, any>) => T, overrides?: AwsClientOptions): T {
         const region = overrides?.region ?? this.config.getRegion() ?? 'default';
         const profile = overrides?.profile ?? this.config.getProfile() ?? 'default';
@@ -32,6 +46,7 @@ export class AwsCredentialManager {
         return this._clientCache.get(key) as T;
     }
 
+    /** Clears the cached AWS SDK client instances, forcing re-creation on next access. */
     clearCache(): void {
         this._clientCache.clear();
     }

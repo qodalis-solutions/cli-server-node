@@ -3,6 +3,7 @@ import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
 
+/** Information about a connected WebSocket event client. */
 export interface CliWebSocketClientInfo {
     id: string;
     connectedAt: string;
@@ -16,6 +17,10 @@ interface ClientEntry {
     remoteAddress: string;
 }
 
+/**
+ * Manages WebSocket connections for server-push events and interactive shell sessions.
+ * Handles upgrades on `/ws/v1/qcli/events` and `/ws/v1/qcli/shell` paths.
+ */
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
@@ -69,7 +74,7 @@ export class CliEventSocketManager {
                 return;
             }
 
-            // Not our path — let other handlers deal with it
+            // Unrecognized path; leave for other upgrade handlers
         });
 
         this._wss.on('connection', (ws, request: IncomingMessage) => {
@@ -152,6 +157,7 @@ export class CliEventSocketManager {
         return result;
     }
 
+    /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
         for (const ws of this._clients) {
             ws.terminate();

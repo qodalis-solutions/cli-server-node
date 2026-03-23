@@ -29,9 +29,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// ---------------------------------------------------------------------------
-// aws configure set
-// ---------------------------------------------------------------------------
+/** Sub-processor that sets AWS credentials, region, and profile via `aws configure set`. */
 class AwsConfigureSetProcessor extends CliCommandProcessor {
     command = 'set';
     description = 'Set AWS credentials and region';
@@ -49,10 +47,12 @@ class AwsConfigureSetProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const key = command.args?.key as string | undefined;
         const secret = command.args?.secret as string | undefined;
@@ -84,9 +84,7 @@ class AwsConfigureSetProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// aws configure get
-// ---------------------------------------------------------------------------
+/** Sub-processor that displays the current AWS configuration (secrets masked) via `aws configure get`. */
 class AwsConfigureGetProcessor extends CliCommandProcessor {
     command = 'get';
     description = 'Show current AWS configuration (secrets masked)';
@@ -95,10 +93,12 @@ class AwsConfigureGetProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(): Promise<CliStructuredResponse> {
         const summary = this.configService.getConfigSummary();
         const entries: Record<string, string> = {};
@@ -110,27 +110,24 @@ class AwsConfigureGetProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// aws configure profiles
-// ---------------------------------------------------------------------------
+/** Sub-processor that lists available AWS profiles from ~/.aws/credentials and ~/.aws/config. */
 class AwsConfigureProfilesProcessor extends CliCommandProcessor {
     command = 'profiles';
     description = 'List available AWS profiles from ~/.aws/credentials and ~/.aws/config';
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(): Promise<CliStructuredResponse> {
         const profiles = new Set<string>();
 
         const credentialsPath = path.join(os.homedir(), '.aws', 'credentials');
         const configPath = path.join(os.homedir(), '.aws', 'config');
 
-        // Parse [profile-name] from credentials file
         this.parseProfiles(credentialsPath, /^\[([^\]]+)\]/, profiles);
-
-        // Parse [profile profile-name] or [profile-name] from config file
         this.parseProfiles(configPath, /^\[(?:profile\s+)?([^\]]+)\]/, profiles);
 
         const items = Array.from(profiles).sort();
@@ -144,6 +141,12 @@ class AwsConfigureProfilesProcessor extends CliCommandProcessor {
         return buildResponse([formatAsList(items)]);
     }
 
+    /**
+     * Parses profile names from an AWS configuration file.
+     * @param filePath - Path to the AWS credentials or config file.
+     * @param pattern - Regex to match section headers and capture profile names.
+     * @param profiles - Set to add discovered profile names to.
+     */
     private parseProfiles(filePath: string, pattern: RegExp, profiles: Set<string>): void {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
@@ -154,14 +157,12 @@ class AwsConfigureProfilesProcessor extends CliCommandProcessor {
                 }
             }
         } catch {
-            // File doesn't exist or is unreadable — skip
+            // File doesn't exist or is unreadable
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// aws configure (parent)
-// ---------------------------------------------------------------------------
+/** Parent processor for `aws configure` sub-commands (set, get, profiles). */
 class AwsConfigureProcessor extends CliCommandProcessor {
     command = 'configure';
     description = 'Manage AWS credentials and configuration';
@@ -176,14 +177,13 @@ class AwsConfigureProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 }
 
-// ---------------------------------------------------------------------------
-// aws status
-// ---------------------------------------------------------------------------
+/** Sub-processor that tests AWS connectivity via STS GetCallerIdentity. */
 class AwsStatusProcessor extends CliCommandProcessor {
     command = 'status';
     description = 'Test AWS connectivity using STS GetCallerIdentity';
@@ -192,10 +192,12 @@ class AwsStatusProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(): Promise<CliStructuredResponse> {
         try {
             const client = this.credentialManager.getClient(STSClient);
@@ -226,9 +228,7 @@ class AwsStatusProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// aws (root processor)
-// ---------------------------------------------------------------------------
+/** Root processor for all AWS CLI commands, providing access to service-specific sub-processors. */
 export class AwsCommandProcessor extends CliCommandProcessor {
     command = 'aws';
     description = 'AWS cloud resource management';
@@ -256,14 +256,17 @@ export class AwsCommandProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** Returns the credential manager used by all sub-processors. */
     getCredentialManager(): AwsCredentialManager {
         return this.credentialManager;
     }
 
+    /** Returns the configuration service used by all sub-processors. */
     getConfigService(): AwsConfigService {
         return this.configService;
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

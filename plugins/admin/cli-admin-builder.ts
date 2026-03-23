@@ -135,7 +135,6 @@ export class CliAdminBuilder {
         const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
         const statusDeps: StatusDeps = {
             getActiveWsConnections: () => eventSocketManager.getClients().length,
-            // TODO: expose getActiveShellSessions() on CliEventSocketManager
             getActiveShellSessions: () => 0,
             getRegisteredCommands: () => registry.processors.length,
             getRegisteredJobs: () => registeredJobs,

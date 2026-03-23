@@ -2,8 +2,10 @@ import { WebSocket } from 'ws';
 import * as os from 'os';
 import * as path from 'path';
 
-// Lazy-load node-pty so that importing this module does not fail when the
-// native add-on is unavailable (e.g. in CI environments without build tools).
+/**
+ * Lazy-loads node-pty to avoid import failures when the native add-on is unavailable.
+ * @throws {Error} If node-pty cannot be loaded.
+ */
 let _pty: typeof import('node-pty') | undefined;
 function getPty(): typeof import('node-pty') {
     if (!_pty) {
@@ -19,10 +21,12 @@ function getPty(): typeof import('node-pty') {
     return _pty!;
 }
 
+/** Messages sent from the WebSocket client to the shell session. */
 type ClientMessage =
     | { type: 'stdin'; data: string }
     | { type: 'resize'; cols: number; rows: number };
 
+/** Messages sent from the shell session to the WebSocket client. */
 type ServerMessage =
     | { type: 'stdout'; data: string }
     | { type: 'stderr'; data: string }
@@ -30,7 +34,15 @@ type ServerMessage =
     | { type: 'error'; message: string }
     | { type: 'ready'; shell: string; os: string };
 
+/** Manages interactive PTY shell sessions over WebSocket connections. */
 export class CliShellSessionManager {
+    /**
+     * Creates a PTY shell session bridged to the given WebSocket.
+     * @param ws - WebSocket connection for the shell session.
+     * @param cols - Initial terminal width in columns.
+     * @param rows - Initial terminal height in rows.
+     * @param command - Optional command to execute instead of an interactive shell.
+     */
     async handleSession(
         ws: WebSocket,
         cols: number,
@@ -111,6 +123,7 @@ export class CliShellSessionManager {
         });
     }
 
+    /** Determines the shell binary and arguments based on the platform and optional command. */
     private getShellInfo(command?: string): { shell: string; args: string[] } {
         if (os.platform() === 'win32') {
             const shell = 'powershell.exe';
@@ -125,6 +138,7 @@ export class CliShellSessionManager {
             : { shell, args: [] };
     }
 
+    /** Detects the best available shell on Unix systems by checking $SHELL and common paths. */
     private detectShell(): string {
         const envShell = process.env.SHELL;
         if (envShell) {
@@ -132,7 +146,7 @@ export class CliShellSessionManager {
                 require('fs').accessSync(envShell, require('fs').constants.X_OK);
                 return envShell;
             } catch {
-                // SHELL env var points to non-existent binary, fall through
+                // $SHELL binary not accessible; try common paths
             }
         }
 
@@ -149,6 +163,7 @@ export class CliShellSessionManager {
         return '/bin/sh';
     }
 
+    /** Sends a JSON message to the WebSocket if the connection is open. */
     private send(ws: WebSocket, msg: ServerMessage): void {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));

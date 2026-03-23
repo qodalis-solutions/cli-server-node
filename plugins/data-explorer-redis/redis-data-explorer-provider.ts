@@ -7,7 +7,9 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 
+/** Connection configuration for the Redis data explorer provider. */
 export interface RedisConnectionOptions {
+    /** Redis connection URI (e.g. 'redis://localhost:6379'). */
     connectionString: string;
 }
 
@@ -18,6 +20,7 @@ const ALLOWED_COMMANDS = new Set([
     'EXISTS', 'TYPE', 'MGET', 'MSET', 'SCAN', 'INFO', 'DBSIZE', 'PING', 'FLUSHDB',
 ]);
 
+/** Parse a Redis command string into an array of arguments, respecting quoted strings. */
 function parseCommandArgs(input: string): string[] {
     const args: string[] = [];
     let current = '';
@@ -51,6 +54,7 @@ function parseCommandArgs(input: string): string[] {
     return args;
 }
 
+/** Convert a raw Redis response into tabular columns and rows based on the command type. */
 function normalizeResult(
     command: string,
     args: string[],
@@ -163,6 +167,10 @@ function normalizeResult(
     return { columns: ['key', 'value'], rows: [[args[0] ?? '', result]] };
 }
 
+/**
+ * Data explorer provider for Redis. Parses raw Redis commands and returns
+ * tabular results. Only a safe subset of commands is allowed.
+ */
 export class RedisDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: RedisConnectionOptions;
 

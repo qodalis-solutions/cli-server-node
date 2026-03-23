@@ -17,17 +17,27 @@ import {
     CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 
+/** Configuration for the S3-backed file storage provider. */
 export interface S3ProviderOptions {
+    /** S3 bucket name. */
     bucket: string;
+    /** AWS region (defaults to 'us-east-1'). */
     region?: string;
+    /** Optional key prefix prepended to all virtual paths. */
     prefix?: string;
+    /** Custom S3-compatible endpoint URL (e.g. MinIO). */
     endpoint?: string;
+    /** Explicit AWS credentials; omit to use the default credential chain. */
     credentials?: {
         accessKeyId: string;
         secretAccessKey: string;
     };
 }
 
+/**
+ * File storage provider backed by Amazon S3 (or any S3-compatible service).
+ * Directories are represented by zero-byte objects with a trailing `/`.
+ */
 export class S3FileStorageProvider implements IFileStorageProvider {
     readonly name = 's3';
 

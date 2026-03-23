@@ -28,16 +28,22 @@ import {
 } from '../utils/output-helpers';
 import { paginateAll } from '../utils/pagination';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
+/**
+ * Parses an S3 URI (s3://bucket/key) into its bucket and key components.
+ * @param uri - The S3 URI to parse.
+ * @returns An object with `bucket` and `key` properties, or `null` if the URI is invalid.
+ */
 export function parseS3Uri(uri: string): { bucket: string; key: string } | null {
     const match = uri.match(/^s3:\/\/([^/]+)\/?(.*)$/);
     if (!match) return null;
     return { bucket: match[1], key: match[2] };
 }
 
+/**
+ * Formats a byte count into a human-readable string (e.g., '1.5 MB').
+ * @param bytes - The number of bytes.
+ * @returns A formatted string with the appropriate unit.
+ */
 export function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -45,10 +51,7 @@ export function formatBytes(bytes: number): string {
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-// ---------------------------------------------------------------------------
-// s3 ls
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists S3 buckets or objects within a bucket. */
 class S3LsProcessor extends CliCommandProcessor {
     command = 'ls';
     description = 'List S3 buckets or objects in a bucket';
@@ -62,10 +65,12 @@ class S3LsProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(S3Client, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -74,7 +79,6 @@ class S3LsProcessor extends CliCommandProcessor {
         const value = command.value?.trim();
 
         if (!value) {
-            // List all buckets
             try {
                 const response = await client.send(new ListBucketsCommand({}));
                 const buckets = response.Buckets ?? [];
@@ -95,7 +99,6 @@ class S3LsProcessor extends CliCommandProcessor {
             }
         }
 
-        // List objects in a bucket
         const parsed = parseS3Uri(value);
         if (!parsed) {
             return buildErrorResponse(`Invalid S3 URI: "${value}". Expected format: s3://bucket[/prefix]`);
@@ -130,10 +133,7 @@ class S3LsProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 cp
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that copies objects between S3 locations (S3-to-S3 only). */
 class S3CpProcessor extends CliCommandProcessor {
     command = 'cp';
     description = 'Copy objects between S3 locations (S3-to-S3 only)';
@@ -147,10 +147,12 @@ class S3CpProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const source = command.value?.trim();
         const dest = command.args?.dest as string | undefined;
@@ -193,10 +195,7 @@ class S3CpProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 rm
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that deletes an S3 object, with optional dry-run support. */
 class S3RmProcessor extends CliCommandProcessor {
     command = 'rm';
     description = 'Delete an S3 object';
@@ -210,10 +209,12 @@ class S3RmProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const value = command.value?.trim();
         if (!value) {
@@ -250,10 +251,7 @@ class S3RmProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 mb (make bucket)
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that creates a new S3 bucket. */
 class S3MbProcessor extends CliCommandProcessor {
     command = 'mb';
     description = 'Create an S3 bucket';
@@ -266,10 +264,12 @@ class S3MbProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const bucketName = command.value?.trim();
         if (!bucketName) {
@@ -289,10 +289,7 @@ class S3MbProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 rb (remove bucket)
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that deletes an S3 bucket, with optional dry-run support. */
 class S3RbProcessor extends CliCommandProcessor {
     command = 'rb';
     description = 'Delete an S3 bucket';
@@ -306,10 +303,12 @@ class S3RbProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const bucketName = command.value?.trim();
         if (!bucketName) {
@@ -335,10 +334,7 @@ class S3RbProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 presign
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that generates a pre-signed URL for an S3 object. */
 class S3PresignProcessor extends CliCommandProcessor {
     command = 'presign';
     description = 'Generate a pre-signed URL for an S3 object';
@@ -352,10 +348,12 @@ class S3PresignProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const value = command.value?.trim();
         if (!value) {
@@ -385,7 +383,7 @@ class S3PresignProcessor extends CliCommandProcessor {
 
             return buildResponse([
                 { type: 'text', value: url },
-                { type: 'text', value: `Expires in ${expiresIn} seconds.`, style: 'muted' },
+                { type: 'text', value: `Expires in ${expiresIn} seconds.`, style: 'info' },
             ]);
         } catch (err: any) {
             return buildErrorResponse(`Failed to generate pre-signed URL: ${err.message ?? err}`);
@@ -393,10 +391,7 @@ class S3PresignProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// s3 (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for S3 sub-commands (ls, cp, rm, mb, rb, presign). */
 export class AwsS3Processor extends CliCommandProcessor {
     command = 's3';
     description = 'Amazon S3 operations — list, copy, remove objects and buckets';
@@ -414,6 +409,7 @@ export class AwsS3Processor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }

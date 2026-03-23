@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+/** Dependencies injected into the status controller for runtime metrics. */
 export interface StatusDeps {
     getActiveWsConnections: () => number;
     getActiveShellSessions: () => number;

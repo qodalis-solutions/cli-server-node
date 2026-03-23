@@ -8,10 +8,13 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { Client } from 'pg';
 
+/** Connection configuration for the PostgreSQL data explorer provider. */
 export interface PostgresConnectionOptions {
+    /** PostgreSQL connection URI. */
     connectionString: string;
 }
 
+/** Data explorer provider for PostgreSQL databases using the `pg` client. */
 export class PostgresDataExplorerProvider implements IDataExplorerProvider {
     private readonly connectionOptions: PostgresConnectionOptions;
 

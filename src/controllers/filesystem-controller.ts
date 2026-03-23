@@ -35,7 +35,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
 
     const upload = multer({ storage: multer.memoryStorage() });
 
-    // ------------------------------------------------------------------ ls
     router.get('/ls', async (req: Request, res: Response) => {
         try {
             const dirPath = req.query.path as string | undefined;
@@ -51,7 +50,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // ----------------------------------------------------------------- cat
     router.get('/cat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
@@ -67,7 +65,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // ---------------------------------------------------------------- stat
     router.get('/stat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
@@ -83,7 +80,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // ------------------------------------------------------------ download
     router.get('/download', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
@@ -104,7 +100,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // -------------------------------------------------------------- upload
     router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
         try {
             const targetPath = req.body?.path as string | undefined;
@@ -125,7 +120,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // --------------------------------------------------------------- mkdir
     router.post('/mkdir', async (req: Request, res: Response) => {
         try {
             const dirPath = req.body?.path as string | undefined;
@@ -141,7 +135,6 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    // ----------------------------------------------------------------- rm
     router.delete('/rm', async (req: Request, res: Response) => {
         try {
             const targetPath = req.query.path as string | undefined;

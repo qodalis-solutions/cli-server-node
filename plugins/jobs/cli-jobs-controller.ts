@@ -2,19 +2,36 @@ import { Router } from 'express';
 import { CliJobScheduler, JobError } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 
+/**
+ * Creates the jobs REST controller router.
+ *
+ * Routes (relative to mount point):
+ * - GET    /            - list all jobs
+ * - GET    /:id         - single job details
+ * - POST   /:id/trigger - trigger immediate execution
+ * - POST   /:id/pause   - pause scheduled execution
+ * - POST   /:id/resume  - resume a paused job
+ * - POST   /:id/stop    - stop job and cancel if running
+ * - POST   /:id/cancel  - cancel current execution only
+ * - PUT    /:id         - update job options
+ * - GET    /:id/history - paginated execution history
+ * - GET    /:id/history/:execId - single execution with full logs
+ *
+ * @param scheduler - The job scheduler managing registrations and execution.
+ * @param storage - Storage provider for execution history lookups.
+ * @returns An Express router.
+ */
 export function createCliJobsController(
     scheduler: CliJobScheduler,
     storage: ICliJobStorageProvider,
 ): Router {
     const router = Router();
 
-    // GET / — list all jobs
     router.get('/', (_req, res) => {
         const jobs = scheduler.getAll();
         res.json(jobs);
     });
 
-    // GET /:id — single job details
     router.get('/:id', (req, res) => {
         const job = scheduler.get(req.params.id);
         if (!job) {
@@ -23,7 +40,6 @@ export function createCliJobsController(
         res.json(job);
     });
 
-    // POST /:id/trigger — trigger immediate execution
     router.post('/:id/trigger', async (req, res) => {
         try {
             await scheduler.triggerAsync(req.params.id);
@@ -33,7 +49,6 @@ export function createCliJobsController(
         }
     });
 
-    // POST /:id/pause — pause scheduled execution
     router.post('/:id/pause', async (req, res) => {
         try {
             await scheduler.pauseAsync(req.params.id);
@@ -43,7 +58,6 @@ export function createCliJobsController(
         }
     });
 
-    // POST /:id/resume — resume a paused job
     router.post('/:id/resume', async (req, res) => {
         try {
             await scheduler.resumeAsync(req.params.id);
@@ -53,7 +67,6 @@ export function createCliJobsController(
         }
     });
 
-    // POST /:id/stop — stop job + cancel if running
     router.post('/:id/stop', async (req, res) => {
         try {
             await scheduler.stopJobAsync(req.params.id);
@@ -63,7 +76,6 @@ export function createCliJobsController(
         }
     });
 
-    // POST /:id/cancel — cancel current execution only
     router.post('/:id/cancel', async (req, res) => {
         try {
             await scheduler.cancelCurrentAsync(req.params.id);
@@ -73,7 +85,6 @@ export function createCliJobsController(
         }
     });
 
-    // PUT /:id — update options (patch semantics)
     router.put('/:id', async (req, res) => {
         try {
             const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy } = req.body ?? {};
@@ -95,7 +106,6 @@ export function createCliJobsController(
         }
     });
 
-    // GET /:id/history — paginated execution history
     router.get('/:id/history', async (req, res) => {
         const reg = scheduler.getRegistration(req.params.id);
         if (!reg) {
@@ -122,7 +132,6 @@ export function createCliJobsController(
         });
     });
 
-    // GET /:id/history/:execId — single execution with full logs
     router.get('/:id/history/:execId', async (req, res) => {
         const reg = scheduler.getRegistration(req.params.id);
         if (!reg) {
@@ -140,6 +149,7 @@ export function createCliJobsController(
     return router;
 }
 
+/** Map a caught error to an appropriate HTTP response. */
 function handleError(res: import('express').Response, err: unknown): void {
     if (err instanceof JobError) {
         res.status(err.statusCode).json({ error: err.message, code: err.code });

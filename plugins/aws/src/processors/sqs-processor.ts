@@ -23,10 +23,7 @@ import {
     isDryRun,
 } from '../utils/output-helpers';
 
-// ---------------------------------------------------------------------------
-// sqs list
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that lists SQS queues. */
 class SqsListProcessor extends CliCommandProcessor {
     command = 'list';
     description = 'List SQS queues';
@@ -39,10 +36,12 @@ class SqsListProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const client = this.credentialManager.getClient(SQSClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
@@ -64,10 +63,7 @@ class SqsListProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sqs send
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that sends a message to an SQS queue. */
 class SqsSendProcessor extends CliCommandProcessor {
     command = 'send';
     description = 'Send a message to an SQS queue';
@@ -81,10 +77,12 @@ class SqsSendProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const queueUrl = command.value?.trim();
         if (!queueUrl) {
@@ -115,10 +113,7 @@ class SqsSendProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sqs receive
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that receives messages from an SQS queue. */
 class SqsReceiveProcessor extends CliCommandProcessor {
     command = 'receive';
     description = 'Receive messages from an SQS queue';
@@ -132,10 +127,12 @@ class SqsReceiveProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const queueUrl = command.value?.trim();
         if (!queueUrl) {
@@ -169,10 +166,7 @@ class SqsReceiveProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sqs purge
-// ---------------------------------------------------------------------------
-
+/** Sub-processor that purges all messages from an SQS queue, with optional dry-run support. */
 class SqsPurgeProcessor extends CliCommandProcessor {
     command = 'purge';
     description = 'Purge all messages from an SQS queue';
@@ -186,10 +180,12 @@ class SqsPurgeProcessor extends CliCommandProcessor {
         super();
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
 
+    /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
         const queueUrl = command.value?.trim();
         if (!queueUrl) {
@@ -215,10 +211,7 @@ class SqsPurgeProcessor extends CliCommandProcessor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// sqs (parent)
-// ---------------------------------------------------------------------------
-
+/** Parent processor for SQS sub-commands (list, send, receive, purge). */
 export class AwsSqsProcessor extends CliCommandProcessor {
     command = 'sqs';
     description = 'AWS SQS operations — list, send, receive, purge';
@@ -234,6 +227,7 @@ export class AwsSqsProcessor extends CliCommandProcessor {
         ];
     }
 
+    /** @inheritdoc */
     async handleAsync(): Promise<string> {
         return '';
     }
