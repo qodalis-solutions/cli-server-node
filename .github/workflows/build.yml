@@ -32,6 +32,14 @@ jobs:
           cd ../filesystem-sqlite && npx tsc
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
+          cd ../data-explorer && npx tsc
+          cd ../data-explorer-sql && npm install && npx tsc
+          cd ../data-explorer-mongo && npm install && npx tsc
+          cd ../data-explorer-postgres && npm install && npx tsc
+          cd ../data-explorer-mysql && npm install && npx tsc
+          cd ../data-explorer-mssql && npm install && npx tsc
+          cd ../data-explorer-redis && npm install && npx tsc
+          cd ../data-explorer-elasticsearch && npm install && npx tsc
           cd ../admin && npm install && npx tsc
           cd ../aws && npm install && npx tsc
 
