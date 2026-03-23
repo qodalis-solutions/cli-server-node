@@ -33,6 +33,7 @@ jobs:
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
           cd ../admin && npm install && npx tsc
+          cd ../aws && npm install && npx tsc
 
       - name: Build
         run: npm run build

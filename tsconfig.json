@@ -26,5 +26,5 @@
         }
     },
     "include": ["src/**/*", "plugins/**/*"],
-    "exclude": ["node_modules", "dist", "src/__tests__", "plugins/**/__tests__", "plugins/**/*.test.ts"]
+    "exclude": ["node_modules", "dist", "src/__tests__", "plugins/**/__tests__", "plugins/**/*.test.ts", "plugins/aws", "plugins/admin"]
 }
