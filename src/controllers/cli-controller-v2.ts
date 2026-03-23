@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { ICliCommandProcessor } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
+import { createLogger } from '../utils/logger';
 
+const logger = createLogger('CliControllerV2');
 const SERVER_VERSION = '2.0.0';
 
 /**
@@ -30,6 +32,7 @@ export function createCliControllerV2(
 
     router.post('/execute', async (req, res) => {
         const command = req.body;
+        logger.debug('Executing command (v2): %s', command.command);
         const response = await executor.executeAsync(command);
         res.json(response);
     });

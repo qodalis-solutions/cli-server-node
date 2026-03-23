@@ -91,5 +91,8 @@ export { CliHttpCommandProcessor } from './processors/cli-http-command-processor
 export { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
 export { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
 
+// Utilities
+export { Logger, createLogger } from './utils/logger';
+
 // Server factory
 export { createCliServer, CliServerOptions } from './create-cli-server';

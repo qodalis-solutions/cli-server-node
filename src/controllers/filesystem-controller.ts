@@ -8,6 +8,9 @@ import {
     IsADirectoryError,
     FileExistsError,
 } from '@qodalis/cli-server-plugin-filesystem';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('FileSystem');
 
 /**
  * Maps provider errors to appropriate HTTP status codes and sends a JSON error response.
@@ -38,6 +41,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.get('/ls', async (req: Request, res: Response) => {
         try {
             const dirPath = req.query.path as string | undefined;
+            logger.debug('ls path=%s', dirPath);
             if (!dirPath) {
                 res.status(400).json({ error: 'Missing required query parameter: path' });
                 return;
@@ -46,6 +50,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             const entries = await provider.list(dirPath);
             res.json({ entries });
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to ls: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to ls: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -53,6 +62,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.get('/cat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
+            logger.debug('cat path=%s', filePath);
             if (!filePath) {
                 res.status(400).json({ error: 'Missing required query parameter: path' });
                 return;
@@ -61,6 +71,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             const content = await provider.readFile(filePath);
             res.json({ content });
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to cat: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to cat: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -68,6 +83,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.get('/stat', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
+            logger.debug('stat path=%s', filePath);
             if (!filePath) {
                 res.status(400).json({ error: 'Missing required query parameter: path' });
                 return;
@@ -76,6 +92,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             const fileStat = await provider.stat(filePath);
             res.json(fileStat);
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to stat: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to stat: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -83,6 +104,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.get('/download', async (req: Request, res: Response) => {
         try {
             const filePath = req.query.path as string | undefined;
+            logger.debug('download path=%s', filePath);
             if (!filePath) {
                 res.status(400).json({ error: 'Missing required query parameter: path' });
                 return;
@@ -96,6 +118,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
 
             stream.pipe(res);
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to download: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to download: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -103,6 +130,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
         try {
             const targetPath = req.body?.path as string | undefined;
+            logger.debug('upload path=%s', targetPath);
             if (!targetPath) {
                 res.status(400).json({ error: 'Missing required field: path' });
                 return;
@@ -116,6 +144,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             await provider.uploadFile(targetPath, req.file.buffer);
             res.json({ path: targetPath, size: req.file.size });
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to upload: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to upload: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -123,6 +156,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.post('/mkdir', async (req: Request, res: Response) => {
         try {
             const dirPath = req.body?.path as string | undefined;
+            logger.debug('mkdir path=%s', dirPath);
             if (!dirPath) {
                 res.status(400).json({ error: 'Missing required field: path' });
                 return;
@@ -131,6 +165,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             await provider.mkdir(dirPath, true);
             res.json({ path: dirPath });
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to mkdir: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to mkdir: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });
@@ -138,6 +177,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
     router.delete('/rm', async (req: Request, res: Response) => {
         try {
             const targetPath = req.query.path as string | undefined;
+            logger.debug('rm path=%s', targetPath);
             if (!targetPath) {
                 res.status(400).json({ error: 'Missing required query parameter: path' });
                 return;
@@ -146,6 +186,11 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
             await provider.remove(targetPath, true);
             res.json({ deleted: targetPath });
         } catch (err) {
+            if (err instanceof PermissionDeniedError) {
+                logger.warn('Failed to rm: %s', (err as Error).message ?? err);
+            } else {
+                logger.error('Failed to rm: %s', (err as Error).message ?? err);
+            }
             handleError(err, res);
         }
     });

@@ -1,4 +1,7 @@
 import { ICliCommandProcessor } from '../abstractions';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('CommandRegistry');
 
 /** Registry that stores and looks up CLI command processors by command name. */
 export interface ICliCommandRegistry {
@@ -25,6 +28,7 @@ export class CliCommandRegistry implements ICliCommandRegistry {
 
     register(processor: ICliCommandProcessor): void {
         this._processors.set(processor.command.toLowerCase(), processor);
+        logger.debug('Registered processor: %s', processor.command);
     }
 
     findProcessor(command: string, chainCommands?: string[]): ICliCommandProcessor | undefined {

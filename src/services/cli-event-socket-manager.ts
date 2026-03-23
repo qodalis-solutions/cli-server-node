@@ -2,6 +2,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('EventSocket');
 
 /** Information about a connected WebSocket event client. */
 export interface CliWebSocketClientInfo {
@@ -79,19 +82,25 @@ export class CliEventSocketManager {
 
         this._wss.on('connection', (ws, request: IncomingMessage) => {
             this._clients.add(ws);
+            const id = `evt-${this._nextClientId++}`;
             this._clientMeta.set(ws, {
-                id: `evt-${this._nextClientId++}`,
+                id,
                 connectedAt: new Date(),
                 remoteAddress: request.socket.remoteAddress ?? 'unknown',
             });
+            logger.info('Client connected (id=%s)', id);
             ws.send(JSON.stringify({ type: 'connected' }));
 
             ws.on('close', () => {
+                const meta = this._clientMeta.get(ws);
+                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
             });
 
             ws.on('error', () => {
+                const meta = this._clientMeta.get(ws);
+                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
             });
@@ -114,6 +123,7 @@ export class CliEventSocketManager {
      * Broadcast a disconnect event to all connected clients and close sockets.
      */
     async broadcastDisconnect(): Promise<void> {
+        logger.info('Broadcasting disconnect to %d clients', this._clients.size);
         const message = JSON.stringify({ type: 'disconnect' });
 
         const promises: Promise<void>[] = [];

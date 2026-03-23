@@ -8,6 +8,9 @@ import { createCliVersionController } from './controllers/cli-version-controller
 import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
+import { createLogger } from './utils/logger';
+
+const logger = createLogger('Server');
 
 /** Options for creating a standalone CLI server instance. */
 export interface CliServerOptions {
@@ -84,6 +87,8 @@ export function createCliServer(options: CliServerOptions = {}): {
 
     const eventSocketManager = new CliEventSocketManager();
     const logSocketManager = new CliLogSocketManager();
+
+    logger.info('CLI server created with %d processors', registry.processors.length);
 
     return { app, registry, builder, eventSocketManager, logSocketManager };
 }

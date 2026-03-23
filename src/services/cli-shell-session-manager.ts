@@ -1,6 +1,9 @@
 import { WebSocket } from 'ws';
 import * as os from 'os';
 import * as path from 'path';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('ShellSession');
 
 /**
  * Lazy-loads node-pty to avoid import failures when the native add-on is unavailable.
@@ -62,10 +65,13 @@ export class CliShellSessionManager {
                 env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
             });
         } catch (err: any) {
+            logger.error('Shell session error: %s', err.message ?? err);
             this.send(ws, { type: 'error', message: err.message });
             ws.close();
             return;
         }
+
+        logger.info('Shell session started (shell=%s, cols=%d, rows=%d)', shell, cols, rows);
 
         const detectedOs = os.platform() === 'win32'
             ? 'win32'
@@ -84,6 +90,7 @@ export class CliShellSessionManager {
         });
 
         ptyProcess.onExit(({ exitCode }) => {
+            logger.info('Shell session ended');
             this.send(ws, { type: 'exit', code: exitCode });
             if (ws.readyState === WebSocket.OPEN) {
                 ws.close();
@@ -103,6 +110,7 @@ export class CliShellSessionManager {
                 }
             } catch {
                 // Ignore malformed messages
+                logger.debug('Ignoring malformed WebSocket message');
             }
         });
 
@@ -111,14 +119,17 @@ export class CliShellSessionManager {
                 ptyProcess.kill();
             } catch {
                 // Already exited
+                logger.debug('Process already exited, cleanup skipped');
             }
         });
 
-        ws.on('error', () => {
+        ws.on('error', (error) => {
+            logger.error('Shell session error: %s', (error as Error).message ?? error);
             try {
                 ptyProcess.kill();
             } catch {
                 // Already exited
+                logger.debug('Process already exited, cleanup skipped');
             }
         });
     }
