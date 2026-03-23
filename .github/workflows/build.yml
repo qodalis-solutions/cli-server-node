@@ -26,15 +26,20 @@ jobs:
 
       - name: Install plugin dependencies
         run: |
-          cd plugins/data-explorer-sql && npm install --omit=dev
-          cd ../data-explorer-mongo && npm install --omit=dev
-          cd ../data-explorer-postgres && npm install --omit=dev
-          cd ../data-explorer-mysql && npm install --omit=dev
-          cd ../data-explorer-mssql && npm install --omit=dev
-          cd ../data-explorer-redis && npm install --omit=dev
-          cd ../data-explorer-elasticsearch && npm install --omit=dev
-          cd ../admin && npm install
-          cd ../aws && npm install
+          for plugin in data-explorer-sql data-explorer-mongo data-explorer-postgres data-explorer-mysql data-explorer-mssql data-explorer-redis data-explorer-elasticsearch; do
+            cd plugins/$plugin && npm install --omit=dev && cd ../..
+          done
+          cd plugins/admin && npm install && cd ../..
+          cd plugins/aws && npm install && cd ../..
+
+      - name: Hoist plugin runtime deps for test resolution
+        run: |
+          for plugin in data-explorer-sql data-explorer-mongo data-explorer-postgres data-explorer-mysql data-explorer-mssql data-explorer-redis data-explorer-elasticsearch; do
+            if [ -d "plugins/$plugin/node_modules" ]; then
+              cp -rn plugins/$plugin/node_modules/* node_modules/ 2>/dev/null || true
+              rm -rf plugins/$plugin/node_modules
+            fi
+          done
 
       - name: Build plugins
         run: |
