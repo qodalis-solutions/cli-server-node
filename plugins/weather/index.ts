@@ -7,12 +7,14 @@ import {
     ICliCommandParameterDescriptor,
 } from '@qodalis/cli-server-abstractions';
 
+/** Extract the location from a command's args or value, defaulting to 'London'. */
 function getLocation(command: CliProcessCommand): string {
     if (command.args?.location) return String(command.args.location);
     if (command.value) return command.value;
     return 'London';
 }
 
+/** Fetch raw weather JSON from wttr.in for the given location. */
 async function fetchWeatherData(location: string): Promise<any> {
     const url = `https://wttr.in/${encodeURIComponent(location)}?format=j1`;
     const res = await fetch(url, {
@@ -22,6 +24,7 @@ async function fetchWeatherData(location: string): Promise<any> {
     return res.json();
 }
 
+/** Format current weather conditions as a human-readable multi-line string. */
 async function formatCurrentWeather(location: string): Promise<string> {
     try {
         const data = await fetchWeatherData(location);
@@ -44,6 +47,7 @@ async function formatCurrentWeather(location: string): Promise<string> {
     }
 }
 
+/** Format a 3-day weather forecast as a human-readable multi-line string. */
 async function formatForecast(location: string): Promise<string> {
     try {
         const data = await fetchWeatherData(location);
@@ -76,6 +80,7 @@ const locationParam: ICliCommandParameterDescriptor = new CliCommandParameterDes
     'London',
 );
 
+/** Processor for the `weather current` sub-command. */
 class WeatherCurrentProcessor extends CliCommandProcessor {
     command = 'current';
     description = 'Shows current weather conditions';
@@ -86,6 +91,7 @@ class WeatherCurrentProcessor extends CliCommandProcessor {
     }
 }
 
+/** Processor for the `weather forecast` sub-command. */
 class WeatherForecastProcessor extends CliCommandProcessor {
     command = 'forecast';
     description = 'Shows a 3-day weather forecast';
@@ -96,6 +102,7 @@ class WeatherForecastProcessor extends CliCommandProcessor {
     }
 }
 
+/** Root processor for the `weather` command, delegating to current/forecast sub-commands. */
 class CliWeatherCommandProcessor extends CliCommandProcessor {
     command = 'weather';
     description = 'Shows weather information for a location';
@@ -110,6 +117,7 @@ class CliWeatherCommandProcessor extends CliCommandProcessor {
     }
 }
 
+/** CLI module providing weather information commands (current conditions and forecast). */
 export class WeatherModule extends CliModule {
     name = 'weather';
     version = '1.0.0';

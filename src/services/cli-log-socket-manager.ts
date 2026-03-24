@@ -1,7 +1,11 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
+import { createLogger } from '../utils/logger';
 
+const logger = createLogger('LogSocket');
+
+/** Information about a connected WebSocket log-streaming client. */
 export interface CliLogWebSocketClientInfo {
     id: string;
     connectedAt: string;
@@ -142,6 +146,7 @@ export class CliLogSocketManager {
      * Send a disconnect message to all clients and close connections.
      */
     async broadcastDisconnect(): Promise<void> {
+        logger.info('Broadcasting disconnect to %d log clients', this._clients.size);
         const disconnectMsg = JSON.stringify({ type: 'disconnect' });
         const promises: Promise<void>[] = [];
 
@@ -181,6 +186,7 @@ export class CliLogSocketManager {
         return result;
     }
 
+    /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
         for (const entry of this._clients.values()) {
             entry.ws.terminate();
@@ -202,12 +208,15 @@ export class CliLogSocketManager {
         this._clients.set(id, entry);
 
         ws.send(JSON.stringify({ type: 'connected' }));
+        logger.info('Log client connected (id=%s, level=%s)', id, levelFilter ?? 'all');
 
         ws.on('close', () => {
+            logger.info('Log client disconnected (id=%s)', id);
             this._clients.delete(id);
         });
 
         ws.on('error', () => {
+            logger.info('Log client disconnected (id=%s)', id);
             this._clients.delete(id);
         });
     }

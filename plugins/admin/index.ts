@@ -1,4 +1,4 @@
-export { CliAdminBuilder, CliAdminBuildDeps, CliAdminPluginResult } from './cli-admin-builder';
+export { CliAdminBuilder, CliAdminBuildDeps, CliAdminPluginResult, IExecutorLike } from './cli-admin-builder';
 export { LogRingBuffer, LogEntry, LogQueryParams, LogQueryResult } from './services/log-ring-buffer';
 export { ModuleRegistry, ModuleInfo, IRegistryLike, IBuilderLike } from './services/module-registry';
 export { AdminConfig, AdminCredentials, ConfigSection } from './services/admin-config';

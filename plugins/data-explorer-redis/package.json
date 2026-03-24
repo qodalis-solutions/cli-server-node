@@ -1,0 +1,38 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer-redis",
+    "version": "1.0.0-beta.5",
+    "description": "Redis data explorer provider plugin for Qodalis CLI server",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "data-explorer",
+        "redis",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer-redis"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2",
+        "ioredis": "^5.4.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "^5.6.0"
+    }
+}

@@ -4,6 +4,7 @@ import { CliCommandExecutorService } from '../services/cli-command-executor-serv
 import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
 import { DefaultLibraryAuthor } from '../abstractions/cli-command-author';
 import { CliProcessCommand } from '../abstractions/cli-process-command';
+import { CliStructuredResponse } from '../abstractions';
 
 function makeProcessor(
     command: string,
@@ -15,6 +16,20 @@ function makeProcessor(
         author: DefaultLibraryAuthor,
         version: '1.0.0',
         handleAsync: handler,
+    };
+}
+
+function makeStructuredProcessor(
+    command: string,
+    handler: (cmd: CliProcessCommand) => Promise<CliStructuredResponse>,
+): ICliCommandProcessor {
+    return {
+        command,
+        description: `${command} structured processor`,
+        author: DefaultLibraryAuthor,
+        version: '1.0.0',
+        handleAsync: async () => 'fallback',
+        handleStructuredAsync: handler,
     };
 }
 
@@ -92,6 +107,78 @@ describe('CliCommandExecutorService', () => {
         expect(result.outputs[0]).toEqual({
             type: 'text',
             value: 'Error executing command: raw string error',
+            style: 'error',
+        });
+    });
+
+    it('should prefer handleStructuredAsync when available', async () => {
+        registry.register(
+            makeStructuredProcessor('table-cmd', async () => ({
+                exitCode: 0,
+                outputs: [
+                    { type: 'table', headers: ['Name', 'Value'], rows: [['a', '1']] },
+                ],
+            })),
+        );
+
+        const result = await executor.executeAsync(makeCommand('table-cmd'));
+
+        expect(result.exitCode).toBe(0);
+        expect(result.outputs).toHaveLength(1);
+        expect(result.outputs[0]).toEqual({
+            type: 'table',
+            headers: ['Name', 'Value'],
+            rows: [['a', '1']],
+        });
+    });
+
+    it('should fall back to handleAsync when handleStructuredAsync is not defined', async () => {
+        registry.register(
+            makeProcessor('plain', async () => 'plain text'),
+        );
+
+        const result = await executor.executeAsync(makeCommand('plain'));
+
+        expect(result.exitCode).toBe(0);
+        expect(result.outputs).toHaveLength(1);
+        expect(result.outputs[0]).toEqual({ type: 'text', value: 'plain text' });
+    });
+
+    it('should handle errors from handleStructuredAsync', async () => {
+        registry.register(
+            makeStructuredProcessor('structured-fail', async () => {
+                throw new Error('structured boom');
+            }),
+        );
+
+        const result = await executor.executeAsync(makeCommand('structured-fail'));
+
+        expect(result.exitCode).toBe(1);
+        expect(result.outputs).toHaveLength(1);
+        expect(result.outputs[0]).toEqual({
+            type: 'text',
+            value: 'Error executing command: structured boom',
+            style: 'error',
+        });
+    });
+
+    it('should use structured response exitCode as-is', async () => {
+        registry.register(
+            makeStructuredProcessor('exit-one', async () => ({
+                exitCode: 1,
+                outputs: [
+                    { type: 'text', value: 'something went wrong', style: 'error' },
+                ],
+            })),
+        );
+
+        const result = await executor.executeAsync(makeCommand('exit-one'));
+
+        expect(result.exitCode).toBe(1);
+        expect(result.outputs).toHaveLength(1);
+        expect(result.outputs[0]).toEqual({
+            type: 'text',
+            value: 'something went wrong',
             style: 'error',
         });
     });

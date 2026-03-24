@@ -4,15 +4,23 @@ import * as path from 'path';
 
 const SERVER_VERSION = '2.0.0';
 
+/**
+ * Creates an Express router for API version discovery and server capabilities.
+ * @returns Router with `/versions` and `/capabilities` endpoints.
+ */
 export function createCliVersionController(): Router {
     const router = Router();
 
-    router.get('/version', (_req, res) => {
+    router.get('/versions', (_req, res) => {
         res.json({
-            supportedVersions: [1, 2],
-            preferredVersion: 2,
+            supportedVersions: [1],
+            preferredVersion: 1,
             serverVersion: SERVER_VERSION,
         });
+    });
+
+    router.get('/version', (_req, res) => {
+        res.redirect(301, 'versions');
     });
 
     router.get('/capabilities', (_req, res) => {
@@ -32,6 +40,7 @@ export function createCliVersionController(): Router {
             os: detectedOs,
             shellPath,
             version: SERVER_VERSION,
+            streaming: true,
         });
     });
 

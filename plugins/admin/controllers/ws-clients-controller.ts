@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+/** Dependency providing access to connected WebSocket client metadata. */
 export interface WsClientsDeps {
     getClients: () => Array<{
         id: string;

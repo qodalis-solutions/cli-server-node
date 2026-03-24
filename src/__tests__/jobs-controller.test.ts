@@ -44,7 +44,7 @@ function setup() {
 
     app = express();
     app.use(express.json());
-    app.use('/api/v1/qcli/jobs', plugin.router);
+    app.use(plugin.prefix, plugin.router);
 
     jobIds = {};
     const all = plugin.scheduler.getAll();

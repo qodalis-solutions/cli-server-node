@@ -5,7 +5,9 @@ import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
 import { createCliJobsController } from './cli-jobs-controller';
 
 export interface CliJobsPluginResult {
-    /** Express router — mount at your preferred path (e.g. `/api/v1/qcli/jobs`). */
+    /** Default mount prefix for this plugin. */
+    prefix: '/api/v1/qcli/jobs';
+    /** Express router for the jobs API. */
     router: Router;
     /** The job scheduler instance. Call `start()` / `stop()` to manage its lifecycle. */
     scheduler: CliJobScheduler;
@@ -66,6 +68,6 @@ export class CliJobsBuilder {
 
         const router = createCliJobsController(scheduler, storage);
 
-        return { router, scheduler };
+        return { prefix: '/api/v1/qcli/jobs', router, scheduler };
     }
 }

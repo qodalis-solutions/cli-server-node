@@ -1,5 +1,6 @@
 import { ICliJobLogger, JobLogEntry, JobLogLevel } from '@qodalis/cli-server-abstractions';
 
+/** In-memory logger that collects structured log entries during a job execution. */
 export class CliJobLogger implements ICliJobLogger {
     private readonly _entries: JobLogEntry[] = [];
 
@@ -19,6 +20,7 @@ export class CliJobLogger implements ICliJobLogger {
         this._log('error', message);
     }
 
+    /** Returns all log entries captured so far. */
     get entries(): JobLogEntry[] {
         return this._entries;
     }

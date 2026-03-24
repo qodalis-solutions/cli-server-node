@@ -2,6 +2,7 @@ import { CliCommandProcessor } from '../abstractions/cli-command-processor';
 import { CliProcessCommand } from '../abstractions/cli-process-command';
 import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
 
+/** Sub-processor that encodes text to Base64. */
 class Base64EncodeProcessor extends CliCommandProcessor {
     command = 'encode';
     description = 'Encodes text to Base64';
@@ -13,6 +14,7 @@ class Base64EncodeProcessor extends CliCommandProcessor {
     }
 }
 
+/** Sub-processor that decodes Base64 to text. */
 class Base64DecodeProcessor extends CliCommandProcessor {
     command = 'decode';
     description = 'Decodes Base64 to text';
@@ -28,6 +30,7 @@ class Base64DecodeProcessor extends CliCommandProcessor {
     }
 }
 
+/** Command processor for Base64 encoding and decoding with `encode` and `decode` sub-commands. */
 export class CliBase64CommandProcessor extends CliCommandProcessor {
     command = 'base64';
     description = 'Encodes or decodes Base64 text';

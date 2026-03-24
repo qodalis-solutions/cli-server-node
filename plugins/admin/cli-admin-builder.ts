@@ -1,5 +1,5 @@
 import { Router, RequestHandler, static as expressStatic } from 'express';
-import { ICliModule, ICliCommandProcessor } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
 import { createStatusController, StatusDeps } from './controllers/status-controller';
@@ -14,6 +14,11 @@ import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import * as crypto from 'crypto';
 
+/** Executor-like interface — the admin plugin only needs to register filters. */
+export interface IExecutorLike {
+    addFilter(filter: ICliProcessorFilter): void;
+}
+
 export interface CliAdminBuildDeps {
     /** The command registry instance. */
     registry: IRegistryLike;
@@ -23,14 +28,20 @@ export interface CliAdminBuildDeps {
     };
     /** The CLI builder instance (for reading modules). */
     builder: IBuilderLike;
+    /** The command executor service — used to register the module filter for plugin toggling. */
+    executor?: IExecutorLike;
     /** Optional broadcast function override for log events. */
     broadcastFn?: (message: Record<string, unknown>) => void;
 }
 
 export interface CliAdminPluginResult {
-    /** Express router — mount at `/api/v1/qcli`. */
+    /** Default mount prefix for the API router. */
+    prefix: '/api/v1/qcli';
+    /** Default mount prefix for the dashboard SPA. */
+    dashboardPrefix: '/qcli/admin';
+    /** Express router for admin API endpoints. */
     router: Router;
-    /** Express router serving the SPA at `/qcli/admin`. */
+    /** Express router serving the SPA. */
     dashboardRouter: Router;
     /** The auth middleware, in case you need to protect additional routes. */
     authMiddleware: RequestHandler;
@@ -101,7 +112,7 @@ export class CliAdminBuilder {
      * Build the admin plugin, returning the Express router and auth middleware.
      */
     build(deps: CliAdminBuildDeps): CliAdminPluginResult {
-        const { registry, eventSocketManager, builder, broadcastFn } = deps;
+        const { registry, eventSocketManager, builder, executor, broadcastFn } = deps;
 
         // Resolve JWT secret: explicit > env var > random
         const secret = this._jwtSecret
@@ -110,6 +121,12 @@ export class CliAdminBuilder {
 
         // Create services
         const moduleRegistry = new ModuleRegistry(registry, builder);
+
+        // Register the module registry as a processor filter so that
+        // disabled modules' commands are blocked at execution time.
+        if (executor) {
+            executor.addFilter(moduleRegistry);
+        }
         const logBuffer = new LogRingBuffer();
 
         const broadcast = broadcastFn ?? ((msg) => eventSocketManager.broadcastMessage(msg));
@@ -135,7 +152,6 @@ export class CliAdminBuilder {
         const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
         const statusDeps: StatusDeps = {
             getActiveWsConnections: () => eventSocketManager.getClients().length,
-            // TODO: expose getActiveShellSessions() on CliEventSocketManager
             getActiveShellSessions: () => 0,
             getRegisteredCommands: () => registry.processors.length,
             getRegisteredJobs: () => registeredJobs,
@@ -188,7 +204,7 @@ export class CliAdminBuilder {
             logBuffer.restoreConsole();
         };
 
-        return { router, dashboardRouter, authMiddleware, logBuffer, dispose };
+        return { prefix: '/api/v1/qcli', dashboardPrefix: '/qcli/admin', router, dashboardRouter, authMiddleware, logBuffer, dispose };
     }
 
     /**

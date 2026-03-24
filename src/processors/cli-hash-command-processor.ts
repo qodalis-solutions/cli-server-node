@@ -5,6 +5,7 @@ import { CliProcessCommand } from '../abstractions/cli-process-command';
 
 const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
 
+/** Command processor that computes cryptographic hashes (md5, sha1, sha256, sha512) of input text. */
 export class CliHashCommandProcessor extends CliCommandProcessor {
     command = 'hash';
     description = 'Computes hash of the input text';

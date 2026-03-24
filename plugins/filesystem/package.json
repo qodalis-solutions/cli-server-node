@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-filesystem",
-    "version": "1.0.0-beta.2",
+    "version": "1.0.0-beta.5",
     "description": "Pluggable file storage plugin for Qodalis CLI server — provides in-memory and OS filesystem providers",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

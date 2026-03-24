@@ -11,8 +11,16 @@ import { CliTimeCommandProcessor } from './processors/cli-time-command-processor
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
+import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
+import { PostgresDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-postgres';
+import { MysqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mysql';
+import { MssqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mssql';
+import { RedisDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-redis';
+import { ElasticsearchDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-elasticsearch';
+import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
-import { CliAdminBuilder } from '../../plugins/admin';
+import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
+import { AwsModule } from '@qodalis/cli-server-plugin-aws';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -24,7 +32,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, registry, builder, eventSocketManager, logSocketManager } = createCliServer({
+const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -37,7 +45,159 @@ const { app, registry, builder, eventSocketManager, logSocketManager } = createC
             .addProcessor(new CliHashCommandProcessor())
             .addProcessor(new CliBase64CommandProcessor())
             .addModule(new WeatherModule())
+            .addModule(new AwsModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });
+
+        // -----------------------------------------------------------
+        // Data Explorer — SQL Provider
+        // -----------------------------------------------------------
+        builder.addDataExplorerProvider(
+            new SqlDataExplorerProvider({ type: 'sqlite', filename: './demo.db' }),
+            {
+                name: 'demo-sqlite',
+                description: 'Demo SQLite database',
+                language: DataExplorerLanguage.Sql,
+                defaultOutputFormat: DataExplorerOutputFormat.Table,
+                timeout: 30000,
+                maxRows: 1000,
+                templates: [
+                    {
+                        name: 'list_tables',
+                        query: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+                        description: 'List all tables in the database',
+                    },
+                ],
+            },
+        );
+
+        // -----------------------------------------------------------
+        // Data Explorer — MongoDB Provider
+        // -----------------------------------------------------------
+        const mongoConnectionString = process.env.MONGO_CONNECTION_STRING;
+        if (mongoConnectionString) {
+            const { MongoDataExplorerProvider } = require('@qodalis/cli-server-plugin-data-explorer-mongo');
+            builder.addDataExplorerProvider(
+                new MongoDataExplorerProvider({
+                    connectionString: mongoConnectionString,
+                    database: 'demo',
+                }),
+                {
+                    name: 'demo-mongo',
+                    description: 'Demo MongoDB database',
+                    language: DataExplorerLanguage.Json,
+                    defaultOutputFormat: DataExplorerOutputFormat.Json,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [
+                        {
+                            name: 'show_collections',
+                            query: 'show collections',
+                            description: 'List all collections',
+                        },
+                        {
+                            name: 'find_all',
+                            query: 'db.users.find({})',
+                            description: 'Find all documents in users collection',
+                        },
+                    ],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — PostgreSQL Provider
+        // -----------------------------------------------------------
+        const pgConnectionString = process.env.POSTGRES_CONNECTION_STRING;
+        if (pgConnectionString) {
+            builder.addDataExplorerProvider(
+                new PostgresDataExplorerProvider({ connectionString: pgConnectionString }),
+                {
+                    name: 'demo-postgres',
+                    description: 'Demo PostgreSQL database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — MySQL Provider
+        // -----------------------------------------------------------
+        const mysqlConnectionString = process.env.MYSQL_CONNECTION_STRING;
+        if (mysqlConnectionString) {
+            builder.addDataExplorerProvider(
+                new MysqlDataExplorerProvider({ connectionString: mysqlConnectionString }),
+                {
+                    name: 'demo-mysql',
+                    description: 'Demo MySQL database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — MS SQL Provider
+        // -----------------------------------------------------------
+        const mssqlConnectionString = process.env.MSSQL_CONNECTION_STRING;
+        if (mssqlConnectionString) {
+            builder.addDataExplorerProvider(
+                new MssqlDataExplorerProvider({ connectionString: mssqlConnectionString }),
+                {
+                    name: 'demo-mssql',
+                    description: 'Demo MS SQL Server database',
+                    language: DataExplorerLanguage.Sql,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — Redis Provider
+        // -----------------------------------------------------------
+        const redisConnectionString = process.env.REDIS_CONNECTION_STRING;
+        if (redisConnectionString) {
+            builder.addDataExplorerProvider(
+                new RedisDataExplorerProvider({ connectionString: redisConnectionString }),
+                {
+                    name: 'demo-redis',
+                    description: 'Demo Redis instance',
+                    language: DataExplorerLanguage.Redis,
+                    defaultOutputFormat: DataExplorerOutputFormat.Table,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
+
+        // -----------------------------------------------------------
+        // Data Explorer — Elasticsearch Provider
+        // -----------------------------------------------------------
+        const esNode = process.env.ELASTICSEARCH_NODE;
+        if (esNode) {
+            builder.addDataExplorerProvider(
+                new ElasticsearchDataExplorerProvider({ node: esNode }),
+                {
+                    name: 'demo-elasticsearch',
+                    description: 'Demo Elasticsearch cluster',
+                    language: DataExplorerLanguage.Elasticsearch,
+                    defaultOutputFormat: DataExplorerOutputFormat.Json,
+                    timeout: 30000,
+                    maxRows: 1000,
+                    templates: [],
+                },
+            );
+        }
 
         // -----------------------------------------------------------
         // File Storage Provider Configuration
@@ -87,7 +247,7 @@ const jobsPlugin = new CliJobsBuilder()
     })
     .build((msg) => eventSocketManager.broadcastMessage(msg));
 
-app.use('/api/v1/qcli/jobs', jobsPlugin.router);
+mountPlugin(jobsPlugin);
 
 // -----------------------------------------------------------
 // Admin Dashboard (via plugin)
@@ -102,6 +262,7 @@ const adminPlugin = new CliAdminBuilder()
         registry,
         eventSocketManager,
         builder,
+        executor,
         broadcastFn: (msg) => {
             eventSocketManager.broadcastMessage(msg);
             // Also stream to dedicated log WebSocket clients
@@ -115,8 +276,7 @@ const adminPlugin = new CliAdminBuilder()
         },
     });
 
-app.use('/api/v1/qcli', adminPlugin.router);
-app.use('/qcli/admin', adminPlugin.dashboardRouter);
+mountPlugin(adminPlugin);
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);

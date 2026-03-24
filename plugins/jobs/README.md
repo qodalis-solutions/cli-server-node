@@ -38,7 +38,12 @@ const jobsPlugin = new CliJobsBuilder()
     })
     .build((msg) => eventSocketManager.broadcastMessage(msg));
 
-app.use('/api/v1/qcli/jobs', jobsPlugin.router);
+// Using createCliServer:
+mountPlugin(jobsPlugin);
+
+// Or on an existing Express app:
+app.use(jobsPlugin.prefix, jobsPlugin.router);
+
 await jobsPlugin.scheduler.start();
 ```
 
@@ -58,7 +63,7 @@ await jobsPlugin.scheduler.start();
 
 ## REST API
 
-All endpoints are mounted at the path you choose (typically `/api/v1/qcli/jobs`).
+All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

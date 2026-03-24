@@ -24,6 +24,23 @@ jobs:
       - name: Build abstractions
         run: cd packages/abstractions && npx tsc
 
+      - name: Install plugin dependencies
+        run: |
+          for plugin in data-explorer-sql data-explorer-mongo data-explorer-postgres data-explorer-mysql data-explorer-mssql data-explorer-redis data-explorer-elasticsearch; do
+            cd plugins/$plugin && npm install --omit=dev && cd ../..
+          done
+          cd plugins/admin && npm install && cd ../..
+          cd plugins/aws && npm install && cd ../..
+
+      - name: Hoist plugin runtime deps for test resolution
+        run: |
+          for plugin in data-explorer-sql data-explorer-mongo data-explorer-postgres data-explorer-mysql data-explorer-mssql data-explorer-redis data-explorer-elasticsearch; do
+            if [ -d "plugins/$plugin/node_modules" ]; then
+              cp -rn plugins/$plugin/node_modules/* node_modules/ 2>/dev/null || true
+              rm -rf plugins/$plugin/node_modules
+            fi
+          done
+
       - name: Build plugins
         run: |
           cd plugins/filesystem && npx tsc
@@ -32,7 +49,16 @@ jobs:
           cd ../filesystem-sqlite && npx tsc
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
-          cd ../admin && npm install && npx tsc
+          cd ../data-explorer && npx tsc
+          cd ../data-explorer-sql && npx tsc
+          cd ../data-explorer-mongo && npx tsc
+          cd ../data-explorer-postgres && npx tsc
+          cd ../data-explorer-mysql && npx tsc
+          cd ../data-explorer-mssql && npx tsc
+          cd ../data-explorer-redis && npx tsc
+          cd ../data-explorer-elasticsearch && npx tsc
+          cd ../admin && npx tsc
+          cd ../aws && npx tsc
 
       - name: Build
         run: npm run build

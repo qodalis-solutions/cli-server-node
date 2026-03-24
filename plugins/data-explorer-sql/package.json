@@ -1,0 +1,39 @@
+{
+    "name": "@qodalis/cli-server-plugin-data-explorer-sql",
+    "version": "1.0.0-beta.5",
+    "description": "SQL data explorer provider plugin for Qodalis CLI server — SQLite, PostgreSQL, MySQL support",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "data-explorer",
+        "sql",
+        "sqlite",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/data-explorer-sql"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.2",
+        "better-sqlite3": "^11.0.0"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.0.0",
+        "typescript": "^5.6.0"
+    }
+}

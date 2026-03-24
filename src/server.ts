@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { createCliServer } from './create-cli-server';
+import { createLogger } from './utils/logger';
+
+const logger = createLogger('Server');
 import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
 import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
 import { CliSystemCommandProcessor } from './processors/cli-system-command-processor';
@@ -25,17 +28,17 @@ const { app, eventSocketManager } = createCliServer({
 });
 
 const server = app.listen(port, () => {
-    console.log(`CLI server (Node.js) listening on http://localhost:${port}`);
-    console.log(`  Commands:     http://localhost:${port}/api/v1/qcli/commands`);
-    console.log(`  Execute:      http://localhost:${port}/api/v1/qcli/execute`);
-    console.log(`  Capabilities: http://localhost:${port}/api/v1/qcli/capabilities`);
-    console.log(`  Events:       ws://localhost:${port}/ws/v1/qcli/events`);
+    logger.info(`CLI server (Node.js) listening on http://localhost:${port}`);
+    logger.info(`  Commands:     http://localhost:${port}/api/v1/qcli/commands`);
+    logger.info(`  Execute:      http://localhost:${port}/api/v1/qcli/execute`);
+    logger.info(`  Capabilities: http://localhost:${port}/api/v1/qcli/capabilities`);
+    logger.info(`  Events:       ws://localhost:${port}/ws/v1/qcli/events`);
 });
 
 eventSocketManager.attach(server);
 
 process.on('SIGINT', async () => {
-    console.log('\nShutting down...');
+    logger.info('Shutting down...');
     await eventSocketManager.broadcastDisconnect();
     server.close();
     process.exit(0);

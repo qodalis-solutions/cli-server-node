@@ -17,7 +17,16 @@
             "@qodalis/cli-server-plugin-filesystem-sqlite": ["../plugins/filesystem-sqlite/index.ts"],
             "@qodalis/cli-server-plugin-filesystem-s3": ["../plugins/filesystem-s3/index.ts"],
             "@qodalis/cli-server-plugin-jobs": ["../plugins/jobs/index.ts"],
-            "@qodalis/cli-server-plugin-weather": ["../plugins/weather/index.ts"]
+            "@qodalis/cli-server-plugin-weather": ["../plugins/weather/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-sql": ["../plugins/data-explorer-sql/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-mongo": ["../plugins/data-explorer-mongo/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-postgres": ["../plugins/data-explorer-postgres/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-mysql": ["../plugins/data-explorer-mysql/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-mssql": ["../plugins/data-explorer-mssql/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-redis": ["../plugins/data-explorer-redis/index.ts"],
+            "@qodalis/cli-server-plugin-data-explorer-elasticsearch": ["../plugins/data-explorer-elasticsearch/index.ts"],
+            "@qodalis/cli-server-plugin-admin": ["../plugins/admin/index.ts"],
+            "@qodalis/cli-server-plugin-aws": ["../plugins/aws/src/index.ts"]
         }
     },
     "include": ["src/**/*"]

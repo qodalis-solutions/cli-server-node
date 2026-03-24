@@ -2,16 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 
 // Skip the entire suite when better-sqlite3 is not available (native module).
-let SqliteFileStorageProvider: typeof import('../../plugins/filesystem-sqlite').SqliteFileStorageProvider;
-let FileNotFoundError: typeof import('../../plugins/filesystem').FileNotFoundError;
-let IsADirectoryError: typeof import('../../plugins/filesystem').IsADirectoryError;
-let NotADirectoryError: typeof import('../../plugins/filesystem').NotADirectoryError;
-let FileExistsError: typeof import('../../plugins/filesystem').FileExistsError;
+let SqliteFileStorageProvider: typeof import('@qodalis/cli-server-plugin-filesystem-sqlite').SqliteFileStorageProvider;
+let FileNotFoundError: typeof import('@qodalis/cli-server-plugin-filesystem').FileNotFoundError;
+let IsADirectoryError: typeof import('@qodalis/cli-server-plugin-filesystem').IsADirectoryError;
+let NotADirectoryError: typeof import('@qodalis/cli-server-plugin-filesystem').NotADirectoryError;
+let FileExistsError: typeof import('@qodalis/cli-server-plugin-filesystem').FileExistsError;
 
 let canRun = true;
 try {
-    ({ SqliteFileStorageProvider } = await import('../../plugins/filesystem-sqlite'));
-    ({ FileNotFoundError, IsADirectoryError, NotADirectoryError, FileExistsError } = await import('../../plugins/filesystem'));
+    ({ SqliteFileStorageProvider } = await import('@qodalis/cli-server-plugin-filesystem-sqlite'));
+    ({ FileNotFoundError, IsADirectoryError, NotADirectoryError, FileExistsError } = await import('@qodalis/cli-server-plugin-filesystem'));
 } catch {
     canRun = false;
 }

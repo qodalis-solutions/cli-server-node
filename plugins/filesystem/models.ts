@@ -1,3 +1,4 @@
+/** Describes a single entry returned by a directory listing. */
 export interface FileEntry {
     name: string;
     type: 'file' | 'directory';
@@ -6,6 +7,7 @@ export interface FileEntry {
     permissions?: string;
 }
 
+/** Detailed metadata for a file or directory. */
 export interface FileStat {
     name: string;
     type: 'file' | 'directory';

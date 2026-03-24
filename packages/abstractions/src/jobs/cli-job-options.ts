@@ -1,6 +1,10 @@
+/** Behavior when a job's timer fires while the previous execution is still running. */
 export type JobOverlapPolicy = 'skip' | 'queue' | 'cancel';
+
+/** Retry backoff strategy for failed job executions. */
 export type JobRetryStrategy = 'fixed' | 'linear' | 'exponential';
 
+/** Configuration options for a scheduled or on-demand CLI job. */
 export interface CliJobOptions {
     /** Display name for the job. Defaults to class name. */
     name?: string;

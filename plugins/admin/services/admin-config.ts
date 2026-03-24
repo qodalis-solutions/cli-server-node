@@ -10,14 +10,13 @@ function safeCompare(a: string, b: string): boolean {
     return timingSafeEqual(hashA, hashB);
 }
 
-/**
- * Admin configuration — reads credentials and settings from environment variables.
- */
+/** Admin username/password pair. */
 export interface AdminCredentials {
     username: string;
     password: string;
 }
 
+/** A single configuration setting exposed by the admin dashboard. */
 export interface ConfigEntry {
     key: string;
     value: string | number | boolean | string[];
@@ -26,12 +25,17 @@ export interface ConfigEntry {
     mutable: boolean;
 }
 
+/** A named group of configuration entries (e.g. "server", "auth", "custom"). */
 export interface ConfigSection {
     name: string;
     mutable: boolean;
     settings: ConfigEntry[];
 }
 
+/**
+ * Manages admin credentials and mutable runtime settings.
+ * Reads defaults from environment variables on construction.
+ */
 export class AdminConfig {
     private _username: string;
     private _password: string;
@@ -48,11 +52,13 @@ export class AdminConfig {
         }
     }
 
+    /** Override the admin username and password. */
     setCredentials(username: string, password: string): void {
         this._username = username;
         this._password = password;
     }
 
+    /** Set the JWT signing secret explicitly. */
     setJwtSecret(secret: string): void {
         this._jwtSecret = secret;
     }
@@ -61,6 +67,7 @@ export class AdminConfig {
         return this._jwtSecret;
     }
 
+    /** Validate credentials using timing-safe comparison. */
     validateCredentials(username: string, password: string): boolean {
         // Evaluate both comparisons to avoid short-circuit timing leaks
         const usernameMatch = safeCompare(username, this._username);
@@ -68,6 +75,7 @@ export class AdminConfig {
         return usernameMatch && passwordMatch;
     }
 
+    /** Return all configuration sections (server, auth, custom) for the dashboard. */
     getConfigSections(): ConfigSection[] {
         const customEntries: ConfigEntry[] = Object.entries(this._mutableSettings).map(
             ([key, val]) => ({
@@ -106,15 +114,18 @@ export class AdminConfig {
         ];
     }
 
+    /** Return a shallow copy of all mutable (custom) settings. */
     getMutableSettings(): Record<string, unknown> {
         return { ...this._mutableSettings };
     }
 
+    /** Merge the provided key-value pairs into mutable settings. */
     updateMutableSettings(values: Record<string, unknown>): void {
         Object.assign(this._mutableSettings, values);
     }
 }
 
+/** Infer the ConfigEntry type string from a runtime value. */
 function inferType(val: unknown): 'string' | 'number' | 'boolean' | 'string[]' {
     if (typeof val === 'boolean') return 'boolean';
     if (typeof val === 'number') return 'number';

@@ -32,11 +32,35 @@ export default defineConfig({
                 __dirname,
                 'plugins/jobs/index.ts',
             ),
+            '@qodalis/cli-server-plugin-data-explorer-redis': path.resolve(
+                __dirname,
+                'plugins/data-explorer-redis/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-data-explorer-elasticsearch': path.resolve(
+                __dirname,
+                'plugins/data-explorer-elasticsearch/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-data-explorer-postgres': path.resolve(
+                __dirname,
+                'plugins/data-explorer-postgres/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-data-explorer-mysql': path.resolve(
+                __dirname,
+                'plugins/data-explorer-mysql/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-data-explorer-mssql': path.resolve(
+                __dirname,
+                'plugins/data-explorer-mssql/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-aws': path.resolve(
+                __dirname,
+                'plugins/aws/src/index.ts',
+            ),
         },
     },
     test: {
         globals: true,
         environment: 'node',
-        exclude: ['dist/**', 'node_modules/**', 'packages/**', 'demo/**'],
+        exclude: ['dist/**', '**/node_modules/**', 'packages/**', 'demo/**'],
     },
 });

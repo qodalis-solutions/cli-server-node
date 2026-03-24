@@ -11,10 +11,16 @@ import {
     IsADirectoryError,
 } from '../errors';
 
+/** Configuration for the OS file storage provider. */
 export interface OsProviderOptions {
+    /** Absolute directory paths that the provider is allowed to access. */
     allowedPaths: string[];
 }
 
+/**
+ * File storage provider that delegates to the host OS filesystem.
+ * Path-traversal is prevented by validating all paths against an allowlist.
+ */
 export class OsFileStorageProvider implements IFileStorageProvider {
     readonly name = 'os';
     private readonly allowedPaths: string[];

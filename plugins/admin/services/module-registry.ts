@@ -1,4 +1,4 @@
-import { ICliModule, ICliCommandProcessor } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
 
 /**
  * Provides information about a tracked module for the admin dashboard.
@@ -40,9 +40,11 @@ export interface IBuilderLike {
 
 /**
  * Tracks registered CLI modules and allows toggling them on/off.
+ * Implements {@link ICliProcessorFilter} to block execution of processors belonging to disabled modules.
  */
-export class ModuleRegistry {
+export class ModuleRegistry implements ICliProcessorFilter {
     private readonly _tracked = new Map<string, TrackedModule>();
+    private readonly _processorToModuleId = new Map<ICliCommandProcessor, string>();
     private readonly _registry: IRegistryLike;
     private readonly _builder: IBuilderLike;
 
@@ -58,7 +60,24 @@ export class ModuleRegistry {
                 enabled: true,
                 processors: [...mod.processors],
             });
+            for (const processor of mod.processors) {
+                this._processorToModuleId.set(processor, id);
+            }
         }
+    }
+
+    /**
+     * Determines whether the given command processor is allowed to execute.
+     * Returns false when the processor belongs to a disabled module.
+     */
+    isAllowed(processor: ICliCommandProcessor): boolean {
+        const moduleId = this._processorToModuleId.get(processor);
+        if (!moduleId) {
+            // Processor is not part of any tracked module — allow by default
+            return true;
+        }
+        const tracked = this._tracked.get(moduleId);
+        return tracked ? tracked.enabled : true;
     }
 
     /**
@@ -81,29 +100,23 @@ export class ModuleRegistry {
 
     /**
      * Toggle a module's enabled/disabled state.
-     * When disabled, its processors are removed from the command registry.
-     * When enabled, they are re-registered.
+     * When disabled, processors are blocked at execution time via the filter.
+     * When enabled, they are re-registered if needed.
      */
-    toggle(id: string): (ModuleInfo & { warning?: string }) | undefined {
+    toggle(id: string): ModuleInfo | undefined {
         const tracked = this._tracked.get(id);
         if (!tracked) return undefined;
 
         tracked.enabled = !tracked.enabled;
 
-        let warning: string | undefined;
-
         if (tracked.enabled) {
-            // Re-register processors
+            // Re-register processors in case they were removed
             for (const processor of tracked.processors) {
                 this._registry.register(processor);
             }
-        } else {
-            // We can't "unregister" from the current CliCommandRegistry directly
-            // since it only has register(). We track the state but processors remain active.
-            warning = 'Module state tracked but command unregistration is not yet supported. Processors remain active.';
         }
 
-        return { ...this.toInfo(tracked), warning };
+        return this.toInfo(tracked);
     }
 
     private moduleId(mod: ICliModule): string {

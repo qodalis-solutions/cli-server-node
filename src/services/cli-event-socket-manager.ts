@@ -2,7 +2,11 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
+import { createLogger } from '../utils/logger';
 
+const logger = createLogger('EventSocket');
+
+/** Information about a connected WebSocket event client. */
 export interface CliWebSocketClientInfo {
     id: string;
     connectedAt: string;
@@ -16,6 +20,10 @@ interface ClientEntry {
     remoteAddress: string;
 }
 
+/**
+ * Manages WebSocket connections for server-push events and interactive shell sessions.
+ * Handles upgrades on `/ws/v1/qcli/events` and `/ws/v1/qcli/shell` paths.
+ */
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
@@ -69,24 +77,30 @@ export class CliEventSocketManager {
                 return;
             }
 
-            // Not our path — let other handlers deal with it
+            // Unrecognized path; leave for other upgrade handlers
         });
 
         this._wss.on('connection', (ws, request: IncomingMessage) => {
             this._clients.add(ws);
+            const id = `evt-${this._nextClientId++}`;
             this._clientMeta.set(ws, {
-                id: `evt-${this._nextClientId++}`,
+                id,
                 connectedAt: new Date(),
                 remoteAddress: request.socket.remoteAddress ?? 'unknown',
             });
+            logger.info('Client connected (id=%s)', id);
             ws.send(JSON.stringify({ type: 'connected' }));
 
             ws.on('close', () => {
+                const meta = this._clientMeta.get(ws);
+                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
             });
 
             ws.on('error', () => {
+                const meta = this._clientMeta.get(ws);
+                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
             });
@@ -109,6 +123,7 @@ export class CliEventSocketManager {
      * Broadcast a disconnect event to all connected clients and close sockets.
      */
     async broadcastDisconnect(): Promise<void> {
+        logger.info('Broadcasting disconnect to %d clients', this._clients.size);
         const message = JSON.stringify({ type: 'disconnect' });
 
         const promises: Promise<void>[] = [];
@@ -152,6 +167,7 @@ export class CliEventSocketManager {
         return result;
     }
 
+    /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
         for (const ws of this._clients) {
             ws.terminate();

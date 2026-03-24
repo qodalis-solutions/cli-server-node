@@ -12,10 +12,16 @@ import {
     IsADirectoryError,
 } from '@qodalis/cli-server-plugin-filesystem';
 
+/** Configuration for the SQLite-backed file storage provider. */
 export interface SqliteProviderOptions {
-    dbPath: string; // e.g. './data/files.db' or ':memory:'
+    /** Path to the SQLite database file, or ':memory:' for in-memory operation. */
+    dbPath: string;
 }
 
+/**
+ * File storage provider that persists a virtual filesystem in a SQLite database.
+ * Uses WAL journaling for concurrent read performance.
+ */
 export class SqliteFileStorageProvider implements IFileStorageProvider {
     readonly name = 'sqlite';
 
@@ -399,6 +405,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 }
 
+/** Raw row shape returned by SQLite queries against the `files` table. */
 interface FileRow {
     id: number;
     path: string;
