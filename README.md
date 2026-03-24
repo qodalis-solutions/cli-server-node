@@ -1,5 +1,8 @@
 # Qodalis CLI Server (Node.js)
 
+[![npm @qodalis/cli-server-node](https://img.shields.io/npm/v/@qodalis/cli-server-node?label=%40qodalis%2Fcli-server-node)](https://www.npmjs.com/package/@qodalis/cli-server-node)
+[![npm @qodalis/cli-server-abstractions](https://img.shields.io/npm/v/@qodalis/cli-server-abstractions?label=%40qodalis%2Fcli-server-abstractions)](https://www.npmjs.com/package/@qodalis/cli-server-abstractions)
+
 A Node.js CLI server framework for the [Qodalis CLI](https://github.com/qodalis-solutions/web-cli) ecosystem. Build custom server-side commands that integrate with the Qodalis web terminal.
 
 ## Installation
@@ -303,11 +306,13 @@ The server exposes versioned endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/cli/versions` | Version discovery (supported versions, preferred version) |
-| GET | `/api/v1/cli/version` | V1 server version |
-| GET | `/api/v1/cli/commands` | V1 commands (all processors) |
-| POST | `/api/v1/cli/execute` | V1 execute |
-| WS | `/ws/cli/events` | WebSocket events (also `/ws/v1/cli/events`) |
+| GET | `/api/qcli/versions` | Version discovery (supported versions, preferred version) |
+| GET | `/api/v1/qcli/version` | V1 server version |
+| GET | `/api/v1/qcli/commands` | V1 commands (all processors) |
+| POST | `/api/v1/qcli/execute` | V1 execute |
+| POST | `/api/v1/qcli/execute/stream` | V1 SSE streaming execute |
+| WS | `/ws/qcli/events` | WebSocket events (also `/ws/v1/qcli/events`) |
+| WS | `/ws/v1/qcli/shell` | Interactive PTY shell session |
 
 ## Processor Base Class Reference
 
@@ -329,8 +334,8 @@ The server exposes versioned endpoints:
 
 ```typescript
 interface CliServerOptions {
-    basePath?: string;                     // API base path (default: '/api/cli')
-    cors?: boolean | cors.CorsOptions;     // CORS config (default: false)
+    basePath?: string;                     // API base path (default: '/api/qcli')
+    cors?: boolean | cors.CorsOptions;     // CORS config (default: true)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
 ```
@@ -342,7 +347,10 @@ interface CliServerOptions {
     app: Express;                          // Configured Express app
     registry: CliCommandRegistry;          // Processor registry
     builder: CliBuilder;                   // Registration builder
-    eventSocketManager: CliEventSocketManager;  // WebSocket manager
+    executor: CliCommandExecutorService;   // Command executor
+    eventSocketManager: CliEventSocketManager;  // WebSocket event manager
+    logSocketManager: CliLogSocketManager;      // WebSocket log manager
+    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes
 }
 ```
 
@@ -391,19 +399,19 @@ import {
 
 ## File Storage
 
-The server includes a pluggable file storage system exposed at `/api/cli/fs/*`. Enable it with `setFileStorageProvider()` and choose a storage backend.
+The server includes a pluggable file storage system exposed at `/api/qcli/fs/*`. Enable it with `setFileStorageProvider()` and choose a storage backend.
 
 ### Filesystem API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/cli/fs/ls?path=/` | List directory contents |
-| GET | `/api/cli/fs/cat?path=/file.txt` | Read file content |
-| GET | `/api/cli/fs/stat?path=/file.txt` | File/directory metadata |
-| GET | `/api/cli/fs/download?path=/file.txt` | Download file |
-| POST | `/api/cli/fs/upload` | Upload file (multipart) |
-| POST | `/api/cli/fs/mkdir` | Create directory |
-| DELETE | `/api/cli/fs/rm?path=/file.txt` | Delete file or directory |
+| GET | `/api/qcli/fs/ls?path=/` | List directory contents |
+| GET | `/api/qcli/fs/cat?path=/file.txt` | Read file content |
+| GET | `/api/qcli/fs/stat?path=/file.txt` | File/directory metadata |
+| GET | `/api/qcli/fs/download?path=/file.txt` | Download file |
+| POST | `/api/qcli/fs/upload` | Upload file (multipart) |
+| POST | `/api/qcli/fs/mkdir` | Create directory |
+| DELETE | `/api/qcli/fs/rm?path=/file.txt` | Delete file or directory |
 
 ### Storage Providers
 
@@ -627,7 +635,6 @@ These processors ship with the library and are included in the standalone server
 | `http` | HTTP request operations |
 | `hash` | Hash computation (MD5, SHA1, SHA256, SHA512) |
 | `base64` | Base64 encode/decode (sub-commands) |
-| `uuid` | UUID generation |
 
 ## Docker
 
@@ -663,10 +670,21 @@ packages/
       cli-command-parameter-descriptor.ts  # Parameter declaration
       cli-command-author.ts           # Author metadata
 plugins/
+  admin/                              # Admin dashboard plugin (auth, status, config, logs)
+  aws/                                # AWS cloud services (S3, EC2, Lambda, CloudWatch, etc.)
+  data-explorer/                      # Core data explorer abstraction
+  data-explorer-sql/                  # SQL data explorer provider (SQLite)
+  data-explorer-mongo/                # MongoDB data explorer provider
+  data-explorer-postgres/             # PostgreSQL data explorer provider
+  data-explorer-mysql/                # MySQL data explorer provider
+  data-explorer-mssql/                # MS SQL data explorer provider
+  data-explorer-redis/                # Redis data explorer provider
+  data-explorer-elasticsearch/        # Elasticsearch data explorer provider
   filesystem/                         # Core file storage abstraction (IFileStorageProvider, InMemory, OS)
   filesystem-json/                    # JSON file persistence provider
   filesystem-sqlite/                  # SQLite persistence provider (better-sqlite3)
   filesystem-s3/                      # Amazon S3 storage provider (@aws-sdk/client-s3)
+  jobs/                               # Job scheduling plugin
   weather/                            # Weather module (example plugin)
 src/
   abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
@@ -679,9 +697,11 @@ src/
     cli-command-executor-service.ts   # Command execution pipeline
     cli-response-builder.ts           # Structured output builder
     cli-event-socket-manager.ts       # WebSocket event broadcasting
+    cli-log-socket-manager.ts         # WebSocket log streaming
+    cli-shell-session-manager.ts      # PTY shell session management
   controllers/
-    cli-controller.ts                 # V1 REST API (/api/v1/cli)
-    cli-version-controller.ts         # Version discovery (/api/cli/versions)
+    cli-controller.ts                 # V1 REST API (/api/v1/qcli)
+    cli-version-controller.ts         # Version discovery (/api/qcli/versions)
   extensions/
     cli-builder.ts                    # Fluent registration API (addProcessor, addModule)
   processors/                         # Built-in processors
