@@ -1,5 +1,8 @@
 # Qodalis CLI Server (Node.js)
 
+[![npm @qodalis/cli-server-node](https://img.shields.io/npm/v/@qodalis/cli-server-node?label=%40qodalis%2Fcli-server-node)](https://www.npmjs.com/package/@qodalis/cli-server-node)
+[![npm @qodalis/cli-server-abstractions](https://img.shields.io/npm/v/@qodalis/cli-server-abstractions?label=%40qodalis%2Fcli-server-abstractions)](https://www.npmjs.com/package/@qodalis/cli-server-abstractions)
+
 A Node.js CLI server framework for the [Qodalis CLI](https://github.com/qodalis-solutions/web-cli) ecosystem. Build custom server-side commands that integrate with the Qodalis web terminal.
 
 ## Installation
