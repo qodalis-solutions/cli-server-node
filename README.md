@@ -297,21 +297,7 @@ Every processor receives a `CliProcessCommand` with the parsed command input:
 | `rawCommand` | `string` | Original unprocessed input |
 | `data` | `any` | Arbitrary data payload from the client |
 
-## API Versioning
-
-Processors declare which API version they target. The default is version 1.
-
-```typescript
-class DashboardProcessor extends CliCommandProcessor {
-    command = 'dashboard';
-    description = 'Server dashboard (v2 only)';
-    apiVersion = 2;
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return 'Dashboard data...';
-    }
-}
-```
+## API Endpoints
 
 The server exposes versioned endpoints:
 
@@ -321,12 +307,7 @@ The server exposes versioned endpoints:
 | GET | `/api/v1/cli/version` | V1 server version |
 | GET | `/api/v1/cli/commands` | V1 commands (all processors) |
 | POST | `/api/v1/cli/execute` | V1 execute |
-| GET | `/api/v2/cli/version` | V2 server version |
-| GET | `/api/v2/cli/commands` | V2 commands (only `apiVersion >= 2`) |
-| POST | `/api/v2/cli/execute` | V2 execute |
-| WS | `/ws/cli/events` | WebSocket events (also `/ws/v1/cli/events`, `/ws/v2/cli/events`) |
-
-The Qodalis CLI client auto-negotiates the highest mutually supported version via the `/api/cli/versions` discovery endpoint.
+| WS | `/ws/cli/events` | WebSocket events (also `/ws/v1/cli/events`) |
 
 ## Processor Base Class Reference
 
@@ -342,7 +323,6 @@ The Qodalis CLI client auto-negotiates the highest mutually supported version vi
 | `allowUnlistedCommands` | `boolean` | `undefined` | Accept sub-commands not in `processors` |
 | `valueRequired` | `boolean` | `undefined` | Require a positional value |
 | `version` | `string` | `'1.0.0'` | Processor version string |
-| `apiVersion` | `number` | `1` | Target API version |
 | `author` | `ICliCommandAuthor` | default author | Author metadata (name, email) |
 
 ## Server Options
@@ -701,7 +681,6 @@ src/
     cli-event-socket-manager.ts       # WebSocket event broadcasting
   controllers/
     cli-controller.ts                 # V1 REST API (/api/v1/cli)
-    cli-controller-v2.ts              # V2 REST API (/api/v2/cli)
     cli-version-controller.ts         # Version discovery (/api/cli/versions)
   extensions/
     cli-builder.ts                    # Fluent registration API (addProcessor, addModule)

@@ -1,14 +1,25 @@
-import express, { Express } from 'express';
+import express, { Express, Router } from 'express';
 import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager, CliLogSocketManager } from './services';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
-import { createCliControllerV2 } from './controllers/cli-controller-v2';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
+
+/**
+ * Generic interface for plugin results that can be auto-mounted.
+ * Plugins expose a `prefix` and `router`; some also have a
+ * `dashboardPrefix` / `dashboardRouter` pair.
+ */
+export interface MountablePlugin {
+    prefix: string;
+    router: Router;
+    dashboardPrefix?: string;
+    dashboardRouter?: Router;
+}
 
 const logger = createLogger('Server');
 
@@ -28,14 +39,29 @@ export interface CliServerOptions {
  * Use this for standalone server mode. For integration into an existing
  * Express app, use `createCliController` directly instead.
  */
-export function createCliServer(options: CliServerOptions = {}): {
+export interface CliServerResult {
     app: Express;
     registry: CliCommandRegistry;
     builder: CliBuilder;
     executor: CliCommandExecutorService;
     eventSocketManager: CliEventSocketManager;
     logSocketManager: CliLogSocketManager;
-} {
+    /**
+     * Mount a plugin using its built-in prefix.
+     * Reads `prefix` and `router` from the plugin result, and optionally
+     * `dashboardPrefix` / `dashboardRouter` for plugins that serve a UI.
+     *
+     * @example
+     * ```ts
+     * const result = createCliServer();
+     * result.mountPlugin(jobsPlugin);
+     * result.mountPlugin(adminPlugin);
+     * ```
+     */
+    mountPlugin(plugin: MountablePlugin): void;
+}
+
+export function createCliServer(options: CliServerOptions = {}): CliServerResult {
     const { basePath = '/api/qcli', cors: corsOption = true, configure } = options;
 
     const app = express();
@@ -61,11 +87,8 @@ export function createCliServer(options: CliServerOptions = {}): {
     // API v1 routes
     app.use('/api/v1/qcli', createCliController(registry, executor));
 
-    // API v2 routes
-    app.use('/api/v2/qcli', createCliControllerV2(registry, executor));
-
     // Custom basePath fallback (when user overrides the default)
-    if (basePath !== '/api/v1/qcli' && basePath !== '/api/v2/qcli') {
+    if (basePath !== '/api/v1/qcli') {
         app.use(basePath, createCliController(registry, executor));
     }
 
@@ -91,5 +114,12 @@ export function createCliServer(options: CliServerOptions = {}): {
 
     logger.info('CLI server created with %d processors', registry.processors.length);
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager };
+    const mountPlugin = (plugin: MountablePlugin) => {
+        app.use(plugin.prefix, plugin.router);
+        if (plugin.dashboardPrefix && plugin.dashboardRouter) {
+            app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+        }
+    };
+
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin };
 }

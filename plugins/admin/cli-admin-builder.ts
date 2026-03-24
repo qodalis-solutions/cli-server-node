@@ -35,9 +35,13 @@ export interface CliAdminBuildDeps {
 }
 
 export interface CliAdminPluginResult {
-    /** Express router — mount at `/api/v1/qcli`. */
+    /** Default mount prefix for the API router. */
+    prefix: '/api/v1/qcli';
+    /** Default mount prefix for the dashboard SPA. */
+    dashboardPrefix: '/qcli/admin';
+    /** Express router for admin API endpoints. */
     router: Router;
-    /** Express router serving the SPA at `/qcli/admin`. */
+    /** Express router serving the SPA. */
     dashboardRouter: Router;
     /** The auth middleware, in case you need to protect additional routes. */
     authMiddleware: RequestHandler;
@@ -200,7 +204,7 @@ export class CliAdminBuilder {
             logBuffer.restoreConsole();
         };
 
-        return { router, dashboardRouter, authMiddleware, logBuffer, dispose };
+        return { prefix: '/api/v1/qcli', dashboardPrefix: '/qcli/admin', router, dashboardRouter, authMiddleware, logBuffer, dispose };
     }
 
     /**

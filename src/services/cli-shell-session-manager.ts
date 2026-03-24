@@ -54,7 +54,16 @@ export class CliShellSessionManager {
     ): Promise<void> {
         const { shell, args } = this.getShellInfo(command);
 
-        const nodePty = getPty();
+        let nodePty: typeof import('node-pty');
+        try {
+            nodePty = getPty();
+        } catch (err: any) {
+            logger.error('node-pty unavailable: %s', err.message ?? err);
+            this.send(ws, { type: 'error', message: err.message });
+            ws.close();
+            return;
+        }
+
         let ptyProcess: import('node-pty').IPty;
         try {
             ptyProcess = nodePty.spawn(shell, args, {

@@ -17,8 +17,6 @@ export interface ICliCommandProcessor {
     valueRequired?: boolean;
     /** Semantic version of this processor. */
     version: string;
-    /** Minimum API version this processor is available in. Defaults to 1. */
-    apiVersion?: number;
     /** Nested sub-command processors. */
     processors?: ICliCommandProcessor[];
     /** Parameter descriptors for this command. */
@@ -51,7 +49,6 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     allowUnlistedCommands?: boolean;
     valueRequired?: boolean;
     version: string = '1.0.0';
-    apiVersion: number = 2;
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
 

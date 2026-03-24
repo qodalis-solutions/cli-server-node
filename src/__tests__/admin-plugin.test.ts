@@ -89,7 +89,7 @@ beforeAll(async () => {
 
     app = express();
     app.use(express.json());
-    app.use('/api/v1/qcli', adminPlugin.router);
+    app.use(adminPlugin.prefix, adminPlugin.router);
 
     server = app.listen(0); // random port
     eventSocketManager.attach(server);
@@ -99,10 +99,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    adminPlugin.logBuffer.restoreConsole();
-    await eventSocketManager.broadcastDisconnect();
-    await logSocketManager.broadcastDisconnect();
-    server.close();
+    adminPlugin?.logBuffer.restoreConsole();
+    if (eventSocketManager) await eventSocketManager.broadcastDisconnect();
+    if (logSocketManager) await logSocketManager.broadcastDisconnect();
+    server?.close();
 });
 
 // ---------------------------------------------------------------------------
@@ -587,7 +587,7 @@ describe('Auth Rate Limiting', () => {
         freshApp.use(express.json());
         // Express needs trust proxy for req.ip in testing
         freshApp.set('trust proxy', true);
-        freshApp.use('/api/v1/qcli', freshAdmin.router);
+        freshApp.use(freshAdmin.prefix, freshAdmin.router);
 
         // 5 failed attempts
         for (let i = 0; i < 5; i++) {

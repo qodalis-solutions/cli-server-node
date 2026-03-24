@@ -102,11 +102,6 @@ describe('CLI Controllers (integration)', () => {
                     description: 'Greet someone',
                     handleAsync: async (cmd) => `Hello, ${cmd.value ?? 'world'}!`,
                 }));
-                builder.addProcessor(makeProcessor('v2cmd', {
-                    description: 'A v2-only command',
-                    apiVersion: 2,
-                    handleAsync: async () => 'v2 only result',
-                }));
                 builder.addProcessor(streamProcessor);
                 builder.addProcessor(makeSlowProcessor('slow', 5000));
             },
@@ -146,38 +141,16 @@ describe('CLI Controllers (integration)', () => {
         });
     });
 
-    describe('GET /api/v2/qcli/version', () => {
-        it('should return v2 version info', async () => {
-            const res = await request(app).get('/api/v2/qcli/version').expect(200);
-
-            expect(res.body).toEqual({
-                apiVersion: 2,
-                serverVersion: '2.0.0',
-            });
-        });
-    });
-
     describe('GET /api/v1/qcli/commands', () => {
         it('should return all registered commands', async () => {
             const res = await request(app).get('/api/v1/qcli/commands').expect(200);
 
-            expect(res.body).toHaveLength(5);
+            expect(res.body).toHaveLength(4);
             const commands = res.body.map((c: any) => c.command);
             expect(commands).toContain('echo');
             expect(commands).toContain('greet');
-            expect(commands).toContain('v2cmd');
             expect(commands).toContain('stream-test');
             expect(commands).toContain('slow');
-        });
-    });
-
-    describe('GET /api/v2/qcli/commands', () => {
-        it('should return only apiVersion >= 2 commands', async () => {
-            const res = await request(app).get('/api/v2/qcli/commands').expect(200);
-
-            expect(res.body).toHaveLength(1);
-            expect(res.body[0].command).toBe('v2cmd');
-            expect(res.body[0].apiVersion).toBe(2);
         });
     });
 
@@ -216,24 +189,6 @@ describe('CLI Controllers (integration)', () => {
                 value: 'Unknown command: doesnotexist',
                 style: 'error',
             });
-        });
-    });
-
-    describe('POST /api/v2/qcli/execute', () => {
-        it('should execute a command via v2 endpoint', async () => {
-            const res = await request(app)
-                .post('/api/v2/qcli/execute')
-                .send({
-                    command: 'greet',
-                    chainCommands: [],
-                    rawCommand: 'greet Claude',
-                    value: 'Claude',
-                    args: {},
-                })
-                .expect(200);
-
-            expect(res.body.exitCode).toBe(0);
-            expect(res.body.outputs[0]).toEqual({ type: 'text', value: 'Hello, Claude!' });
         });
     });
 

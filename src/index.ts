@@ -36,7 +36,6 @@ export {
 
 // Controllers
 export { createCliController } from './controllers/cli-controller';
-export { createCliControllerV2 } from './controllers/cli-controller-v2';
 export { createCliVersionController } from './controllers/cli-version-controller';
 export { createFilesystemRouter } from './controllers/filesystem-controller';
 
@@ -96,4 +95,4 @@ export { CliBase64CommandProcessor } from './processors/cli-base64-command-proce
 export { Logger, createLogger } from './utils/logger';
 
 // Server factory
-export { createCliServer, CliServerOptions } from './create-cli-server';
+export { createCliServer, CliServerOptions, CliServerResult, MountablePlugin } from './create-cli-server';

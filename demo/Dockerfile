@@ -21,6 +21,7 @@ COPY plugins/data-explorer-mysql/package.json plugins/data-explorer-mysql/
 COPY plugins/data-explorer-mssql/package.json plugins/data-explorer-mssql/
 COPY plugins/data-explorer-redis/package.json plugins/data-explorer-redis/
 COPY plugins/data-explorer-elasticsearch/package.json plugins/data-explorer-elasticsearch/
+COPY plugins/aws/package.json plugins/aws/
 RUN npm install
 
 COPY tsconfig.json ./
@@ -42,6 +43,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../data-explorer-mssql && npx tsc \
     && cd ../data-explorer-redis && npx tsc \
     && cd ../data-explorer-elasticsearch && npx tsc \
+    && cd ../aws && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/

@@ -2,7 +2,7 @@
     "name": "@qodalis/cli-server-plugin-aws",
     "version": "1.0.0-beta.1",
     "description": "AWS cloud resource management plugin for Qodalis CLI Server",
-    "main": "src/index.ts",
+    "main": "dist/index.js",
     "scripts": {
         "build": "tsc",
         "test": "vitest run"

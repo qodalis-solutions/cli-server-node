@@ -25,8 +25,12 @@ const adminPlugin = new CliAdminBuilder()
     .setJwtSecret('my-jwt-secret')
     .build({ registry, eventSocketManager, builder });
 
-app.use('/api/v1/qcli', adminPlugin.router);
-app.use('/qcli/admin', adminPlugin.dashboardRouter);
+// Using createCliServer:
+mountPlugin(adminPlugin);
+
+// Or on an existing Express app:
+app.use(adminPlugin.prefix, adminPlugin.router);
+app.use(adminPlugin.dashboardPrefix, adminPlugin.dashboardRouter);
 ```
 
 ## Configuration
@@ -51,7 +55,7 @@ Credentials and JWT secret can be set via the builder or environment variables:
 
 ## REST API
 
-All endpoints are mounted at the path you choose (typically `/api/v1/qcli`). Routes below `/auth/login` require a valid JWT in the `Authorization: Bearer <token>` header.
+All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Routes below `/auth/login` require a valid JWT in the `Authorization: Bearer <token>` header.
 
 ### Authentication
 
@@ -94,7 +98,7 @@ All endpoints are mounted at the path you choose (typically `/api/v1/qcli`). Rou
 
 ## Dashboard
 
-The plugin includes a bundled SPA dashboard served at the mount path you choose (e.g. `/qcli/admin`). The dashboard auto-resolves from the package's `dashboard/` directory, or from the `@qodalis/cli-server-dashboard` package if installed separately.
+The plugin includes a bundled SPA dashboard served at the built-in prefix (`/qcli/admin`). The dashboard auto-resolves from the package's `dashboard/` directory, or from the `@qodalis/cli-server-dashboard` package if installed separately.
 
 ## License
 

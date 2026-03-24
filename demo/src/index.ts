@@ -32,7 +32,7 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
-const { app, registry, builder, executor, eventSocketManager, logSocketManager } = createCliServer({
+const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -247,7 +247,7 @@ const jobsPlugin = new CliJobsBuilder()
     })
     .build((msg) => eventSocketManager.broadcastMessage(msg));
 
-app.use('/api/v1/qcli/jobs', jobsPlugin.router);
+mountPlugin(jobsPlugin);
 
 // -----------------------------------------------------------
 // Admin Dashboard (via plugin)
@@ -276,8 +276,7 @@ const adminPlugin = new CliAdminBuilder()
         },
     });
 
-app.use('/api/v1/qcli', adminPlugin.router);
-app.use('/qcli/admin', adminPlugin.dashboardRouter);
+mountPlugin(adminPlugin);
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);

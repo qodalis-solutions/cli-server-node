@@ -68,7 +68,6 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `description` | `string` | *(abstract)* | Human-readable description shown in help |
 | `author` | `ICliCommandAuthor` | `DefaultLibraryAuthor` | Author metadata |
 | `version` | `string` | `'1.0.0'` | Processor version |
-| `apiVersion` | `number` | `1` | Minimum API version this processor targets |
 | `allowUnlistedCommands` | `boolean?` | `undefined` | Accept sub-commands not in `processors` list |
 | `valueRequired` | `boolean?` | `undefined` | Whether a positional value argument is required |
 | `processors` | `ICliCommandProcessor[]?` | `undefined` | Nested sub-command processors |
