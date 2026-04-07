@@ -75,6 +75,27 @@ describe('Users API Integration', () => {
 
             expect(res.status).toBe(400);
         });
+
+        it('returns 401 for disabled user account', async () => {
+            // Create a user, disable via PUT, then try login
+            const createRes = await request(app)
+                .post('/api/v1/qcli/users')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ name: 'disableduser', email: 'disabled@example.com', password: 'disabledpass' });
+            const userId = createRes.body.id;
+
+            await request(app)
+                .put(`/api/v1/qcli/users/${userId}`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ disabled: true });
+
+            const loginRes = await request(app)
+                .post('/api/v1/qcli/auth/login')
+                .send({ username: 'disableduser', password: 'disabledpass' });
+
+            expect(loginRes.status).toBe(401);
+            expect(loginRes.body.error).toBeDefined();
+        });
     });
 
     describe('POST /auth/logout', () => {
@@ -132,6 +153,14 @@ describe('Users API Integration', () => {
 
             expect(res.status).toBe(400);
         });
+
+        it('returns 400 when password is missing', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/auth/verify')
+                .send({ userId: adminUserId });
+
+            expect(res.status).toBe(400);
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -185,6 +214,15 @@ describe('Users API Integration', () => {
 
             expect(res.status).toBe(400);
         });
+
+        it('returns 400 when email is missing', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/users')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ name: 'noemailuser' });
+
+            expect(res.status).toBe(400);
+        });
     });
 
     describe('GET /users/:idOrName', () => {
@@ -222,6 +260,15 @@ describe('Users API Integration', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.email).toBe('alice-updated@example.com');
+        });
+
+        it('returns 404 for non-existent user id', async () => {
+            const res = await request(app)
+                .put('/api/v1/qcli/users/non-existent-id')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ email: 'test@example.com' });
+
+            expect(res.status).toBe(404);
         });
     });
 
@@ -300,6 +347,37 @@ describe('Users API Integration', () => {
                 .send({ currentPassword: 'wrongcurrent', newPassword: 'newpass' });
 
             expect(res.status).toBe(401);
+        });
+
+        it('returns 400 when newPassword is missing', async () => {
+            const getRes = await request(app)
+                .get('/api/v1/qcli/users/alice')
+                .set('Authorization', `Bearer ${adminToken}`);
+            const aliceId = getRes.body.id;
+
+            const res = await request(app)
+                .put(`/api/v1/qcli/users/${aliceId}/password`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ currentPassword: 'alicepass2' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.error).toContain('newPassword');
+        });
+
+        it('returns 400 when non-admin self-change is missing currentPassword', async () => {
+            const loginRes = await request(app)
+                .post('/api/v1/qcli/auth/login')
+                .send({ username: 'alice', password: 'alicepass2' });
+            const aliceToken = loginRes.body.token;
+            const aliceId = loginRes.body.session.userId;
+
+            const res = await request(app)
+                .put(`/api/v1/qcli/users/${aliceId}/password`)
+                .set('Authorization', `Bearer ${aliceToken}`)
+                .send({ newPassword: 'newpass' });
+
+            expect(res.status).toBe(400);
+            expect(res.body.error).toContain('currentPassword');
         });
     });
 
@@ -385,6 +463,15 @@ describe('Users API Integration', () => {
 
             expect(res.status).toBe(409);
         });
+
+        it('returns 400 when name is missing', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/groups')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ description: 'A group without a name' });
+
+            expect(res.status).toBe(400);
+        });
     });
 
     describe('GET /groups', () => {
@@ -429,6 +516,19 @@ describe('Users API Integration', () => {
                 .set('Authorization', `Bearer ${adminToken}`);
 
             expect(res.status).toBe(200);
+        });
+
+        it('returns 404 for non-existent group', async () => {
+            const getRes = await request(app)
+                .get('/api/v1/qcli/users/alice')
+                .set('Authorization', `Bearer ${adminToken}`);
+            const aliceId = getRes.body.id;
+
+            const res = await request(app)
+                .put(`/api/v1/qcli/groups/no-such-group/members/${aliceId}`)
+                .set('Authorization', `Bearer ${adminToken}`);
+
+            expect(res.status).toBe(404);
         });
     });
 
@@ -587,6 +687,63 @@ describe('Users API Integration', () => {
                 .send({ newPassword: 'hackedpass' });
 
             expect(res.status).toBe(403);
+        });
+
+        it('cannot create groups (403)', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/groups')
+                .set('Authorization', `Bearer ${bobToken}`)
+                .send({ name: 'bobgroup', description: 'Should fail' });
+
+            expect(res.status).toBe(403);
+        });
+
+        it('cannot add members to groups (403)', async () => {
+            const res = await request(app)
+                .put(`/api/v1/qcli/groups/editors/members/${bobUserId}`)
+                .set('Authorization', `Bearer ${bobToken}`);
+
+            expect(res.status).toBe(403);
+        });
+
+        it('cannot kick another session (403)', async () => {
+            // Create a temporary login session to target
+            const loginRes = await request(app)
+                .post('/api/v1/qcli/auth/login')
+                .send({ username: 'root', password: 'admin123' });
+            const targetSessionId = loginRes.body.session.id;
+
+            const res = await request(app)
+                .delete(`/api/v1/qcli/sessions/${targetSessionId}`)
+                .set('Authorization', `Bearer ${bobToken}`);
+
+            expect(res.status).toBe(403);
+        });
+
+        it('cannot clear audit log (403)', async () => {
+            const res = await request(app)
+                .delete('/api/v1/qcli/audit')
+                .set('Authorization', `Bearer ${bobToken}`);
+
+            expect(res.status).toBe(403);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Audit (additional edge cases)
+    // -------------------------------------------------------------------------
+
+    describe('GET /audit (filters)', () => {
+        it('can filter audit entries by username', async () => {
+            const res = await request(app)
+                .get('/api/v1/qcli/audit?username=root')
+                .set('Authorization', `Bearer ${adminToken}`);
+
+            expect(res.status).toBe(200);
+            expect(Array.isArray(res.body)).toBe(true);
+            res.body.forEach((entry: { username: string }) => {
+                expect(entry.username).toBe('root');
+            });
         });
     });
 });
