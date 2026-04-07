@@ -72,6 +72,8 @@ export interface Group {
     createdAt: number;
 }
 
+export type AuthAdapter = (req: import('express').Request) => { user: User; isAdmin: boolean } | undefined | null;
+
 export interface UsersModuleOptions {
     userStore?: import('./stores/interfaces').ICliUserStore;
     sessionStore?: import('./stores/interfaces').ICliSessionStore;
@@ -80,4 +82,14 @@ export interface UsersModuleOptions {
     groupStore?: import('./stores/interfaces').ICliGroupStore;
     sessionTimeoutMs?: number;
     defaultAdminPassword?: string;
+    /**
+     * When provided, the plugin delegates authentication to the host application.
+     * The adapter receives the Express request (after the host's own auth middleware
+     * has run) and returns the CLI user + admin flag, or null/undefined if the
+     * request is unauthenticated.
+     *
+     * When set, the built-in login/logout/verify endpoints return 501 and the
+     * plugin skips seeding a root user and credential store.
+     */
+    authAdapter?: AuthAdapter;
 }

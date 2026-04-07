@@ -3,12 +3,30 @@ import { AuthService } from '../services/auth-service';
 import { ICliSessionStore } from '../stores/interfaces';
 import { createAuthMiddleware } from '../middleware/auth-middleware';
 
+export interface AuthControllerOptions {
+    externalAuth?: boolean;
+}
+
 export function createAuthController(
     authService: AuthService,
     sessionStore: ICliSessionStore,
+    options: AuthControllerOptions = {},
 ): Router {
     const router = Router();
     const authMiddleware = createAuthMiddleware(sessionStore);
+
+    if (options.externalAuth) {
+        // When authentication is managed externally, disable login/logout/verify
+        const externalHandler = (_req: Request, res: Response): void => {
+            res.status(501).json({ error: 'Authentication is managed by the host application' });
+        };
+
+        router.post('/login', externalHandler);
+        router.post('/logout', externalHandler);
+        router.post('/verify', externalHandler);
+
+        return router;
+    }
 
     // POST /login — no auth required
     router.post('/login', async (req: Request, res: Response): Promise<void> => {

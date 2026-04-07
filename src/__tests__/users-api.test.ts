@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import express from 'express';
+import express, { Request } from 'express';
 import request from 'supertest';
 import { buildUsersPlugin, UsersPluginResult } from '../../plugins/users/index';
+import { User, AuthAdapter } from '../../plugins/users/models';
 
 describe('Users API Integration', () => {
     let app: express.Express;
@@ -744,6 +745,197 @@ describe('Users API Integration', () => {
             res.body.forEach((entry: { username: string }) => {
                 expect(entry.username).toBe('root');
             });
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// External Auth Adapter
+// ---------------------------------------------------------------------------
+
+describe('External Auth Adapter', () => {
+    let app: express.Express;
+    let plugin: UsersPluginResult;
+
+    const adminUser: User = {
+        id: 'ext-admin-1',
+        name: 'extadmin',
+        email: 'extadmin@host.com',
+        groups: ['admin'],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+    };
+
+    const regularUser: User = {
+        id: 'ext-user-1',
+        name: 'extuser',
+        email: 'extuser@host.com',
+        groups: ['users'],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+    };
+
+    /**
+     * Adapter that reads X-Test-User header to decide who is calling.
+     * - "admin"  => adminUser + isAdmin: true
+     * - "user"   => regularUser + isAdmin: false
+     * - anything else or missing => null (unauthenticated)
+     */
+    const testAdapter: AuthAdapter = (req: Request) => {
+        const header = req.headers['x-test-user'] as string | undefined;
+        if (header === 'admin') {
+            return { user: adminUser, isAdmin: true };
+        }
+        if (header === 'user') {
+            return { user: regularUser, isAdmin: false };
+        }
+        return null;
+    };
+
+    beforeAll(async () => {
+        app = express();
+        app.use(express.json());
+        plugin = await buildUsersPlugin({ authAdapter: testAdapter });
+        app.use(plugin.prefix, plugin.router);
+    });
+
+    afterAll(() => {
+        plugin.dispose();
+    });
+
+    // -------------------------------------------------------------------------
+    // Auth endpoints return 501
+    // -------------------------------------------------------------------------
+
+    describe('Auth endpoints return 501 when external auth is active', () => {
+        it('POST /auth/login returns 501', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/auth/login')
+                .send({ username: 'root', password: 'root' });
+
+            expect(res.status).toBe(501);
+            expect(res.body.error).toContain('host application');
+        });
+
+        it('POST /auth/logout returns 501', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/auth/logout');
+
+            expect(res.status).toBe(501);
+            expect(res.body.error).toContain('host application');
+        });
+
+        it('POST /auth/verify returns 501', async () => {
+            const res = await request(app)
+                .post('/api/v1/qcli/auth/verify')
+                .send({ userId: 'ext-admin-1', password: 'pass' });
+
+            expect(res.status).toBe(501);
+            expect(res.body.error).toContain('host application');
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Adapter-authenticated requests
+    // -------------------------------------------------------------------------
+
+    describe('Adapter-authenticated requests', () => {
+        it('GET /users works when adapter returns a user', async () => {
+            const res = await request(app)
+                .get('/api/v1/qcli/users')
+                .set('X-Test-User', 'user');
+
+            expect(res.status).toBe(200);
+            expect(Array.isArray(res.body)).toBe(true);
+        });
+
+        it('admin-only endpoints work when adapter returns isAdmin: true', async () => {
+            // Create a user first so we have something to manage
+            const createRes = await request(app)
+                .post('/api/v1/qcli/users')
+                .set('X-Test-User', 'admin')
+                .send({ name: 'managed-user', email: 'managed@host.com' });
+
+            expect(createRes.status).toBe(201);
+            expect(createRes.body.name).toBe('managed-user');
+
+            // Admin can list sessions
+            const sessRes = await request(app)
+                .get('/api/v1/qcli/sessions')
+                .set('X-Test-User', 'admin');
+
+            expect(sessRes.status).toBe(200);
+            expect(Array.isArray(sessRes.body)).toBe(true);
+
+            // Admin can view audit log
+            const auditRes = await request(app)
+                .get('/api/v1/qcli/audit')
+                .set('X-Test-User', 'admin');
+
+            expect(auditRes.status).toBe(200);
+        });
+
+        it('admin-only endpoints return 403 for non-admin adapter user', async () => {
+            const createRes = await request(app)
+                .post('/api/v1/qcli/users')
+                .set('X-Test-User', 'user')
+                .send({ name: 'should-fail', email: 'fail@host.com' });
+
+            expect(createRes.status).toBe(403);
+
+            const sessRes = await request(app)
+                .get('/api/v1/qcli/sessions')
+                .set('X-Test-User', 'user');
+
+            expect(sessRes.status).toBe(403);
+        });
+
+        it('returns 401 when adapter returns null', async () => {
+            const res = await request(app)
+                .get('/api/v1/qcli/users')
+                .set('X-Test-User', 'unknown');
+
+            expect(res.status).toBe(401);
+        });
+
+        it('returns 401 when no auth header is present', async () => {
+            const res = await request(app).get('/api/v1/qcli/users');
+            expect(res.status).toBe(401);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Audit trail for adapter-authenticated requests
+    // -------------------------------------------------------------------------
+
+    describe('Audit endpoint with adapter auth', () => {
+        it('admin can access audit endpoint', async () => {
+            const auditRes = await request(app)
+                .get('/api/v1/qcli/audit')
+                .set('X-Test-User', 'admin');
+
+            expect(auditRes.status).toBe(200);
+            expect(Array.isArray(auditRes.body)).toBe(true);
+        });
+
+        it('non-admin cannot access audit endpoint', async () => {
+            const auditRes = await request(app)
+                .get('/api/v1/qcli/audit')
+                .set('X-Test-User', 'user');
+
+            expect(auditRes.status).toBe(403);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // No root user seeded
+    // -------------------------------------------------------------------------
+
+    describe('Root user seeding', () => {
+        it('does not seed a root user when authAdapter is set', async () => {
+            const users = await plugin.userStore.getUsers();
+            const rootUser = users.find((u) => u.name === 'root');
+            expect(rootUser).toBeUndefined();
         });
     });
 });

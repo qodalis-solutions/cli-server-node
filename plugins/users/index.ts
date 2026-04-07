@@ -15,6 +15,7 @@ import { createGroupsController } from './controllers/groups-controller';
 import { createAuditController } from './controllers/audit-controller';
 
 export { UsersModuleOptions } from './models';
+export type { AuthAdapter } from './models';
 export type { ICliUserStore, ICliSessionStore, ICliCredentialStore, ICliAuditStore, ICliGroupStore } from './stores/interfaces';
 export { InMemoryUserStore } from './stores/in-memory-user-store';
 export { InMemorySessionStore } from './stores/in-memory-session-store';
@@ -41,26 +42,33 @@ export async function buildUsersPlugin(
     options: UsersModuleOptions = {},
     broadcastEvent?: (msg: Record<string, unknown>) => void,
 ): Promise<UsersPluginResult> {
+    const useExternalAuth = !!options.authAdapter;
+
     // 1. Create store instances (in-memory defaults, overridable via options)
     const userStore: ICliUserStore = options.userStore ?? new InMemoryUserStore();
     const sessionStore: ICliSessionStore = options.sessionStore ?? new InMemorySessionStore();
-    const credentialStore: ICliCredentialStore = options.credentialStore ?? new InMemoryCredentialStore();
+    const credentialStore: ICliCredentialStore =
+        useExternalAuth
+            ? options.credentialStore ?? new InMemoryCredentialStore() // still created but unused
+            : options.credentialStore ?? new InMemoryCredentialStore();
     const auditStore: ICliAuditStore = options.auditStore ?? new InMemoryAuditStore();
     const groupStore: ICliGroupStore = options.groupStore || new InMemoryGroupStore();
 
     // 2. Create AuthService
     const authService = new AuthService(userStore, sessionStore, credentialStore, auditStore);
 
-    // 3. Seed default admin user if no users exist
-    const existingUsers = await userStore.getUsers();
-    if (existingUsers.length === 0) {
-        const adminPassword = options.defaultAdminPassword ?? 'root';
-        const adminUser = await userStore.createUser({
-            name: 'root',
-            email: 'root@localhost',
-            groups: ['admin'],
-        });
-        await authService.setPassword(adminUser.id, adminPassword);
+    // 3. Seed default admin user if no users exist (skip when using external auth)
+    if (!useExternalAuth) {
+        const existingUsers = await userStore.getUsers();
+        if (existingUsers.length === 0) {
+            const adminPassword = options.defaultAdminPassword ?? 'root';
+            const adminUser = await userStore.createUser({
+                name: 'root',
+                email: 'root@localhost',
+                groups: ['admin'],
+            });
+            await authService.setPassword(adminUser.id, adminPassword);
+        }
     }
 
     // 4. Seed 'admin' group if not already present
@@ -69,14 +77,16 @@ export async function buildUsersPlugin(
         await groupStore.createGroup('admin', 'Administrator group');
     }
 
-    // 5. Create auth middleware
-    const authMiddleware = createAuthMiddleware(sessionStore);
+    // 5. Create auth middleware (with optional adapter)
+    const authMiddleware = createAuthMiddleware(sessionStore, options.authAdapter);
 
     // 6. Build the router
     const router = Router();
 
     // /auth — no global auth requirement
-    router.use('/auth', createAuthController(authService, sessionStore));
+    router.use('/auth', createAuthController(authService, sessionStore, {
+        externalAuth: useExternalAuth,
+    }));
 
     // /users, /sessions, /groups, /audit — auth required globally
     router.use('/users', authMiddleware, createUsersController(userStore, authService, credentialStore, sessionStore));
