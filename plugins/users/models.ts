@@ -77,6 +77,7 @@ export interface UsersModuleOptions {
     sessionStore?: import('./stores/interfaces').ICliSessionStore;
     credentialStore?: import('./stores/interfaces').ICliCredentialStore;
     auditStore?: import('./stores/interfaces').ICliAuditStore;
+    groupStore?: import('./stores/interfaces').ICliGroupStore;
     sessionTimeoutMs?: number;
     defaultAdminPassword?: string;
 }

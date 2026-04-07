@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { ICliUserStore } from '../stores/interfaces';
+import { ICliUserStore, ICliCredentialStore, ICliSessionStore } from '../stores/interfaces';
 import { AuthService } from '../services/auth-service';
 import { requireAdmin } from '../middleware/auth-middleware';
 
 export function createUsersController(
     userStore: ICliUserStore,
     authService: AuthService,
+    credentialStore: ICliCredentialStore,
+    sessionStore: ICliSessionStore,
 ): Router {
     const router = Router();
 
@@ -58,7 +60,9 @@ export function createUsersController(
     // DELETE /:id — delete user (admin only)
     router.delete('/:id', requireAdmin, async (req: Request, res: Response): Promise<void> => {
         await userStore.deleteUser(req.params.id);
-        res.json({ message: 'User deleted' });
+        await credentialStore.deleteCredentials(req.params.id);
+        await sessionStore.deleteUserSessions(req.params.id);
+        res.status(204).end();
     });
 
     // PUT /:id/password — change password (self or admin)
@@ -74,14 +78,26 @@ export function createUsersController(
             return;
         }
 
-        const { password } = req.body ?? {};
-        if (!password) {
-            res.status(400).json({ error: 'password is required' });
+        const { currentPassword, newPassword } = req.body ?? {};
+        if (!newPassword) {
+            res.status(400).json({ error: 'newPassword is required' });
             return;
         }
 
+        if (isSelf && !isAdmin) {
+            if (!currentPassword) {
+                res.status(400).json({ error: 'currentPassword is required' });
+                return;
+            }
+            const valid = await authService.verifyPassword(targetId, currentPassword);
+            if (!valid) {
+                res.status(401).json({ error: 'Current password is incorrect' });
+                return;
+            }
+        }
+
         try {
-            await authService.setPassword(targetId, password);
+            await authService.setPassword(targetId, newPassword);
             res.json({ message: 'Password updated' });
         } catch (err: any) {
             res.status(400).json({ error: err.message });

@@ -29,16 +29,12 @@ export function createSessionsController(
 
         await sessionStore.deleteSessionById(req.params.id);
 
-        if (broadcastEvent) {
-            broadcastEvent({
-                type: 'session:kicked',
-                sessionId: session.id,
-                userId: session.userId,
-                username: session.user.name,
-            });
-        }
+        broadcastEvent?.({
+            type: 'session-kicked',
+            data: { sessionId: session.id, userId: session.userId },
+        });
 
-        res.json({ message: 'Session terminated' });
+        res.status(204).end();
     });
 
     return router;

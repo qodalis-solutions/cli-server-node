@@ -19,7 +19,7 @@ export function createAuditController(auditStore: ICliAuditStore): Router {
     // DELETE / — clear all audit entries (admin only)
     router.delete('/', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
         await auditStore.clear();
-        res.json({ message: 'Audit log cleared' });
+        res.status(204).end();
     });
 
     return router;

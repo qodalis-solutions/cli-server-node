@@ -35,12 +35,18 @@ export function createAuthController(
         const authHeader = req.headers['authorization'] ?? '';
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
         await authService.logout(token);
-        res.json({ message: 'Logged out successfully' });
+        res.status(204).end();
     });
 
-    // POST /verify — auth required, returns current session info
-    router.post('/verify', authMiddleware, (req: Request, res: Response): void => {
-        res.json({ valid: true, session: req.session });
+    // POST /verify — verify userId + password, returns { valid: boolean }
+    router.post('/verify', async (req: Request, res: Response): Promise<void> => {
+        const { userId, password } = req.body ?? {};
+        if (!userId || !password) {
+            res.status(400).json({ error: 'userId and password are required' });
+            return;
+        }
+        const valid = await authService.verifyPassword(userId, password);
+        res.json({ valid });
     });
 
     return router;

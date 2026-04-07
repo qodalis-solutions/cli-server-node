@@ -46,7 +46,7 @@ export async function buildUsersPlugin(
     const sessionStore: ICliSessionStore = options.sessionStore ?? new InMemorySessionStore();
     const credentialStore: ICliCredentialStore = options.credentialStore ?? new InMemoryCredentialStore();
     const auditStore: ICliAuditStore = options.auditStore ?? new InMemoryAuditStore();
-    const groupStore: ICliGroupStore = new InMemoryGroupStore();
+    const groupStore: ICliGroupStore = options.groupStore || new InMemoryGroupStore();
 
     // 2. Create AuthService
     const authService = new AuthService(userStore, sessionStore, credentialStore, auditStore);
@@ -79,7 +79,7 @@ export async function buildUsersPlugin(
     router.use('/auth', createAuthController(authService, sessionStore));
 
     // /users, /sessions, /groups, /audit — auth required globally
-    router.use('/users', authMiddleware, createUsersController(userStore, authService));
+    router.use('/users', authMiddleware, createUsersController(userStore, authService, credentialStore, sessionStore));
     router.use('/sessions', authMiddleware, createSessionsController(sessionStore, broadcastEvent));
     router.use('/groups', authMiddleware, createGroupsController(groupStore, userStore));
     router.use('/audit', authMiddleware, createAuditController(auditStore));

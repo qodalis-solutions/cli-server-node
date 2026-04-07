@@ -43,7 +43,7 @@ export function createGroupsController(
     // DELETE /:name — delete group (admin only)
     router.delete('/:name', requireAdmin, async (req: Request, res: Response): Promise<void> => {
         await groupStore.deleteGroup(req.params.name);
-        res.json({ message: 'Group deleted' });
+        res.status(204).end();
     });
 
     // PUT /:name/members/:userId — add user to group (admin only)
