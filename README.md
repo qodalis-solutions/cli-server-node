@@ -623,6 +623,22 @@ All commands support `--region` (`-r`) for region override and `--output` (`-o`)
 
 See [`plugins/aws/README.md`](plugins/aws/README.md) for the full command reference.
 
+### Users Plugin
+
+The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under `/api/v1/qcli` for authentication, users, sessions, groups and an audit log, with swappable storage (in-memory by default). It is the server side of the `@qodalis/cli-users` browser plugin's *server mode*.
+
+```typescript
+import { buildUsersPlugin } from '@qodalis/cli-server-plugin-users';
+
+const usersPlugin = await buildUsersPlugin(
+    { defaultAdminPassword: 'admin' },
+    (msg) => eventSocketManager.broadcastMessage(msg),
+);
+mountPlugin(usersPlugin);
+```
+
+See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, custom storage and external auth adapters.
+
 ## Built-in Processors
 
 These processors ship with the library and are included in the standalone server:
@@ -685,6 +701,7 @@ plugins/
   filesystem-sqlite/                  # SQLite persistence provider (better-sqlite3)
   filesystem-s3/                      # Amazon S3 storage provider (@aws-sdk/client-s3)
   jobs/                               # Job scheduling plugin
+  users/                              # Users plugin (auth, sessions, groups, audit)
   weather/                            # Weather module (example plugin)
 src/
   abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
