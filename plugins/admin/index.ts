@@ -5,3 +5,4 @@ export { AdminConfig, AdminCredentials, ConfigSection } from './services/admin-c
 export { signToken, verifyToken, JwtPayload } from './auth/jwt-service';
 export { AuthControllerResult } from './auth/auth-controller';
 export { createAuthMiddleware, AuthenticatedRequest } from './auth/auth-middleware';
+export { AdminAuthProvider, ADMIN_ACCESS_PERMISSION } from './auth/auth-provider';

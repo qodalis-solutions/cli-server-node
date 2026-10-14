@@ -2,6 +2,7 @@ import { Router, RequestHandler, static as expressStatic } from 'express';
 import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
+import { AdminAuthProvider } from './auth/auth-provider';
 import { createStatusController, StatusDeps } from './controllers/status-controller';
 import { createPluginsController } from './controllers/plugins-controller';
 import { createConfigController } from './controllers/config-controller';
@@ -47,6 +48,8 @@ export interface CliAdminPluginResult {
     authMiddleware: RequestHandler;
     /** The log ring buffer, in case you need to push entries programmatically. */
     logBuffer: LogRingBuffer;
+    /** Routes that stay public when the users plugin protects the server. */
+    publicRoutes: string[];
     /** Clean up timers and restore console. Call when shutting down. */
     dispose: () => void;
 }
@@ -71,6 +74,18 @@ export class CliAdminBuilder {
     private _registeredJobs = 0;
     private _dashboardDir?: string;
     private _enabledFeatures: string[] = [];
+    private _authProvider?: AdminAuthProvider;
+
+    /**
+     * Authenticate the dashboard through the users plugin
+     * (`usersPlugin.serverAuth`): login uses the users auth service and
+     * requires the `admin:access` permission (`admin` has it via `*`). The
+     * static credentials are then ignored.
+     */
+    setAuthProvider(provider: AdminAuthProvider): CliAdminBuilder {
+        this._authProvider = provider;
+        return this;
+    }
 
     /**
      * Set admin credentials.
@@ -114,6 +129,10 @@ export class CliAdminBuilder {
     build(deps: CliAdminBuildDeps): CliAdminPluginResult {
         const { registry, eventSocketManager, builder, executor, broadcastFn } = deps;
 
+        if (!this._authProvider && this._config.usesDefaultCredentials()) {
+            console.warn('[qcli-admin] WARNING: Using default admin credentials. Set QCLI_ADMIN_USERNAME and QCLI_ADMIN_PASSWORD environment variables.');
+        }
+
         // Resolve JWT secret: explicit > env var > random
         const secret = this._jwtSecret
             ?? process.env.QCLI_ADMIN_JWT_SECRET
@@ -134,13 +153,13 @@ export class CliAdminBuilder {
         logBuffer.interceptConsole();
 
         // Create auth middleware
-        const authMiddleware = createAuthMiddleware(secret);
+        const authMiddleware = createAuthMiddleware(secret, this._authProvider);
 
         // Create main router
         const router = Router();
 
         // Auth routes (login is unauthenticated, /me requires auth)
-        const authResult = createAuthController(this._config, secret);
+        const authResult = createAuthController(this._config, secret, this._authProvider);
         router.use('/auth', authResult.router);
 
         // Auth is applied per admin route group (not router-wide): this router
@@ -206,7 +225,16 @@ export class CliAdminBuilder {
             logBuffer.restoreConsole();
         };
 
-        return { prefix: '/api/v1/qcli', dashboardPrefix: '/qcli/admin', router, dashboardRouter, authMiddleware, logBuffer, dispose };
+        return {
+            prefix: '/api/v1/qcli',
+            dashboardPrefix: '/qcli/admin',
+            router,
+            dashboardRouter,
+            authMiddleware,
+            logBuffer,
+            publicRoutes: ['POST /api/v1/qcli/auth/login'],
+            dispose,
+        };
     }
 
     /**
