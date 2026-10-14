@@ -45,7 +45,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../data-explorer-mssql && npx tsc \
     && cd ../data-explorer-redis && npx tsc \
     && cd ../data-explorer-elasticsearch && npx tsc \
-    && cd ../aws && npx tsc \
+    && cd ../aws && npm install && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/
