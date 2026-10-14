@@ -111,26 +111,26 @@ describe('InMemorySessionStore', () => {
     });
 
     it('creates a session', async () => {
-        const session = await store.createSession('user-1', 'token-abc', mockUser, {
+        const session = await store.createSession('user-1', 'token-abc', {
             remoteAddress: '127.0.0.1',
         });
         expect(session.id).toBeDefined();
         expect(session.token).toBe('token-abc');
         expect(session.userId).toBe('user-1');
-        expect(session.user).toBe(mockUser);
-        expect(session.loginTime).toBeDefined();
+        expect((session as any).user).toBeUndefined();
+        expect(session.createdAt).toBeDefined();
         expect(session.lastActivity).toBeDefined();
     });
 
     it('gets session by token', async () => {
-        await store.createSession('user-1', 'my-token', mockUser, {});
+        await store.createSession('user-1', 'my-token', {});
         const found = await store.getSession('my-token');
         expect(found).toBeDefined();
         expect(found!.token).toBe('my-token');
     });
 
     it('gets session by id', async () => {
-        const session = await store.createSession('user-1', 'tok', mockUser, {});
+        const session = await store.createSession('user-1', 'tok', {});
         const found = await store.getSessionById(session.id);
         expect(found).toBeDefined();
         expect(found!.id).toBe(session.id);
@@ -142,30 +142,30 @@ describe('InMemorySessionStore', () => {
     });
 
     it('lists all active sessions', async () => {
-        await store.createSession('user-1', 't1', mockUser, {});
-        await store.createSession('user-1', 't2', mockUser, {});
+        await store.createSession('user-1', 't1', {});
+        await store.createSession('user-1', 't2', {});
         const sessions = await store.getActiveSessions();
         expect(sessions).toHaveLength(2);
     });
 
     it('deletes session by token', async () => {
-        await store.createSession('user-1', 'tok-del', mockUser, {});
+        await store.createSession('user-1', 'tok-del', {});
         await store.deleteSession('tok-del');
         const found = await store.getSession('tok-del');
         expect(found).toBeUndefined();
     });
 
     it('deletes session by id', async () => {
-        const session = await store.createSession('user-1', 'tok-by-id', mockUser, {});
+        const session = await store.createSession('user-1', 'tok-by-id', {});
         await store.deleteSessionById(session.id);
         const found = await store.getSessionById(session.id);
         expect(found).toBeUndefined();
     });
 
     it('deletes all sessions for a user', async () => {
-        await store.createSession('user-1', 'tok-a', mockUser, {});
-        await store.createSession('user-1', 'tok-b', mockUser, {});
-        await store.createSession('user-2', 'tok-c', { ...mockUser, id: 'user-2' }, {});
+        await store.createSession('user-1', 'tok-a', {});
+        await store.createSession('user-1', 'tok-b', {});
+        await store.createSession('user-2', 'tok-c', {});
         await store.deleteUserSessions('user-1');
         const sessions = await store.getActiveSessions();
         expect(sessions).toHaveLength(1);
@@ -173,7 +173,7 @@ describe('InMemorySessionStore', () => {
     });
 
     it('updates lastActivity', async () => {
-        const session = await store.createSession('user-1', 'tok-act', mockUser, {});
+        const session = await store.createSession('user-1', 'tok-act', {});
         const oldActivity = session.lastActivity;
         await new Promise((r) => setTimeout(r, 5));
         await store.updateLastActivity('tok-act');
@@ -182,7 +182,7 @@ describe('InMemorySessionStore', () => {
     });
 
     it('cleanup removes expired sessions', async () => {
-        await store.createSession('user-1', 'tok-old', mockUser, {});
+        await store.createSession('user-1', 'tok-old', {});
         // Wait a bit, then clean up with a very short timeout
         await new Promise((r) => setTimeout(r, 10));
         await store.cleanup(5); // 5ms timeout
@@ -191,7 +191,7 @@ describe('InMemorySessionStore', () => {
     });
 
     it('cleanup keeps non-expired sessions', async () => {
-        await store.createSession('user-1', 'tok-fresh', mockUser, {});
+        await store.createSession('user-1', 'tok-fresh', {});
         await store.cleanup(60000); // 1 minute timeout
         const sessions = await store.getActiveSessions();
         expect(sessions).toHaveLength(1);
@@ -311,7 +311,7 @@ describe('InMemoryGroupStore', () => {
     });
 
     it('creates and gets a group', async () => {
-        const group = await store.createGroup('admin', 'Administrators');
+        const group = await store.createGroup({ name: 'admin', description: 'Administrators' });
         expect(group.id).toBeDefined();
         expect(group.name).toBe('admin');
         expect(group.description).toBe('Administrators');
@@ -323,13 +323,13 @@ describe('InMemoryGroupStore', () => {
     });
 
     it('rejects duplicate group names', async () => {
-        await store.createGroup('admin');
-        await expect(store.createGroup('admin')).rejects.toThrow(/already exists/);
+        await store.createGroup({ name: 'admin' });
+        await expect(store.createGroup({ name: 'admin' })).rejects.toThrow(/already exists/);
     });
 
     it('lists all groups', async () => {
-        await store.createGroup('admin');
-        await store.createGroup('devs');
+        await store.createGroup({ name: 'admin' });
+        await store.createGroup({ name: 'devs' });
         const groups = await store.getGroups();
         expect(groups).toHaveLength(2);
     });
@@ -339,8 +339,25 @@ describe('InMemoryGroupStore', () => {
         expect(found).toBeUndefined();
     });
 
+    it('looks up groups case-insensitively and keeps the given name', async () => {
+        await store.createGroup({ name: 'DevOps', permissions: ['deploy:*'] });
+        const found = await store.getGroup('devops');
+        expect(found!.name).toBe('DevOps');
+        expect(found!.permissions).toEqual(['deploy:*']);
+        expect(found!.builtIn).toBe(false);
+        await expect(store.createGroup({ name: 'DEVOPS' })).rejects.toThrow(/already exists/);
+    });
+
+    it('updates description and permissions', async () => {
+        await store.createGroup({ name: 'ops' });
+        const updated = await store.updateGroup('OPS', { description: 'Ops', permissions: ['a:b'] });
+        expect(updated.description).toBe('Ops');
+        expect(updated.permissions).toEqual(['a:b']);
+        expect(updated.updatedAt).toBeGreaterThanOrEqual(updated.createdAt);
+    });
+
     it('deletes a group', async () => {
-        await store.createGroup('temp');
+        await store.createGroup({ name: 'temp' });
         await store.deleteGroup('temp');
         const found = await store.getGroup('temp');
         expect(found).toBeUndefined();

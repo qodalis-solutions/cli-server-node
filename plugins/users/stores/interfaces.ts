@@ -8,10 +8,13 @@ import {
     AuditEntry,
     AuditQueryOptions,
     Group,
+    CreateGroupDto,
+    UpdateGroupDto,
 } from '../models';
 
 export interface ICliUserStore {
     getUsers(): Promise<User[]>;
+    /** Lookup by id, then by name (case-insensitive). */
     getUser(idOrName: string): Promise<User | undefined>;
     createUser(data: CreateUserDto): Promise<User>;
     updateUser(id: string, data: UpdateUserDto): Promise<User>;
@@ -19,7 +22,7 @@ export interface ICliUserStore {
 }
 
 export interface ICliSessionStore {
-    createSession(userId: string, token: string, user: User, metadata: SessionMetadata): Promise<Session>;
+    createSession(userId: string, token: string, metadata: SessionMetadata): Promise<Session>;
     getSession(token: string): Promise<Session | undefined>;
     getSessionById(id: string): Promise<Session | undefined>;
     getActiveSessions(): Promise<Session[]>;
@@ -27,6 +30,7 @@ export interface ICliSessionStore {
     deleteSessionById(id: string): Promise<void>;
     deleteUserSessions(userId: string): Promise<void>;
     updateLastActivity(token: string): Promise<void>;
+    /** Removes sessions idle for longer than `maxAgeMs`. */
     cleanup(maxAgeMs: number): Promise<void>;
 }
 
@@ -38,13 +42,16 @@ export interface ICliCredentialStore {
 
 export interface ICliAuditStore {
     log(entry: AuditEntry): Promise<void>;
+    /** Newest first. */
     getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]>;
     clear(): Promise<void>;
 }
 
 export interface ICliGroupStore {
     getGroups(): Promise<Group[]>;
+    /** Case-insensitive lookup by name. */
     getGroup(name: string): Promise<Group | undefined>;
-    createGroup(name: string, description?: string): Promise<Group>;
+    createGroup(group: CreateGroupDto): Promise<Group>;
+    updateGroup(name: string, data: UpdateGroupDto): Promise<Group>;
     deleteGroup(name: string): Promise<void>;
 }

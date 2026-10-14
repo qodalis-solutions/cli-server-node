@@ -1,83 +1,87 @@
-import { Request, Response, NextFunction } from 'express';
-import { ICliSessionStore } from '../stores/interfaces';
-import { Session, AuthAdapter } from '../models';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
+import { AuthAdapter } from '../models';
+import { AuthService, AuthContext } from '../services/auth-service';
+import { asyncHandler, forbidden, unauthorized } from '../errors';
+import { ADMIN_GROUP, hasPermission, inGroup } from '../permissions';
 
-// Extend Express Request to include the session
 declare global {
     namespace Express {
         interface Request {
-            session?: Session;
+            /** Set by the users plugin auth middleware. */
+            qcliAuth?: AuthContext;
         }
     }
 }
 
-export function createAuthMiddleware(sessionStore: ICliSessionStore, authAdapter?: AuthAdapter) {
-    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+/** Extracts the bearer token from the Authorization header. */
+export function getBearerToken(req: Request): string | undefined {
+    const header = req.headers['authorization'];
+    if (!header || !header.startsWith('Bearer ')) {
+        return undefined;
+    }
+    const token = header.slice(7).trim();
+    return token || undefined;
+}
+
+/**
+ * Authenticates the request (bearer token, or the host's auth adapter) and
+ * attaches the live user and effective permissions as `req.qcliAuth`.
+ */
+export function createAuthMiddleware(authService: AuthService, authAdapter?: AuthAdapter): RequestHandler {
+    return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
         if (authAdapter) {
-            // External auth adapter path
             const result = authAdapter(req);
-            if (!result) {
-                res.status(401).json({ error: 'Unauthorized' });
-                return;
+            if (!result || !result.user) {
+                throw unauthorized();
             }
-
             const { user, isAdmin } = result;
-
-            // Ensure the user's groups reflect the isAdmin flag
+            if (user.disabled) {
+                throw unauthorized('account disabled');
+            }
             const groups = [...(user.groups ?? [])];
-            if (isAdmin && !groups.includes('admin')) {
-                groups.push('admin');
+            if (isAdmin && !inGroup(groups, ADMIN_GROUP)) {
+                groups.push(ADMIN_GROUP);
             }
-            const sessionUser = { ...user, groups };
-
-            // Create or reuse a lightweight session keyed by user id for audit trail
-            const adapterTokenKey = `__adapter__${user.id}`;
-            let session = await sessionStore.getSession(adapterTokenKey);
-            if (!session) {
-                session = await sessionStore.createSession(
-                    user.id,
-                    adapterTokenKey,
-                    sessionUser,
-                    {
-                        remoteAddress: req.ip,
-                        userAgent: req.headers['user-agent'],
-                    },
-                );
-            } else {
-                // Update the user snapshot in case groups/data changed
-                session.user = sessionUser;
-                await sessionStore.updateLastActivity(adapterTokenKey);
-            }
-
-            req.session = session;
+            const liveUser = { ...user, groups };
+            req.qcliAuth = { user: liveUser, permissions: await authService.getEffectivePermissions(liveUser) };
             next();
             return;
         }
 
-        // Standard Bearer-token path
-        const authHeader = req.headers['authorization'];
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            res.status(401).json({ error: 'Unauthorized' });
-            return;
+        const token = getBearerToken(req);
+        if (!token) {
+            throw unauthorized();
         }
-
-        const token = authHeader.slice(7);
-        const session = await sessionStore.getSession(token);
-        if (!session) {
-            res.status(401).json({ error: 'Invalid or expired token' });
-            return;
-        }
-
-        await sessionStore.updateLastActivity(token);
-        req.session = session;
+        req.qcliAuth = await authService.authenticateToken(token);
         next();
-    };
+    });
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-    if (!req.session?.user?.groups?.includes('admin')) {
-        res.status(403).json({ error: 'Forbidden: admin access required' });
-        return;
+/** The authenticated context; fails closed (401) if the middleware did not run. */
+export function getAuth(req: Request): AuthContext {
+    if (!req.qcliAuth) {
+        throw unauthorized();
     }
-    next();
+    return req.qcliAuth;
+}
+
+export function can(req: Request, permission: string): boolean {
+    return hasPermission(req.qcliAuth?.permissions, permission);
+}
+
+/** Middleware requiring all the given permissions (403 otherwise). */
+export function requirePermission(...permissions: string[]): RequestHandler {
+    return (req: Request, _res: Response, next: NextFunction) => {
+        const auth = req.qcliAuth;
+        if (!auth) {
+            next(unauthorized());
+            return;
+        }
+        const missing = permissions.filter((p) => !hasPermission(auth.permissions, p));
+        if (missing.length > 0) {
+            next(forbidden(`forbidden: missing permission ${missing.join(', ')}`));
+            return;
+        }
+        next();
+    };
 }

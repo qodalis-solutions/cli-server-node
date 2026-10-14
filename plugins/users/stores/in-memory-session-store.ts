@@ -1,40 +1,41 @@
 import { randomUUID } from 'crypto';
-import { Session, SessionMetadata, User } from '../models';
+import { Session, SessionMetadata } from '../models';
 import { ICliSessionStore } from './interfaces';
 
 export class InMemorySessionStore implements ICliSessionStore {
+    /** Keyed by token. */
     private sessions: Map<string, Session> = new Map();
 
-    async createSession(userId: string, token: string, user: User, metadata: SessionMetadata): Promise<Session> {
+    async createSession(userId: string, token: string, metadata: SessionMetadata): Promise<Session> {
         const now = Date.now();
         const session: Session = {
             id: randomUUID(),
             token,
             userId,
-            user,
-            loginTime: now,
+            createdAt: now,
             lastActivity: now,
-            metadata,
+            metadata: { ...metadata },
         };
         this.sessions.set(token, session);
-        return session;
+        return { ...session };
     }
 
     async getSession(token: string): Promise<Session | undefined> {
-        return this.sessions.get(token);
+        const s = this.sessions.get(token);
+        return s ? { ...s } : undefined;
     }
 
     async getSessionById(id: string): Promise<Session | undefined> {
         for (const session of this.sessions.values()) {
             if (session.id === id) {
-                return session;
+                return { ...session };
             }
         }
         return undefined;
     }
 
     async getActiveSessions(): Promise<Session[]> {
-        return Array.from(this.sessions.values());
+        return Array.from(this.sessions.values()).map((s) => ({ ...s }));
     }
 
     async deleteSession(token: string): Promise<void> {

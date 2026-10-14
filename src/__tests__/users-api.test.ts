@@ -1,754 +1,800 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import express, { Request } from 'express';
 import request from 'supertest';
-import { buildUsersPlugin, UsersPluginResult } from '../../plugins/users/index';
+import { buildUsersPlugin, CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 import { User, AuthAdapter } from '../../plugins/users/models';
+import { BASE, ROOT_PASS, TestServer, auth, createTestServer, createUser, createGroup, login } from './users-test-helpers';
 
-describe('Users API Integration', () => {
-    let app: express.Express;
-    let plugin: UsersPluginResult;
-    let adminToken: string;
-    let adminUserId: string;
+// ---------------------------------------------------------------------------
+// Builder / registration
+// ---------------------------------------------------------------------------
 
-    beforeAll(async () => {
-        app = express();
-        app.use(express.json());
-        plugin = await buildUsersPlugin({ defaultAdminPassword: 'admin123' });
-        app.use(plugin.prefix, plugin.router);
-
-        // Login as admin to get token
-        const res = await request(app)
-            .post('/api/v1/qcli/sessions')
-            .send({ username: 'root', password: 'admin123' });
-        adminToken = res.body.token;
-        adminUserId = res.body.session?.userId;
-    });
-
-    afterAll(() => {
+describe('CliUsersBuilder', () => {
+    it('builds synchronously and seeds through ready', async () => {
+        const plugin = new CliUsersBuilder().setDefaultAdminPassword('pw12').setSessionTimeout(1000).build();
+        expect(plugin.prefix).toBe('/api/v1/qcli');
+        expect(plugin.ready).toBeInstanceOf(Promise);
+        await plugin.ready;
+        const groups = await plugin.groupStore.getGroups();
+        expect(groups.map((g) => g.name).sort()).toEqual(['admin', 'users']);
+        const admin = groups.find((g) => g.name === 'admin')!;
+        expect(admin.permissions).toEqual(['*']);
+        expect(admin.builtIn).toBe(true);
+        const usersGroup = groups.find((g) => g.name === 'users')!;
+        expect(usersGroup.permissions).toEqual([]);
+        expect(usersGroup.builtIn).toBe(true);
+        const root = await plugin.userStore.getUser('root');
+        expect(root).toMatchObject({ email: 'root@localhost', groups: ['admin'] });
+        expect(await plugin.authService.verifyPassword(root!.id, 'pw12')).toBe(true);
         plugin.dispose();
     });
 
-    // -------------------------------------------------------------------------
-    // Auth
-    // -------------------------------------------------------------------------
+    it('requests arriving before seeding completes wait for ready', async () => {
+        const plugin = new CliUsersBuilder().setDefaultAdminPassword('early').build();
+        const app = express();
+        app.use(plugin.prefix, plugin.router);
+        const res = await request(app).post(`${BASE}/sessions`).send({ username: 'root', password: 'early' });
+        expect(res.status).toBe(201);
+        plugin.dispose();
+    });
 
-    describe('POST /sessions (login)', () => {
-        it('returns 201 with token and session for valid credentials', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root', password: 'admin123' });
+    it('keeps buildUsersPlugin as a deprecated async wrapper', async () => {
+        const plugin = await buildUsersPlugin({ defaultAdminPassword: 'legacy' });
+        expect(await plugin.userStore.getUser('root')).toBeDefined();
+        plugin.dispose();
+    });
 
-            expect(res.status).toBe(201);
-            expect(res.body.token).toBeDefined();
-            expect(res.body.session).toBeDefined();
-            expect(res.body.session.userId).toBeDefined();
+    it('uses custom stores passed to the builder', async () => {
+        const { InMemoryUserStore } = await import('../../plugins/users/index');
+        const store = new InMemoryUserStore();
+        await store.createUser({ name: 'preexisting', email: 'pre@x.com', groups: ['admin'] });
+        const plugin = new CliUsersBuilder().setUserStore(store).build();
+        await plugin.ready;
+        expect(plugin.userStore).toBe(store);
+        expect(await store.getUser('root')).toBeUndefined(); // store not empty → no root seed
+        plugin.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Login / sessions
+// ---------------------------------------------------------------------------
+
+describe('Sessions', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterEach(() => s.plugin.dispose());
+
+    it('POST /sessions returns 201 with the contract shape', async () => {
+        const res = await request(s.app).post(`${BASE}/sessions`).send({ username: 'root', password: ROOT_PASS });
+        expect(res.status).toBe(201);
+        expect(typeof res.body.token).toBe('string');
+        const session = res.body.session;
+        expect(Object.keys(session).sort()).toEqual(['expiresAt', 'id', 'lastActivity', 'loginTime', 'permissions', 'user']);
+        expect(session.permissions).toEqual(['*']);
+        expect(session.user).toMatchObject({ name: 'root', email: 'root@localhost', groups: ['admin'], disabled: false });
+        expect(session.user.lastLoginAt).toBeGreaterThan(0);
+        expect(session.expiresAt).toBe(session.lastActivity + 30 * 60 * 1000);
+        expect(JSON.stringify(session)).not.toContain(res.body.token);
+    });
+
+    it('logs in by email', async () => {
+        const res = await request(s.app).post(`${BASE}/sessions`).send({ username: 'ROOT@localhost', password: ROOT_PASS });
+        expect(res.status).toBe(201);
+    });
+
+    it('returns 401 {error} for a wrong password or unknown user', async () => {
+        const bad = await request(s.app).post(`${BASE}/sessions`).send({ username: 'root', password: 'nope' });
+        expect(bad.status).toBe(401);
+        expect(bad.body).toEqual({ error: expect.any(String) });
+        const unknown = await request(s.app).post(`${BASE}/sessions`).send({ username: 'ghost', password: 'nope' });
+        expect(unknown.status).toBe(401);
+        expect(unknown.body.error).toBeDefined();
+    });
+
+    it('returns 400 when username or password is missing', async () => {
+        expect((await request(s.app).post(`${BASE}/sessions`).send({ password: 'x' })).status).toBe(400);
+        const res = await request(s.app).post(`${BASE}/sessions`).send({ username: 'root' });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBeDefined();
+    });
+
+    it('returns 403 account disabled for a disabled user with the right password', async () => {
+        await createUser(s.app, rootToken, { name: 'dis', email: 'dis@x.com', password: 'pass', disabled: true });
+        const res = await request(s.app).post(`${BASE}/sessions`).send({ username: 'dis', password: 'pass' });
+        expect(res.status).toBe(403);
+        expect(res.body).toEqual({ error: 'account disabled' });
+    });
+
+    it('locks out after 5 failures with 429', async () => {
+        await createUser(s.app, rootToken, { name: 'lucy', email: 'lucy@x.com', password: 'pass' });
+        for (let i = 0; i < 5; i++) {
+            const r = await request(s.app).post(`${BASE}/sessions`).send({ username: 'lucy', password: 'bad' });
+            expect(r.status).toBe(401);
+        }
+        const res = await request(s.app).post(`${BASE}/sessions`).send({ username: 'lucy@x.com', password: 'pass' });
+        expect(res.status).toBe(429);
+        expect(res.body).toEqual({ error: 'account locked, try again later' });
+    });
+
+    it('persists lastLoginAt on the user', async () => {
+        const res = await request(s.app).get(`${BASE}/users/root`).set(auth(rootToken));
+        expect(res.body.lastLoginAt).toBeGreaterThan(0);
+    });
+
+    it('GET /sessions/current returns the login session shape', async () => {
+        const res = await request(s.app).get(`${BASE}/sessions/current`).set(auth(rootToken));
+        expect(res.status).toBe(200);
+        expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'id', 'lastActivity', 'loginTime', 'permissions', 'user']);
+        expect(res.body.user.name).toBe('root');
+        expect(res.body).not.toHaveProperty('token');
+    });
+
+    it('requires auth for /sessions/current', async () => {
+        expect((await request(s.app).get(`${BASE}/sessions/current`)).status).toBe(401);
+        expect((await request(s.app).delete(`${BASE}/sessions/current`)).status).toBe(401);
+        const res = await request(s.app).get(`${BASE}/sessions/current`).set(auth('bogus'));
+        expect(res.status).toBe(401);
+        expect(res.body.error).toBeDefined();
+    });
+
+    it('DELETE /sessions/current logs out', async () => {
+        const { token } = await login(s.app, 'root', ROOT_PASS);
+        expect((await request(s.app).delete(`${BASE}/sessions/current`).set(auth(token))).status).toBe(204);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(token))).status).toBe(401);
+        const audit = await request(s.app).get(`${BASE}/audit?event=logout`).set(auth(rootToken));
+        expect(audit.body.length).toBe(1);
+    });
+
+    it('GET /sessions lists sessions without tokens, with current flag', async () => {
+        const other = await login(s.app, 'root', ROOT_PASS);
+        const res = await request(s.app).get(`${BASE}/sessions`).set(auth(rootToken));
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveLength(2);
+        for (const view of res.body) {
+            expect(Object.keys(view).sort()).toEqual(
+                ['createdAt', 'current', 'expiresAt', 'id', 'lastActivity', 'metadata', 'userId', 'userName'],
+            );
+            expect(view.userName).toBe('root');
+            expect(view.expiresAt).toBe(view.lastActivity + 30 * 60 * 1000);
+        }
+        expect(JSON.stringify(res.body)).not.toContain(rootToken);
+        expect(JSON.stringify(res.body)).not.toContain(other.token);
+        expect(res.body.filter((v: any) => v.current)).toHaveLength(1);
+        expect(res.body.find((v: any) => v.id === other.sessionId).current).toBe(false);
+    });
+
+    it('DELETE /sessions/:id revokes, broadcasts session-kicked and audits', async () => {
+        const other = await login(s.app, 'root', ROOT_PASS);
+        const res = await request(s.app).delete(`${BASE}/sessions/${other.sessionId}`).set(auth(rootToken));
+        expect(res.status).toBe(204);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(other.token))).status).toBe(401);
+        expect(s.broadcast).toHaveBeenCalledWith({
+            type: 'session-kicked',
+            data: { sessionId: other.sessionId, userId: other.userId, reason: 'revoked' },
         });
+        const audit = await request(s.app).get(`${BASE}/audit?event=session_revoked`).set(auth(rootToken));
+        expect(audit.body[0]).toMatchObject({ event: 'session_revoked', username: 'root', actor: 'root' });
+    });
 
-        it('returns 401 for invalid credentials', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root', password: 'wrongpassword' });
+    it('DELETE /sessions/:id returns 404 for an unknown id', async () => {
+        const res = await request(s.app).delete(`${BASE}/sessions/nope`).set(auth(rootToken));
+        expect(res.status).toBe(404);
+        expect(res.body.error).toBeDefined();
+    });
+});
 
-            expect(res.status).toBe(401);
+// ---------------------------------------------------------------------------
+// Idle timeout
+// ---------------------------------------------------------------------------
+
+describe('Idle session timeout', () => {
+    let s: TestServer;
+    afterEach(() => s.plugin.dispose());
+
+    it('expires idle sessions (401) and deletes them', async () => {
+        s = await createTestServer({ sessionTimeoutMs: 300 });
+        const { token, sessionId } = await login(s.app, 'root', ROOT_PASS);
+        await new Promise((r) => setTimeout(r, 400));
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(token))).status).toBe(401);
+        expect(await s.plugin.sessionStore.getSessionById(sessionId)).toBeUndefined();
+    });
+
+    it('slides lastActivity on each request', async () => {
+        s = await createTestServer({ sessionTimeoutMs: 300 });
+        const { token } = await login(s.app, 'root', ROOT_PASS);
+        for (let i = 0; i < 4; i++) {
+            await new Promise((r) => setTimeout(r, 150));
+            expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(token))).status).toBe(200);
+        }
+        const res = await request(s.app).get(`${BASE}/sessions/current`).set(auth(token));
+        expect(res.body.expiresAt).toBe(res.body.lastActivity + 300);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+describe('Users', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeAll(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+        await createUser(s.app, rootToken, { name: 'alice', email: 'alice@x.com', password: 'pass' });
+        await createUser(s.app, rootToken, { name: 'bob', email: 'bob@x.com', password: 'pass' });
+        await createUser(s.app, rootToken, { name: 'carol', email: 'carol@corp.io', password: 'pass' });
+    });
+    afterAll(() => s.plugin.dispose());
+
+    it('POST /users returns 201 User with defaults', async () => {
+        const res = await request(s.app).post(`${BASE}/users`).set(auth(rootToken))
+            .send({ name: 'dave', email: 'dave@x.com', homeDir: '/home/dave', data: { team: 'a' } });
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ name: 'dave', email: 'dave@x.com', groups: ['users'], disabled: false, homeDir: '/home/dave', data: { team: 'a' } });
+        expect(res.body.id).toBeDefined();
+        expect(res.body.createdAt).toBeGreaterThan(0);
+        expect(res.body.updatedAt).toBeGreaterThan(0);
+        expect(res.body).not.toHaveProperty('lastLoginAt');
+        expect(res.body).not.toHaveProperty('password');
+    });
+
+    it('omits absent optional fields and always includes disabled', async () => {
+        const res = await request(s.app).get(`${BASE}/users/alice`).set(auth(rootToken));
+        expect(res.body.disabled).toBe(false);
+        expect(res.body).not.toHaveProperty('homeDir');
+        expect(res.body).not.toHaveProperty('data');
+    });
+
+    it('validates input (400)', async () => {
+        const cases = [
+            { email: 'x@x.com' },
+            { name: 'x' },
+            { name: 'x', email: 'x@x.com', groups: 'admin' },
+            { name: 'x', email: 'x@x.com', disabled: 'yes' },
+            { name: 'x', email: 'x@x.com', password: 'abc' }, // too short
+        ];
+        for (const body of cases) {
+            const res = await request(s.app).post(`${BASE}/users`).set(auth(rootToken)).send(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
             expect(res.body.error).toBeDefined();
-        });
-
-        it('returns 401 for unknown username', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'nobody', password: 'pass' });
-
-            expect(res.status).toBe(401);
-        });
-
-        it('returns 400 when username is missing', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ password: 'admin123' });
-
-            expect(res.status).toBe(400);
-        });
-
-        it('returns 400 when password is missing', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root' });
-
-            expect(res.status).toBe(400);
-        });
-
-        it('returns 401 for disabled user account', async () => {
-            // Create a user, disable via PUT, then try login
-            const createRes = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'disableduser', email: 'disabled@example.com', password: 'disabledpass' });
-            const userId = createRes.body.id;
-
-            await request(app)
-                .put(`/api/v1/qcli/users/${userId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ disabled: true });
-
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'disableduser', password: 'disabledpass' });
-
-            expect(loginRes.status).toBe(401);
-            expect(loginRes.body.error).toBeDefined();
-        });
+        }
     });
 
-    describe('DELETE /sessions/current (logout)', () => {
-        it('returns 204 and invalidates the session', async () => {
-            // Create a separate login session to logout
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root', password: 'admin123' });
-
-            const tempToken = loginRes.body.token;
-
-            const logoutRes = await request(app)
-                .delete('/api/v1/qcli/sessions/current')
-                .set('Authorization', `Bearer ${tempToken}`);
-
-            expect(logoutRes.status).toBe(204);
-
-            // Token should no longer work
-            const usersRes = await request(app)
-                .get('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${tempToken}`);
-
-            expect(usersRes.status).toBe(401);
-        });
-
-        it('returns 401 without a token', async () => {
-            const res = await request(app).delete('/api/v1/qcli/sessions/current');
-            expect(res.status).toBe(401);
-        });
+    it('rejects unknown groups with 400 unknown group', async () => {
+        const res = await request(s.app).post(`${BASE}/users`).set(auth(rootToken))
+            .send({ name: 'eve', email: 'eve@x.com', groups: ['nosuch'] });
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'unknown group: nosuch' });
     });
 
-    describe('POST /users/:id/verify-password', () => {
-        it('returns { valid: true } for correct password', async () => {
-            const res = await request(app)
-                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ password: 'admin123' });
-
-            expect(res.status).toBe(200);
-            expect(res.body.valid).toBe(true);
-        });
-
-        it('returns { valid: false } for wrong password', async () => {
-            const res = await request(app)
-                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ password: 'wrongpassword' });
-
-            expect(res.status).toBe(200);
-            expect(res.body.valid).toBe(false);
-        });
-
-        it('returns 400 when password is missing', async () => {
-            const res = await request(app)
-                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({});
-
-            expect(res.status).toBe(400);
-        });
-
-        it('returns 401 without a session', async () => {
-            const res = await request(app)
-                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
-                .send({ password: 'admin123' });
-
-            expect(res.status).toBe(401);
-        });
+    it('rejects duplicate name or email (409), also on update', async () => {
+        expect((await request(s.app).post(`${BASE}/users`).set(auth(rootToken)).send({ name: 'ALICE', email: 'new@x.com' })).status).toBe(409);
+        expect((await request(s.app).post(`${BASE}/users`).set(auth(rootToken)).send({ name: 'new', email: 'Alice@x.com' })).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/bob`).set(auth(rootToken)).send({ name: 'alice' })).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/bob`).set(auth(rootToken)).send({ email: 'alice@x.com' })).status).toBe(409);
     });
 
-    // -------------------------------------------------------------------------
-    // Users
-    // -------------------------------------------------------------------------
+    it('GET /users supports query, skip and take', async () => {
+        const all = await request(s.app).get(`${BASE}/users`).set(auth(rootToken));
+        expect(all.status).toBe(200);
+        expect(all.body.length).toBeGreaterThanOrEqual(4);
 
-    describe('GET /users', () => {
-        it('returns 401 without auth token', async () => {
-            const res = await request(app).get('/api/v1/qcli/users');
-            expect(res.status).toBe(401);
-        });
+        const q = await request(s.app).get(`${BASE}/users?query=CORP`).set(auth(rootToken));
+        expect(q.body.map((u: User) => u.name)).toEqual(['carol']);
 
-        it('returns 200 with list of users when authenticated', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`);
+        const byName = await request(s.app).get(`${BASE}/users?query=li`).set(auth(rootToken));
+        expect(byName.body.map((u: User) => u.name)).toEqual(['alice']);
 
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-            expect(res.body.length).toBeGreaterThan(0);
-        });
+        const page = await request(s.app).get(`${BASE}/users?skip=1&take=2`).set(auth(rootToken));
+        expect(page.body.map((u: User) => u.name)).toEqual(all.body.slice(1, 3).map((u: User) => u.name));
+
+        expect((await request(s.app).get(`${BASE}/users?take=-1`).set(auth(rootToken))).status).toBe(400);
     });
 
-    describe('POST /users', () => {
-        it('admin can create a new user (201)', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'alice', email: 'alice@example.com', password: 'alicepass' });
-
-            expect(res.status).toBe(201);
-            expect(res.body.name).toBe('alice');
-            expect(res.body.id).toBeDefined();
-        });
-
-        it('returns 409 for duplicate username', async () => {
-            // alice was already created above
-            const res = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'alice', email: 'alice2@example.com' });
-
-            expect(res.status).toBe(409);
-        });
-
-        it('returns 400 when name is missing', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ email: 'noemail@example.com' });
-
-            expect(res.status).toBe(400);
-        });
-
-        it('returns 400 when email is missing', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'noemailuser' });
-
-            expect(res.status).toBe(400);
-        });
+    it('GET /users/:idOrName by id or name; 404 unknown', async () => {
+        const byName = await request(s.app).get(`${BASE}/users/alice`).set(auth(rootToken));
+        expect(byName.status).toBe(200);
+        const byId = await request(s.app).get(`${BASE}/users/${byName.body.id}`).set(auth(rootToken));
+        expect(byId.body.name).toBe('alice');
+        const missing = await request(s.app).get(`${BASE}/users/ghost`).set(auth(rootToken));
+        expect(missing.status).toBe(404);
+        expect(missing.body).toEqual({ error: expect.any(String) });
     });
 
-    describe('GET /users/:idOrName', () => {
-        it('returns user by username', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/users/root')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(res.body.name).toBe('root');
-        });
-
-        it('returns 404 for unknown user', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/users/no-such-user')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(404);
-        });
+    it('GET /users/:idOrName/permissions', async () => {
+        const res = await request(s.app).get(`${BASE}/users/root/permissions`).set(auth(rootToken));
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ userId: expect.any(String), groups: ['admin'], permissions: ['*'] });
     });
 
-    describe('PUT /users/:id', () => {
-        it('admin can update user email', async () => {
-            // First get alice's id
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            const aliceId = getRes.body.id;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ email: 'alice-updated@example.com' });
-
-            expect(res.status).toBe(200);
-            expect(res.body.email).toBe('alice-updated@example.com');
-        });
-
-        it('returns 404 for non-existent user id', async () => {
-            const res = await request(app)
-                .put('/api/v1/qcli/users/non-existent-id')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ email: 'test@example.com' });
-
-            expect(res.status).toBe(404);
-        });
+    it('PUT /users/:idOrName updates by name and audits', async () => {
+        const res = await request(s.app).put(`${BASE}/users/carol`).set(auth(rootToken))
+            .send({ email: 'carol@new.io', homeDir: '/h/c', groups: ['USERS'] });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ email: 'carol@new.io', homeDir: '/h/c', groups: ['users'] });
+        const audit = await request(s.app).get(`${BASE}/audit?event=user_updated&username=carol`).set(auth(rootToken));
+        expect(audit.body[0]).toMatchObject({ actor: 'root' });
     });
 
-    describe('DELETE /users/:id', () => {
-        it('admin can delete a user (204)', async () => {
-            // Create a user to delete
-            const createRes = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'deleteme', email: 'deleteme@example.com' });
-
-            const userId = createRes.body.id;
-
-            const deleteRes = await request(app)
-                .delete(`/api/v1/qcli/users/${userId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(deleteRes.status).toBe(204);
-
-            // User should no longer exist
-            const getRes = await request(app)
-                .get(`/api/v1/qcli/users/${userId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(getRes.status).toBe(404);
-        });
+    it('PUT /users/:idOrName 404 for unknown user', async () => {
+        const res = await request(s.app).put(`${BASE}/users/ghost`).set(auth(rootToken)).send({ email: 'g@x.com' });
+        expect(res.status).toBe(404);
     });
 
-    describe('PUT /users/:id/password', () => {
-        it('admin can change another user password without currentPassword', async () => {
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
+    it('rename keeps working (name change)', async () => {
+        const id = await createUser(s.app, rootToken, { name: 'temp1', email: 'temp1@x.com' });
+        const res = await request(s.app).put(`${BASE}/users/temp1`).set(auth(rootToken)).send({ name: 'temp2' });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ id, name: 'temp2' });
+    });
+});
 
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}/password`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ newPassword: 'newAlicePass' });
+// ---------------------------------------------------------------------------
+// Passwords
+// ---------------------------------------------------------------------------
 
-            expect(res.status).toBe(200);
-            expect(res.body.message).toBeDefined();
-        });
+describe('Passwords', () => {
+    let s: TestServer;
+    let rootToken: string;
 
-        it('user can change own password with currentPassword', async () => {
-            // Get alice's id and log in as alice
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+        await createUser(s.app, rootToken, { name: 'pat', email: 'pat@x.com', password: 'oldpass' });
+        await createUser(s.app, rootToken, { name: 'quinn', email: 'quinn@x.com', password: 'qpass' });
+    });
+    afterEach(() => s.plugin.dispose());
 
-            // Login as alice with newAlicePass set above
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'alice', password: 'newAlicePass' });
-            const aliceToken = loginRes.body.token;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}/password`)
-                .set('Authorization', `Bearer ${aliceToken}`)
-                .send({ currentPassword: 'newAlicePass', newPassword: 'alicepass2' });
-
-            expect(res.status).toBe(200);
-        });
-
-        it('returns 403 when self-change currentPassword is wrong', async () => {
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'alice', password: 'alicepass2' });
-            const aliceToken = loginRes.body.token;
-            const aliceId = loginRes.body.session.userId;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}/password`)
-                .set('Authorization', `Bearer ${aliceToken}`)
-                .send({ currentPassword: 'wrongcurrent', newPassword: 'newpass' });
-
-            expect(res.status).toBe(403);
-        });
-
-        it('returns 400 when newPassword is missing', async () => {
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}/password`)
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ currentPassword: 'alicepass2' });
-
-            expect(res.status).toBe(400);
-            expect(res.body.error).toContain('newPassword');
-        });
-
-        it('returns 400 when non-admin self-change is missing currentPassword', async () => {
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'alice', password: 'alicepass2' });
-            const aliceToken = loginRes.body.token;
-            const aliceId = loginRes.body.session.userId;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${aliceId}/password`)
-                .set('Authorization', `Bearer ${aliceToken}`)
-                .send({ newPassword: 'newpass' });
-
-            expect(res.status).toBe(400);
-            expect(res.body.error).toContain('currentPassword');
-        });
+    it('self change requires the correct currentPassword', async () => {
+        const { token } = await login(s.app, 'pat', 'oldpass');
+        const wrong = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(token)).send({ password: 'newpass', currentPassword: 'bad' });
+        expect(wrong.status).toBe(403);
+        expect(wrong.body.error).toBeDefined();
+        const missing = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(token)).send({ password: 'newpass' });
+        expect(missing.status).toBe(400);
+        const ok = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(token)).send({ password: 'newpass', currentPassword: 'oldpass' });
+        expect(ok.status).toBe(204);
+        await login(s.app, 'pat', 'newpass');
     });
 
-    // -------------------------------------------------------------------------
-    // Sessions
-    // -------------------------------------------------------------------------
-
-    describe('GET /sessions', () => {
-        it('admin can list active sessions', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/sessions')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
+    it('self change revokes only the other sessions of the caller', async () => {
+        const a = await login(s.app, 'pat', 'oldpass');
+        const b = await login(s.app, 'pat', 'oldpass');
+        await request(s.app).put(`${BASE}/users/pat/password`).set(auth(a.token)).send({ password: 'newpass', currentPassword: 'oldpass' }).expect(204);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(a.token))).status).toBe(200);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(b.token))).status).toBe(401);
+        expect(s.broadcast).toHaveBeenCalledWith({
+            type: 'session-kicked',
+            data: { sessionId: b.sessionId, userId: b.userId, reason: 'password changed' },
         });
+        expect(s.broadcast).toHaveBeenCalledTimes(1);
     });
 
-    describe('GET /sessions/current', () => {
-        it('returns current session for authenticated user', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/sessions/current')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(res.body.token).toBe(adminToken);
-        });
+    it('change by users:update needs no current password and revokes all target sessions', async () => {
+        const a = await login(s.app, 'pat', 'oldpass');
+        const res = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(rootToken)).send({ password: 'reset1' });
+        expect(res.status).toBe(204);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(a.token))).status).toBe(401);
+        expect(s.broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'session-kicked' }));
+        const audit = await request(s.app).get(`${BASE}/audit?event=password_changed`).set(auth(rootToken));
+        expect(audit.body[0]).toMatchObject({ username: 'pat', actor: 'root' });
     });
 
-    describe('DELETE /sessions/:id', () => {
-        it('admin can kick another session, and that token no longer works', async () => {
-            // Login as alice to get her session
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'alice', password: 'alicepass2' });
-            const aliceToken = loginRes.body.token;
-            const aliceSessionId = loginRes.body.session.id;
-
-            // Admin kicks alice's session
-            const kickRes = await request(app)
-                .delete(`/api/v1/qcli/sessions/${aliceSessionId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(kickRes.status).toBe(204);
-
-            // Alice's token should no longer work
-            const usersRes = await request(app)
-                .get('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${aliceToken}`);
-
-            expect(usersRes.status).toBe(401);
-        });
-
-        it('returns 404 for non-existent session id', async () => {
-            const res = await request(app)
-                .delete('/api/v1/qcli/sessions/no-such-session-id')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(404);
-        });
+    it('another user without users:update gets 403', async () => {
+        const { token } = await login(s.app, 'quinn', 'qpass');
+        const res = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(token)).send({ password: 'hacked', currentPassword: 'oldpass' });
+        expect(res.status).toBe(403);
     });
 
-    // -------------------------------------------------------------------------
-    // Groups
-    // -------------------------------------------------------------------------
-
-    describe('POST /groups', () => {
-        it('admin can create a group (201)', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'editors', description: 'Content editors' });
-
-            expect(res.status).toBe(201);
-            expect(res.body.name).toBe('editors');
-        });
-
-        it('returns 409 for duplicate group name', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'editors' });
-
-            expect(res.status).toBe(409);
-        });
-
-        it('returns 400 when name is missing', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ description: 'A group without a name' });
-
-            expect(res.status).toBe(400);
-        });
+    it('enforces the password policy', async () => {
+        const res = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(rootToken)).send({ password: 'abc' });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/at least 4/);
+        const missing = await request(s.app).put(`${BASE}/users/pat/password`).set(auth(rootToken)).send({});
+        expect(missing.status).toBe(400);
     });
 
-    describe('GET /groups', () => {
-        it('returns list of groups', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-        });
+    it('honours a custom minPasswordLength', async () => {
+        const custom = await createTestServer({ minPasswordLength: 10 });
+        const token = (await login(custom.app, 'root', ROOT_PASS)).token;
+        const res = await request(custom.app).post(`${BASE}/users`).set(auth(token)).send({ name: 'x', email: 'x@x.com', password: 'short' });
+        expect(res.status).toBe(400);
+        custom.plugin.dispose();
     });
 
-    describe('GET /groups/:name', () => {
-        it('returns group by name', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/groups/editors')
-                .set('Authorization', `Bearer ${adminToken}`);
+    it('verify-password: self or users:update; failures audited and count toward lockout', async () => {
+        const { token } = await login(s.app, 'pat', 'oldpass');
+        const ok = await request(s.app).post(`${BASE}/users/pat/verify-password`).set(auth(token)).send({ password: 'oldpass' });
+        expect(ok.status).toBe(200);
+        expect(ok.body).toEqual({ valid: true });
 
-            expect(res.status).toBe(200);
-            expect(res.body.name).toBe('editors');
-        });
+        const other = await request(s.app).post(`${BASE}/users/quinn/verify-password`).set(auth(token)).send({ password: 'qpass' });
+        expect(other.status).toBe(403);
 
-        it('returns 404 for unknown group', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/groups/no-such-group')
-                .set('Authorization', `Bearer ${adminToken}`);
+        const byAdmin = await request(s.app).post(`${BASE}/users/quinn/verify-password`).set(auth(rootToken)).send({ password: 'qpass' });
+        expect(byAdmin.body).toEqual({ valid: true });
 
-            expect(res.status).toBe(404);
-        });
+        expect((await request(s.app).post(`${BASE}/users/pat/verify-password`).set(auth(token)).send({})).status).toBe(400);
+
+        for (let i = 0; i < 5; i++) {
+            const bad = await request(s.app).post(`${BASE}/users/pat/verify-password`).set(auth(token)).send({ password: 'wrong' });
+            expect(bad.body).toEqual({ valid: false });
+        }
+        const audit = await request(s.app).get(`${BASE}/audit?event=login_failed&username=pat`).set(auth(rootToken));
+        expect(audit.body.length).toBe(5);
+
+        const locked = await request(s.app).post(`${BASE}/sessions`).send({ username: 'pat', password: 'oldpass' });
+        expect(locked.status).toBe(429);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Groups
+// ---------------------------------------------------------------------------
+
+describe('Groups', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterEach(() => s.plugin.dispose());
+
+    it('POST /groups returns 201 Group', async () => {
+        const res = await request(s.app).post(`${BASE}/groups`).set(auth(rootToken))
+            .send({ name: 'DevOps', description: 'Ops team', permissions: ['deploy:*'] });
+        expect(res.status).toBe(201);
+        expect(res.body).toMatchObject({ name: 'DevOps', description: 'Ops team', permissions: ['deploy:*'], builtIn: false });
+        expect(res.body.id).toBeDefined();
+        expect(res.body.createdAt).toBeGreaterThan(0);
+        expect(res.body.updatedAt).toBeGreaterThan(0);
+
+        const plain = await request(s.app).post(`${BASE}/groups`).set(auth(rootToken)).send({ name: 'plain' });
+        expect(plain.body.permissions).toEqual([]);
+        expect(plain.body).not.toHaveProperty('description');
     });
 
-    describe('PUT /groups/:name/members/:userId', () => {
-        it('admin can add user to group', async () => {
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/groups/editors/members/${aliceId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-        });
-
-        it('returns 404 for non-existent group', async () => {
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
-
-            const res = await request(app)
-                .put(`/api/v1/qcli/groups/no-such-group/members/${aliceId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(404);
-        });
+    it('rejects duplicates case-insensitively (409) and bad input (400)', async () => {
+        await createGroup(s.app, rootToken, { name: 'devs' });
+        expect((await request(s.app).post(`${BASE}/groups`).set(auth(rootToken)).send({ name: 'DEVS' })).status).toBe(409);
+        expect((await request(s.app).post(`${BASE}/groups`).set(auth(rootToken)).send({ name: 'ADMIN' })).status).toBe(409);
+        expect((await request(s.app).post(`${BASE}/groups`).set(auth(rootToken)).send({})).status).toBe(400);
+        expect((await request(s.app).post(`${BASE}/groups`).set(auth(rootToken)).send({ name: 'x', permissions: 'a:b' })).status).toBe(400);
     });
 
-    describe('DELETE /groups/:name/members/:userId', () => {
-        it('admin can remove user from group', async () => {
-            const getRes = await request(app)
-                .get('/api/v1/qcli/users/alice')
-                .set('Authorization', `Bearer ${adminToken}`);
-            const aliceId = getRes.body.id;
-
-            const res = await request(app)
-                .delete(`/api/v1/qcli/groups/editors/members/${aliceId}`)
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-        });
+    it('GET /groups and /groups/:name (case-insensitive), 404 unknown', async () => {
+        await createGroup(s.app, rootToken, { name: 'DevOps' });
+        const list = await request(s.app).get(`${BASE}/groups`).set(auth(rootToken));
+        expect(list.body.map((g: any) => g.name).sort()).toEqual(['DevOps', 'admin', 'users']);
+        const one = await request(s.app).get(`${BASE}/groups/devops`).set(auth(rootToken));
+        expect(one.status).toBe(200);
+        expect(one.body.name).toBe('DevOps');
+        expect((await request(s.app).get(`${BASE}/groups/nosuch`).set(auth(rootToken))).status).toBe(404);
     });
 
-    describe('DELETE /groups/:name', () => {
-        it('admin can delete a group (204)', async () => {
-            // Create a disposable group first
-            await request(app)
-                .post('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'tempgroup' });
-
-            const res = await request(app)
-                .delete('/api/v1/qcli/groups/tempgroup')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(204);
-        });
+    it('PUT /groups/:name updates description and permissions', async () => {
+        await createGroup(s.app, rootToken, { name: 'ops' });
+        const res = await request(s.app).put(`${BASE}/groups/ops`).set(auth(rootToken))
+            .send({ description: 'Operations', permissions: ['deploy:run'] });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ name: 'ops', description: 'Operations', permissions: ['deploy:run'] });
+        expect((await request(s.app).put(`${BASE}/groups/nosuch`).set(auth(rootToken)).send({ description: 'x' })).status).toBe(404);
+        const audit = await request(s.app).get(`${BASE}/audit?event=group_updated`).set(auth(rootToken));
+        expect(audit.body[0]).toMatchObject({ actor: 'root', details: 'ops' });
     });
 
-    // -------------------------------------------------------------------------
-    // Audit
-    // -------------------------------------------------------------------------
-
-    describe('GET /audit', () => {
-        it('admin can list audit entries', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-            expect(res.body.length).toBeGreaterThan(0);
-        });
-
-        it('can filter audit entries by event', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/audit?event=login')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-            res.body.forEach((entry: { event: string }) => {
-                expect(entry.event).toBe('login');
-            });
-        });
-
-        it('returns 401 without auth', async () => {
-            const res = await request(app).get('/api/v1/qcli/audit');
-            expect(res.status).toBe(401);
-        });
+    it('admin permissions cannot be changed (409); description can', async () => {
+        const res = await request(s.app).put(`${BASE}/groups/admin`).set(auth(rootToken)).send({ permissions: ['users:read'] });
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBeDefined();
+        const desc = await request(s.app).put(`${BASE}/groups/admin`).set(auth(rootToken)).send({ description: 'Admins' });
+        expect(desc.status).toBe(200);
+        expect(desc.body.permissions).toEqual(['*']);
     });
 
-    describe('DELETE /audit', () => {
-        it('admin can clear audit log (204)', async () => {
-            const res = await request(app)
-                .delete('/api/v1/qcli/audit')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(res.status).toBe(204);
-
-            // Verify it's empty now
-            const getRes = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('Authorization', `Bearer ${adminToken}`);
-
-            expect(getRes.body).toHaveLength(0);
-        });
+    it('built-in groups cannot be deleted (409)', async () => {
+        for (const name of ['admin', 'users', 'Admin']) {
+            const res = await request(s.app).delete(`${BASE}/groups/${name}`).set(auth(rootToken));
+            expect(res.status, name).toBe(409);
+            expect(res.body.error).toBeDefined();
+        }
     });
 
-    // -------------------------------------------------------------------------
-    // Non-admin access (bob)
-    // -------------------------------------------------------------------------
-
-    describe('Non-admin user (bob)', () => {
-        let bobToken: string;
-        let bobUserId: string;
-        let bobSessionId: string;
-
-        beforeAll(async () => {
-            // Admin creates bob
-            await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${adminToken}`)
-                .send({ name: 'bob', email: 'bob@example.com', password: 'bobpass' });
-
-            // Bob logs in
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'bob', password: 'bobpass' });
-            bobToken = loginRes.body.token;
-            bobUserId = loginRes.body.session.userId;
-            bobSessionId = loginRes.body.session.id;
-        });
-
-        it('cannot create users (403)', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('Authorization', `Bearer ${bobToken}`)
-                .send({ name: 'charlie', email: 'charlie@example.com' });
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot list all sessions (403)', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/sessions')
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
-
-        it('can get own session (200)', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/sessions/current')
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(200);
-            expect(res.body.id).toBe(bobSessionId);
-        });
-
-        it('cannot access audit log (403)', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot delete groups (403)', async () => {
-            const res = await request(app)
-                .delete('/api/v1/qcli/groups/admin')
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot change another user password (403)', async () => {
-            const res = await request(app)
-                .put(`/api/v1/qcli/users/${adminUserId}/password`)
-                .set('Authorization', `Bearer ${bobToken}`)
-                .send({ newPassword: 'hackedpass' });
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot create groups (403)', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/groups')
-                .set('Authorization', `Bearer ${bobToken}`)
-                .send({ name: 'bobgroup', description: 'Should fail' });
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot add members to groups (403)', async () => {
-            const res = await request(app)
-                .put(`/api/v1/qcli/groups/editors/members/${bobUserId}`)
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot kick another session (403)', async () => {
-            // Create a temporary login session to target
-            const loginRes = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root', password: 'admin123' });
-            const targetSessionId = loginRes.body.session.id;
-
-            const res = await request(app)
-                .delete(`/api/v1/qcli/sessions/${targetSessionId}`)
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
-
-        it('cannot clear audit log (403)', async () => {
-            const res = await request(app)
-                .delete('/api/v1/qcli/audit')
-                .set('Authorization', `Bearer ${bobToken}`);
-
-            expect(res.status).toBe(403);
-        });
+    it('deleting a group removes it from every user (cascade)', async () => {
+        await createGroup(s.app, rootToken, { name: 'temp' });
+        await createUser(s.app, rootToken, { name: 'm1', email: 'm1@x.com', groups: ['users', 'temp'] });
+        await createUser(s.app, rootToken, { name: 'm2', email: 'm2@x.com', groups: ['TEMP'] });
+        expect((await request(s.app).delete(`${BASE}/groups/Temp`).set(auth(rootToken))).status).toBe(204);
+        expect((await request(s.app).get(`${BASE}/users/m1`).set(auth(rootToken))).body.groups).toEqual(['users']);
+        expect((await request(s.app).get(`${BASE}/users/m2`).set(auth(rootToken))).body.groups).toEqual([]);
+        expect((await request(s.app).delete(`${BASE}/groups/temp`).set(auth(rootToken))).status).toBe(404);
+        const audit = await request(s.app).get(`${BASE}/audit?event=group_deleted`).set(auth(rootToken));
+        expect(audit.body).toHaveLength(1);
     });
 
-    // -------------------------------------------------------------------------
-    // Audit (additional edge cases)
-    // -------------------------------------------------------------------------
+    it('members: add (POST) by name, list, remove', async () => {
+        await createGroup(s.app, rootToken, { name: 'Team' });
+        const id = await createUser(s.app, rootToken, { name: 'mem', email: 'mem@x.com' });
 
-    describe('GET /audit (filters)', () => {
-        it('can filter audit entries by username', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/audit?username=root')
-                .set('Authorization', `Bearer ${adminToken}`);
+        const add = await request(s.app).post(`${BASE}/groups/team/members/mem`).set(auth(rootToken));
+        expect(add.status).toBe(204);
+        // idempotent
+        expect((await request(s.app).post(`${BASE}/groups/TEAM/members/${id}`).set(auth(rootToken))).status).toBe(204);
+        const user = await request(s.app).get(`${BASE}/users/mem`).set(auth(rootToken));
+        expect(user.body.groups).toEqual(['users', 'Team']);
 
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-            res.body.forEach((entry: { username: string }) => {
-                expect(entry.username).toBe('root');
-            });
+        const members = await request(s.app).get(`${BASE}/groups/team/members`).set(auth(rootToken));
+        expect(members.status).toBe(200);
+        expect(members.body.map((u: User) => u.name)).toEqual(['mem']);
+        expect(members.body[0].disabled).toBe(false);
+
+        const remove = await request(s.app).delete(`${BASE}/groups/team/members/mem`).set(auth(rootToken));
+        expect(remove.status).toBe(204);
+        expect((await request(s.app).get(`${BASE}/users/mem`).set(auth(rootToken))).body.groups).toEqual(['users']);
+
+        const audit = await request(s.app).get(`${BASE}/audit?username=mem`).set(auth(rootToken));
+        const events = audit.body.map((e: any) => e.event);
+        expect(events).toContain('group_member_added');
+        expect(events).toContain('group_member_removed');
+    });
+
+    it('members: unknown group → 400 on add / 404 on remove; unknown user → 404', async () => {
+        await createUser(s.app, rootToken, { name: 'mem', email: 'mem@x.com' });
+        const add = await request(s.app).post(`${BASE}/groups/nosuch/members/mem`).set(auth(rootToken));
+        expect(add.status).toBe(400);
+        expect(add.body).toEqual({ error: 'unknown group: nosuch' });
+        expect((await request(s.app).post(`${BASE}/groups/users/members/ghost`).set(auth(rootToken))).status).toBe(404);
+        expect((await request(s.app).delete(`${BASE}/groups/nosuch/members/mem`).set(auth(rootToken))).status).toBe(404);
+        expect((await request(s.app).delete(`${BASE}/groups/users/members/ghost`).set(auth(rootToken))).status).toBe(404);
+        expect((await request(s.app).get(`${BASE}/groups/nosuch/members`).set(auth(rootToken))).status).toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Protections & cascades
+// ---------------------------------------------------------------------------
+
+describe('Protections and cascades', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterEach(() => s.plugin.dispose());
+
+    it('cannot delete yourself (409)', async () => {
+        const res = await request(s.app).delete(`${BASE}/users/root`).set(auth(rootToken));
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBeDefined();
+    });
+
+    it('last enabled admin cannot be deleted, disabled or removed from admin', async () => {
+        // a delegated user manager (not admin) so that "self delete" does not mask the rule
+        await createGroup(s.app, rootToken, { name: 'managers', permissions: ['users:*', 'groups:*'] });
+        await createUser(s.app, rootToken, { name: 'mgr', email: 'mgr@x.com', password: 'mgrpass', groups: ['managers'] });
+        const mgr = (await login(s.app, 'mgr', 'mgrpass')).token;
+
+        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(mgr))).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(mgr)).send({ disabled: true })).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(mgr)).send({ groups: ['users'] })).status).toBe(409);
+        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(mgr))).status).toBe(409);
+
+        // a disabled admin does not count as an enabled member
+        await createUser(s.app, rootToken, { name: 'sleeper', email: 's@x.com', groups: ['admin'], disabled: true });
+        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(mgr))).status).toBe(409);
+
+        // with a second enabled admin the rules no longer bite
+        await createUser(s.app, rootToken, { name: 'admin2', email: 'a2@x.com', groups: ['admin'] });
+        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(mgr))).status).toBe(204);
+        // admin2 is now the last enabled admin
+        expect((await request(s.app).put(`${BASE}/users/admin2`).set(auth(mgr)).send({ disabled: true })).status).toBe(409);
+    });
+
+    it('deleting a user removes credentials and revokes sessions', async () => {
+        const id = await createUser(s.app, rootToken, { name: 'del', email: 'del@x.com', password: 'delpass' });
+        const sess = await login(s.app, 'del', 'delpass');
+        const res = await request(s.app).delete(`${BASE}/users/del`).set(auth(rootToken));
+        expect(res.status).toBe(204);
+        expect(await s.plugin.credentialStore.getCredentials(id)).toBeUndefined();
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(sess.token))).status).toBe(401);
+        expect(s.broadcast).toHaveBeenCalledWith({
+            type: 'session-kicked',
+            data: { sessionId: sess.sessionId, userId: id, reason: 'user deleted' },
         });
+        expect((await request(s.app).get(`${BASE}/users/del`).set(auth(rootToken))).status).toBe(404);
+        const audit = await request(s.app).get(`${BASE}/audit?event=user_deleted`).set(auth(rootToken));
+        expect(audit.body[0]).toMatchObject({ username: 'del', actor: 'root' });
+    });
+
+    it('disabling a user revokes their sessions; enabling is audited', async () => {
+        const id = await createUser(s.app, rootToken, { name: 'dis', email: 'dis@x.com', password: 'dispass' });
+        const a = await login(s.app, 'dis', 'dispass');
+        const b = await login(s.app, 'dis', 'dispass');
+        const res = await request(s.app).put(`${BASE}/users/dis`).set(auth(rootToken)).send({ disabled: true });
+        expect(res.status).toBe(200);
+        expect(res.body.disabled).toBe(true);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(a.token))).status).toBe(401);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(b.token))).status).toBe(401);
+        const kicked = s.broadcast.mock.calls.map((c) => c[0]).filter((m) => m.type === 'session-kicked');
+        expect(kicked.map((m) => m.data.sessionId).sort()).toEqual([a.sessionId, b.sessionId].sort());
+        expect(kicked.every((m) => m.data.userId === id && m.data.reason === 'user disabled')).toBe(true);
+
+        await request(s.app).put(`${BASE}/users/dis`).set(auth(rootToken)).send({ disabled: false }).expect(200);
+        const audit = await request(s.app).get(`${BASE}/audit?username=dis`).set(auth(rootToken));
+        const events = audit.body.map((e: any) => e.event);
+        expect(events).toContain('user_disabled');
+        expect(events).toContain('user_enabled');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Live user resolution
+// ---------------------------------------------------------------------------
+
+describe('Live user resolution', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterEach(() => s.plugin.dispose());
+
+    it('group and permission changes apply to existing sessions immediately', async () => {
+        await createUser(s.app, rootToken, { name: 'liv', email: 'liv@x.com', password: 'livpass' });
+        const { token } = await login(s.app, 'liv', 'livpass');
+        expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(403);
+
+        // promote to admin → immediate access
+        await request(s.app).post(`${BASE}/groups/admin/members/liv`).set(auth(rootToken)).expect(204);
+        expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(200);
+        const current = await request(s.app).get(`${BASE}/sessions/current`).set(auth(token));
+        expect(current.body.permissions).toEqual(['*']);
+        expect(current.body.user.groups).toContain('admin');
+
+        // demote → stale admin rights are gone
+        await request(s.app).delete(`${BASE}/groups/admin/members/liv`).set(auth(rootToken)).expect(204);
+        expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(403);
+
+        // grant a permission to the user's group → immediate
+        await request(s.app).put(`${BASE}/groups/users`).set(auth(rootToken)).send({ permissions: ['users:read'] }).expect(200);
+        expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(200);
+    });
+
+    it('disabled or deleted users get 401 on existing tokens', async () => {
+        const id = await createUser(s.app, rootToken, { name: 'tmp', email: 'tmp@x.com', password: 'tmppass' });
+        const { token } = await login(s.app, 'tmp', 'tmppass');
+        await s.plugin.userStore.updateUser(id, { disabled: true }); // directly in the store, no cascade
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(token))).status).toBe(401);
+
+        await s.plugin.userStore.updateUser(id, { disabled: false });
+        const second = await login(s.app, 'tmp', 'tmppass');
+        await s.plugin.userStore.deleteUser(id);
+        expect((await request(s.app).get(`${BASE}/sessions/current`).set(auth(second.token))).status).toBe(401);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+describe('Audit', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeEach(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterEach(() => s.plugin.dispose());
+
+    it('records events with id, timestamp and actor; supports filters and limit', async () => {
+        await createUser(s.app, rootToken, { name: 'au', email: 'au@x.com' });
+        await request(s.app).post(`${BASE}/sessions`).send({ username: 'root', password: 'bad' });
+        await createGroup(s.app, rootToken, { name: 'g1' });
+
+        const all = await request(s.app).get(`${BASE}/audit`).set(auth(rootToken));
+        expect(all.status).toBe(200);
+        const events = all.body.map((e: any) => e.event);
+        expect(events).toEqual(expect.arrayContaining(['login', 'login_failed', 'user_created', 'group_created']));
+        for (const e of all.body) {
+            expect(typeof e.id).toBe('string');
+            expect(typeof e.timestamp).toBe('number');
+            expect(typeof e.username).toBe('string');
+        }
+        // newest first
+        expect(all.body[0].event).toBe('group_created');
+
+        const created = await request(s.app).get(`${BASE}/audit?event=user_created`).set(auth(rootToken));
+        expect(created.body).toHaveLength(1);
+        expect(created.body[0]).toMatchObject({ username: 'au', actor: 'root' });
+
+        const byUser = await request(s.app).get(`${BASE}/audit?username=root&event=login_failed`).set(auth(rootToken));
+        expect(byUser.body).toHaveLength(1);
+
+        const limited = await request(s.app).get(`${BASE}/audit?limit=2`).set(auth(rootToken));
+        expect(limited.body).toHaveLength(2);
+
+        expect((await request(s.app).get(`${BASE}/audit?limit=abc`).set(auth(rootToken))).status).toBe(400);
+    });
+
+    it('DELETE /audit clears and logs audit_cleared', async () => {
+        await createUser(s.app, rootToken, { name: 'au', email: 'au@x.com' });
+        expect((await request(s.app).delete(`${BASE}/audit`).set(auth(rootToken))).status).toBe(204);
+        const after = await request(s.app).get(`${BASE}/audit`).set(auth(rootToken));
+        expect(after.body).toHaveLength(1);
+        expect(after.body[0]).toMatchObject({ event: 'audit_cleared', actor: 'root' });
+    });
+
+    it('keeps at most 1000 entries in memory', async () => {
+        for (let i = 0; i < 1005; i++) {
+            await s.plugin.auditStore.log({ timestamp: Date.now(), event: 'test', username: `u${i}` });
+        }
+        const all = await s.plugin.auditStore.getEntries();
+        expect(all).toHaveLength(1000);
+        expect(all[0].username).toBe('u1004');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Routing details: trailing slashes, error bodies
+// ---------------------------------------------------------------------------
+
+describe('Routing', () => {
+    let s: TestServer;
+    let rootToken: string;
+
+    beforeAll(async () => {
+        s = await createTestServer();
+        rootToken = (await login(s.app, 'root', ROOT_PASS)).token;
+    });
+    afterAll(() => s.plugin.dispose());
+
+    it('accepts collection paths with and without trailing slash (no redirects)', async () => {
+        for (const path of ['/users', '/users/', '/groups', '/groups/', '/sessions', '/sessions/', '/audit', '/audit/', '/users/root', '/users/root/', '/sessions/current/', '/groups/admin/members/']) {
+            const res = await request(s.app).get(`${BASE}${path}`).set(auth(rootToken));
+            expect(res.status, path).toBe(200);
+        }
+        const loginSlash = await request(s.app).post(`${BASE}/sessions/`).send({ username: 'root', password: ROOT_PASS });
+        expect(loginSlash.status).toBe(201);
+        const createSlash = await request(s.app).post(`${BASE}/groups/`).set(auth(rootToken)).send({ name: 'slash' });
+        expect(createSlash.status).toBe(201);
+    });
+
+    it('every error is a JSON {error} body', async () => {
+        const responses = [
+            await request(s.app).get(`${BASE}/users`),
+            await request(s.app).get(`${BASE}/users/ghost`).set(auth(rootToken)),
+            await request(s.app).post(`${BASE}/users`).set(auth(rootToken)).send({}),
+            await request(s.app).delete(`${BASE}/groups/admin`).set(auth(rootToken)),
+            await request(s.app).post(`${BASE}/sessions`).send({ username: 'root', password: 'bad' }),
+        ];
+        for (const res of responses) {
+            expect(res.headers['content-type']).toMatch(/json/);
+            expect(Object.keys(res.body)).toEqual(['error']);
+            expect(typeof res.body.error).toBe('string');
+        }
+    });
+
+    it('rejects malformed JSON with 400 {error} when the host has no body parser', async () => {
+        const app = express();
+        app.use(s.plugin.prefix, s.plugin.router);
+        const res = await request(app).post(`${BASE}/sessions`).set('Content-Type', 'application/json').send('{bad');
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBeDefined();
     });
 });
 
@@ -764,7 +810,7 @@ describe('External Auth Adapter', () => {
         id: 'ext-admin-1',
         name: 'extadmin',
         email: 'extadmin@host.com',
-        groups: ['admin'],
+        groups: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
     };
@@ -778,168 +824,80 @@ describe('External Auth Adapter', () => {
         updatedAt: Date.now(),
     };
 
-    /**
-     * Adapter that reads X-Test-User header to decide who is calling.
-     * - "admin"  => adminUser + isAdmin: true
-     * - "user"   => regularUser + isAdmin: false
-     * - anything else or missing => null (unauthenticated)
-     */
     const testAdapter: AuthAdapter = (req: Request) => {
         const header = req.headers['x-test-user'] as string | undefined;
-        if (header === 'admin') {
-            return { user: adminUser, isAdmin: true };
-        }
-        if (header === 'user') {
-            return { user: regularUser, isAdmin: false };
-        }
+        if (header === 'admin') return { user: adminUser, isAdmin: true };
+        if (header === 'user') return { user: regularUser, isAdmin: false };
         return null;
     };
 
     beforeAll(async () => {
+        plugin = new CliUsersBuilder().setAuthAdapter(testAdapter).build();
+        await plugin.ready;
         app = express();
         app.use(express.json());
-        plugin = await buildUsersPlugin({ authAdapter: testAdapter });
         app.use(plugin.prefix, plugin.router);
     });
+    afterAll(() => plugin.dispose());
 
-    afterAll(() => {
-        plugin.dispose();
-    });
-
-    // -------------------------------------------------------------------------
-    // Auth endpoints return 501
-    // -------------------------------------------------------------------------
-
-    describe('Auth endpoints return 501 when external auth is active', () => {
-        it('POST /sessions (login) returns 501', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/sessions')
-                .send({ username: 'root', password: 'root' });
-
+    it('login, logout, verify-password and password endpoints return 501 {error}', async () => {
+        const responses = [
+            await request(app).post(`${BASE}/sessions`).send({ username: 'root', password: 'root' }),
+            await request(app).delete(`${BASE}/sessions/current`).set('X-Test-User', 'admin'),
+            await request(app).post(`${BASE}/users/extadmin/verify-password`).set('X-Test-User', 'admin').send({ password: 'pass' }),
+            await request(app).put(`${BASE}/users/extadmin/password`).set('X-Test-User', 'admin').send({ password: 'passpass' }),
+        ];
+        for (const res of responses) {
             expect(res.status).toBe(501);
             expect(res.body.error).toContain('host application');
-        });
-
-        it('DELETE /sessions/current (logout) returns 501', async () => {
-            const res = await request(app)
-                .delete('/api/v1/qcli/sessions/current');
-
-            expect(res.status).toBe(501);
-            expect(res.body.error).toContain('host application');
-        });
-
-        it('POST /users/:id/verify-password returns 501', async () => {
-            const res = await request(app)
-                .post('/api/v1/qcli/users/ext-admin-1/verify-password')
-                .set('X-Test-User', 'admin')
-                .send({ password: 'pass' });
-
-            expect(res.status).toBe(501);
-            expect(res.body.error).toContain('host application');
-        });
+        }
     });
 
-    // -------------------------------------------------------------------------
-    // Adapter-authenticated requests
-    // -------------------------------------------------------------------------
-
-    describe('Adapter-authenticated requests', () => {
-        it('GET /users works when adapter returns a user', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/users')
-                .set('X-Test-User', 'user');
-
-            expect(res.status).toBe(200);
-            expect(Array.isArray(res.body)).toBe(true);
-        });
-
-        it('admin-only endpoints work when adapter returns isAdmin: true', async () => {
-            // Create a user first so we have something to manage
-            const createRes = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('X-Test-User', 'admin')
-                .send({ name: 'managed-user', email: 'managed@host.com' });
-
-            expect(createRes.status).toBe(201);
-            expect(createRes.body.name).toBe('managed-user');
-
-            // Admin can list sessions
-            const sessRes = await request(app)
-                .get('/api/v1/qcli/sessions')
-                .set('X-Test-User', 'admin');
-
-            expect(sessRes.status).toBe(200);
-            expect(Array.isArray(sessRes.body)).toBe(true);
-
-            // Admin can view audit log
-            const auditRes = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('X-Test-User', 'admin');
-
-            expect(auditRes.status).toBe(200);
-        });
-
-        it('admin-only endpoints return 403 for non-admin adapter user', async () => {
-            const createRes = await request(app)
-                .post('/api/v1/qcli/users')
-                .set('X-Test-User', 'user')
-                .send({ name: 'should-fail', email: 'fail@host.com' });
-
-            expect(createRes.status).toBe(403);
-
-            const sessRes = await request(app)
-                .get('/api/v1/qcli/sessions')
-                .set('X-Test-User', 'user');
-
-            expect(sessRes.status).toBe(403);
-        });
-
-        it('returns 401 when adapter returns null', async () => {
-            const res = await request(app)
-                .get('/api/v1/qcli/users')
-                .set('X-Test-User', 'unknown');
-
-            expect(res.status).toBe(401);
-        });
-
-        it('returns 401 when no auth header is present', async () => {
-            const res = await request(app).get('/api/v1/qcli/users');
-            expect(res.status).toBe(401);
-        });
+    it('seeds built-in groups but no root user', async () => {
+        expect(await plugin.userStore.getUser('root')).toBeUndefined();
+        expect((await plugin.groupStore.getGroup('admin'))?.permissions).toEqual(['*']);
+        expect(await plugin.groupStore.getGroup('users')).toBeDefined();
     });
 
-    // -------------------------------------------------------------------------
-    // Audit trail for adapter-authenticated requests
-    // -------------------------------------------------------------------------
+    it('resolves the adapter user per request with effective permissions', async () => {
+        const admin = await request(app).get(`${BASE}/sessions/current`).set('X-Test-User', 'admin');
+        expect(admin.status).toBe(200);
+        expect(admin.body.user.name).toBe('extadmin');
+        expect(admin.body.user.groups).toContain('admin');
+        expect(admin.body.permissions).toEqual(['*']);
 
-    describe('Audit endpoint with adapter auth', () => {
-        it('admin can access audit endpoint', async () => {
-            const auditRes = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('X-Test-User', 'admin');
-
-            expect(auditRes.status).toBe(200);
-            expect(Array.isArray(auditRes.body)).toBe(true);
-        });
-
-        it('non-admin cannot access audit endpoint', async () => {
-            const auditRes = await request(app)
-                .get('/api/v1/qcli/audit')
-                .set('X-Test-User', 'user');
-
-            expect(auditRes.status).toBe(403);
-        });
+        const user = await request(app).get(`${BASE}/sessions/current`).set('X-Test-User', 'user');
+        expect(user.body.permissions).toEqual([]);
     });
 
-    // -------------------------------------------------------------------------
-    // No root user seeded
-    // -------------------------------------------------------------------------
+    it('enforces permissions for adapter users', async () => {
+        const created = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').send({ name: 'managed', email: 'managed@host.com' });
+        expect(created.status).toBe(201);
+        expect((await request(app).get(`${BASE}/audit`).set('X-Test-User', 'admin')).status).toBe(200);
 
-    describe('Root user seeding', () => {
-        it('does not seed a root user when authAdapter is set', async () => {
-            const users = await plugin.userStore.getUsers();
-            const rootUser = users.find((u) => u.name === 'root');
-            expect(rootUser).toBeUndefined();
-        });
+        expect((await request(app).post(`${BASE}/users`).set('X-Test-User', 'user').send({ name: 'nope', email: 'n@h.com' })).status).toBe(403);
+        expect((await request(app).get(`${BASE}/sessions`).set('X-Test-User', 'user')).status).toBe(403);
+        expect((await request(app).get(`${BASE}/audit`).set('X-Test-User', 'user')).status).toBe(403);
+        expect((await request(app).get(`${BASE}/groups`).set('X-Test-User', 'user')).status).toBe(200);
+    });
+
+    it('rejects passwords on user creation in external-auth mode', async () => {
+        const res = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').send({ name: 'pw', email: 'pw@host.com', password: 'secret' });
+        expect(res.status).toBe(400);
+    });
+
+    it('adapter sessions are not stored or listed', async () => {
+        await request(app).get(`${BASE}/groups`).set('X-Test-User', 'admin');
+        const res = await request(app).get(`${BASE}/sessions`).set('X-Test-User', 'admin');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual([]);
+        expect(await plugin.sessionStore.getActiveSessions()).toEqual([]);
+    });
+
+    it('returns 401 when the adapter returns null or no header is present', async () => {
+        expect((await request(app).get(`${BASE}/users`).set('X-Test-User', 'unknown')).status).toBe(401);
+        const res = await request(app).get(`${BASE}/users`);
+        expect(res.status).toBe(401);
+        expect(res.body.error).toBeDefined();
     });
 });

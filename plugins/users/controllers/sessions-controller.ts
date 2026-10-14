@@ -1,104 +1,108 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import { ICliSessionStore } from '../stores/interfaces';
-import { AuthService } from '../services/auth-service';
-import { requireAdmin } from '../middleware/auth-middleware';
+import { ICliUserStore } from '../stores/interfaces';
+import { AuthService, toUserJson } from '../services/auth-service';
+import { bodyOf } from '../services/directory-service';
+import { can, getAuth, requirePermission } from '../middleware/auth-middleware';
+import { asyncHandler, badRequest, forbidden, HttpError, notFound } from '../errors';
+import { UsersPermissions as P } from '../permissions';
 
 export interface SessionsControllerOptions {
-    /** When true, authentication is managed by the host app: login/logout return 501 */
+    /** When true, login/logout return 501 (the host app owns authentication). */
     externalAuth?: boolean;
-    /** Broadcasts server events (e.g. `session-kicked`) over the events WebSocket */
-    broadcastEvent?: (msg: Record<string, unknown>) => void;
 }
+
+const notAvailable = () => new HttpError(501, 'Authentication is managed by the host application');
 
 /**
  * Sessions resource.
  *
- * - `POST   /`         — login: create a session from credentials (no auth)
+ * - `POST   /`         — login (public)
  * - `GET    /current`  — current session
- * - `DELETE /current`  — logout: end the current session
- * - `GET    /`         — list active sessions (admin)
- * - `DELETE /:id`      — kick a session (admin)
+ * - `DELETE /current`  — logout
+ * - `GET    /`         — list sessions (`sessions:read`)
+ * - `DELETE /:id`      — revoke a session (`sessions:revoke` or own session)
  */
 export function createSessionsController(
-    sessionStore: ICliSessionStore,
     authService: AuthService,
+    userStore: ICliUserStore,
     authMiddleware: RequestHandler,
     options: SessionsControllerOptions = {},
 ): Router {
     const router = Router();
-    const { externalAuth, broadcastEvent } = options;
+    const { externalAuth } = options;
 
-    const notAvailable = (_req: Request, res: Response): void => {
-        res.status(501).json({ error: 'Authentication is managed by the host application' });
-    };
-
-    // Login/logout are owned by the host application in external-auth mode
     if (externalAuth) {
-        router.post('/', notAvailable);
-        router.delete('/current', notAvailable);
+        router.post('/', asyncHandler(async () => { throw notAvailable(); }));
+        router.delete('/current', asyncHandler(async () => { throw notAvailable(); }));
     } else {
-        // POST / — login (no auth required)
-        router.post('/', async (req: Request, res: Response): Promise<void> => {
-            const { username, password } = req.body ?? {};
-            if (!username || !password) {
-                res.status(400).json({ error: 'username and password are required' });
-                return;
+        router.post('/', asyncHandler(async (req: Request, res: Response) => {
+            const body = bodyOf(req);
+            const { username, password } = body;
+            if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
+                throw badRequest('username and password are required');
             }
-
-            try {
-                const metadata = {
-                    remoteAddress: req.ip,
-                    userAgent: req.headers['user-agent'],
-                };
-                const { token, session } = await authService.login(username, password, metadata);
-                res.status(201).json({ token, session });
-            } catch (err: any) {
-                res.status(401).json({ error: err.message ?? 'Invalid credentials' });
-            }
-        });
+            const result = await authService.login(username.trim(), password, {
+                remoteAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+            });
+            res.status(201).json(result);
+        }));
     }
 
-    // Everything below requires an authenticated session
     router.use(authMiddleware);
 
-    // GET /current — return current session
-    router.get('/current', (req: Request, res: Response): void => {
-        res.json(req.session);
-    });
-
-    // DELETE /current — logout
-    if (!externalAuth) {
-        router.delete('/current', async (req: Request, res: Response): Promise<void> => {
-            const authHeader = req.headers['authorization'] ?? '';
-            const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-            await authService.logout(token);
-            res.status(204).end();
-        });
-    }
-
-    // GET / — list all active sessions (admin only)
-    router.get('/', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
-        const sessions = await sessionStore.getActiveSessions();
-        res.json(sessions);
-    });
-
-    // DELETE /:id — kick/force-logout a session (admin only)
-    router.delete('/:id', requireAdmin, async (req: Request, res: Response): Promise<void> => {
-        const session = await sessionStore.getSessionById(req.params.id);
-        if (!session) {
-            res.status(404).json({ error: 'Session not found' });
+    router.get('/current', asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        if (auth.session) {
+            res.json(authService.toSessionPayload(auth.session, auth.user, auth.permissions));
             return;
         }
-
-        await sessionStore.deleteSessionById(req.params.id);
-
-        broadcastEvent?.({
-            type: 'session-kicked',
-            data: { sessionId: session.id, userId: session.userId },
+        // External-auth request: synthetic, unstored session
+        const now = Date.now();
+        res.json({
+            id: `adapter:${auth.user.id}`,
+            user: toUserJson(auth.user),
+            permissions: auth.permissions,
+            loginTime: now,
+            lastActivity: now,
+            expiresAt: now + authService.sessionTimeoutMs,
         });
+    }));
 
+    if (!externalAuth) {
+        router.delete('/current', asyncHandler(async (req: Request, res: Response) => {
+            const auth = getAuth(req);
+            if (auth.token) {
+                await authService.logout(auth.token);
+            }
+            res.status(204).end();
+        }));
+    }
+
+    router.get('/', requirePermission(P.SessionsRead), asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        const sessions = await authService.listSessions();
+        const names = new Map<string, string>();
+        for (const s of sessions) {
+            if (!names.has(s.userId)) {
+                names.set(s.userId, (await userStore.getUser(s.userId))?.name ?? s.userId);
+            }
+        }
+        res.json(sessions.map((s) => authService.toSessionView(s, names.get(s.userId)!, auth.session?.id ?? '')));
+    }));
+
+    router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        const session = await authService.getSessionById(req.params.id);
+        if (!session) {
+            throw notFound('session not found');
+        }
+        if (session.userId !== auth.user.id && !can(req, P.SessionsRevoke)) {
+            throw forbidden(`forbidden: missing permission ${P.SessionsRevoke}`);
+        }
+        await authService.revokeSession(session, 'revoked', auth.user.name);
         res.status(204).end();
-    });
+    }));
 
     return router;
 }

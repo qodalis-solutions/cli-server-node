@@ -1,131 +1,162 @@
 import { Router, Request, Response } from 'express';
-import { ICliUserStore, ICliCredentialStore, ICliSessionStore } from '../stores/interfaces';
-import { AuthService } from '../services/auth-service';
-import { requireAdmin } from '../middleware/auth-middleware';
+import { AuthService, toUserJson } from '../services/auth-service';
+import { DirectoryService, bodyOf } from '../services/directory-service';
+import { can, getAuth, requirePermission } from '../middleware/auth-middleware';
+import { asyncHandler, badRequest, forbidden, HttpError } from '../errors';
+import { UsersPermissions as P } from '../permissions';
+import { User } from '../models';
 
 export interface UsersControllerOptions {
-    /** When true, authentication is managed by the host app: verify-password returns 501 */
+    /** When true, password endpoints return 501 (the host app owns credentials). */
     externalAuth?: boolean;
 }
 
+const notAvailable = () => new HttpError(501, 'Authentication is managed by the host application');
+
+function parseNonNegativeInt(value: unknown, field: string): number | undefined {
+    if (value === undefined || value === '') return undefined;
+    if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+        throw badRequest(`${field} must be a non-negative integer`);
+    }
+    return parseInt(value, 10);
+}
+
+/**
+ * `/users` resource. Expects the auth middleware to have run.
+ */
 export function createUsersController(
-    userStore: ICliUserStore,
     authService: AuthService,
-    credentialStore: ICliCredentialStore,
-    sessionStore: ICliSessionStore,
+    directory: DirectoryService,
     options: UsersControllerOptions = {},
 ): Router {
     const router = Router();
 
-    // GET / — list all users
-    router.get('/', async (_req: Request, res: Response): Promise<void> => {
-        const users = await userStore.getUsers();
-        res.json(users);
-    });
-
-    // GET /:idOrName — get user by id or name
-    router.get('/:idOrName', async (req: Request, res: Response): Promise<void> => {
-        const user = await userStore.getUser(req.params.idOrName);
-        if (!user) {
-            res.status(404).json({ error: 'User not found' });
-            return;
+    /** Resolves the target user for "permission or self" endpoints. Non-privileged callers get 403 for anyone else (including unknown users). */
+    const resolveSelfOr = async (req: Request, permission: string): Promise<{ target: User; privileged: boolean; isSelf: boolean }> => {
+        const auth = getAuth(req);
+        const privileged = can(req, permission);
+        if (privileged) {
+            const target = await directory.getUserOr404(req.params.idOrName);
+            return { target, privileged, isSelf: target.id === auth.user.id };
         }
-        res.json(user);
-    });
-
-    // POST / — create user (admin only)
-    router.post('/', requireAdmin, async (req: Request, res: Response): Promise<void> => {
-        const { name, email, password, groups, data } = req.body ?? {};
-        if (!name || !email) {
-            res.status(400).json({ error: 'name and email are required' });
-            return;
+        const target = await directory.getUserOr404(req.params.idOrName).catch(() => undefined);
+        if (!target || target.id !== auth.user.id) {
+            throw forbidden(`forbidden: missing permission ${permission}`);
         }
+        return { target, privileged, isSelf: true };
+    };
 
-        try {
-            const user = await userStore.createUser({ name, email, groups, data });
-            if (password) {
-                await authService.setPassword(user.id, password);
+    // GET / — list users (?query=&skip=&take=)
+    router.get('/', requirePermission(P.UsersRead), asyncHandler(async (req: Request, res: Response) => {
+        const query = typeof req.query.query === 'string' ? req.query.query : undefined;
+        const skip = parseNonNegativeInt(req.query.skip, 'skip') ?? 0;
+        const take = parseNonNegativeInt(req.query.take, 'take');
+        const users = await directory.listUsers(query, skip, take);
+        res.json(users.map(toUserJson));
+    }));
+
+    // POST / — create user
+    router.post('/', requirePermission(P.UsersCreate), asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        const user = await directory.createUser(bodyOf(req), auth.user.name, options.externalAuth);
+        res.status(201).json(toUserJson(user));
+    }));
+
+    // GET /:idOrName — users:read or self
+    router.get('/:idOrName', asyncHandler(async (req: Request, res: Response) => {
+        const { target } = await resolveSelfOr(req, P.UsersRead);
+        res.json(toUserJson(target));
+    }));
+
+    // GET /:idOrName/permissions — users:read or self
+    router.get('/:idOrName/permissions', asyncHandler(async (req: Request, res: Response) => {
+        const { target } = await resolveSelfOr(req, P.UsersRead);
+        const permissions = await authService.getEffectivePermissions(target);
+        res.json({ userId: target.id, groups: [...target.groups], permissions });
+    }));
+
+    // PUT /:idOrName — users:update; self may change only email and data
+    router.put('/:idOrName', asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        const body = bodyOf(req);
+        const { target, privileged } = await resolveSelfOr(req, P.UsersUpdate);
+        if (!privileged) {
+            const restricted = Object.keys(body).filter((k) => body[k] !== undefined && k !== 'email' && k !== 'data');
+            if (restricted.length > 0) {
+                throw forbidden(`forbidden: cannot change ${restricted.join(', ')} without ${P.UsersUpdate}`);
             }
-            res.status(201).json(user);
-        } catch (err: any) {
-            res.status(409).json({ error: err.message });
         }
-    });
+        const updated = await directory.updateUser(target, body, auth.user.name);
+        res.json(toUserJson(updated));
+    }));
 
-    // PUT /:id — update user (admin only)
-    router.put('/:id', requireAdmin, async (req: Request, res: Response): Promise<void> => {
-        const { name, email, groups, disabled, data } = req.body ?? {};
-        try {
-            const user = await userStore.updateUser(req.params.id, { name, email, groups, disabled, data });
-            res.json(user);
-        } catch (err: any) {
-            res.status(404).json({ error: err.message });
-        }
-    });
-
-    // DELETE /:id — delete user (admin only)
-    router.delete('/:id', requireAdmin, async (req: Request, res: Response): Promise<void> => {
-        await userStore.deleteUser(req.params.id);
-        await credentialStore.deleteCredentials(req.params.id);
-        await sessionStore.deleteUserSessions(req.params.id);
+    // DELETE /:idOrName — users:delete
+    router.delete('/:idOrName', requirePermission(P.UsersDelete), asyncHandler(async (req: Request, res: Response) => {
+        const auth = getAuth(req);
+        const target = await directory.getUserOr404(req.params.idOrName);
+        await directory.deleteUser(target, auth.user.id, auth.user.name);
         res.status(204).end();
-    });
+    }));
 
-    // PUT /:id/password — change password (self or admin)
-    router.put('/:id/password', async (req: Request, res: Response): Promise<void> => {
-        const requestingUser = req.session?.user;
-        const targetId = req.params.id;
+    // PUT /:idOrName/password — self (with currentPassword) or users:update
+    router.put('/:idOrName/password', asyncHandler(async (req: Request, res: Response) => {
+        if (options.externalAuth) throw notAvailable();
+        const auth = getAuth(req);
+        const body = bodyOf(req);
+        const { target, privileged, isSelf } = await resolveSelfOr(req, P.UsersUpdate);
+        const password = body.password;
+        authService.validatePassword(password);
 
-        const isSelf = requestingUser?.id === targetId;
-        const isAdmin = requestingUser?.groups?.includes('admin') ?? false;
-
-        if (!isSelf && !isAdmin) {
-            res.status(403).json({ error: 'Forbidden' });
-            return;
-        }
-
-        const { currentPassword, newPassword } = req.body ?? {};
-        if (!newPassword) {
-            res.status(400).json({ error: 'newPassword is required' });
-            return;
-        }
-
-        if (isSelf && !isAdmin) {
-            if (!currentPassword) {
-                res.status(400).json({ error: 'currentPassword is required' });
-                return;
+        if (!privileged) {
+            const current = body.currentPassword;
+            if (typeof current !== 'string' || current.length === 0) {
+                throw badRequest('currentPassword is required');
             }
-            const valid = await authService.verifyPassword(targetId, currentPassword);
+            const valid = await authService.verifyPasswordWithLockout(target, current, {
+                actor: auth.user.name,
+                remoteAddress: req.ip,
+                details: 'Wrong current password',
+            });
             if (!valid) {
-                // 403, not 401: the session is valid, the supplied password is not
-                res.status(403).json({ error: 'Current password is incorrect' });
-                return;
+                throw forbidden('current password is incorrect');
             }
         }
 
-        try {
-            await authService.setPassword(targetId, newPassword);
-            res.json({ message: 'Password updated' });
-        } catch (err: any) {
-            res.status(400).json({ error: err.message });
-        }
-    });
+        await authService.setPassword(target.id, password);
+        await authService.audit({ event: 'password_changed', username: target.name, actor: auth.user.name });
 
-    // POST /:id/verify-password — check a user's password, returns { valid }.
-    // Requires an authenticated session (used by `su` and `passwd` on the client).
-    router.post('/:id/verify-password', async (req: Request, res: Response): Promise<void> => {
-        if (options.externalAuth) {
-            res.status(501).json({ error: 'Authentication is managed by the host application' });
-            return;
+        if (isSelf) {
+            await authService.revokeUserSessions(target.id, 'password changed', {
+                actor: auth.user.name,
+                exceptSessionId: auth.session?.id,
+                userName: target.name,
+            });
+        } else {
+            await authService.revokeUserSessions(target.id, 'password changed', {
+                actor: auth.user.name,
+                userName: target.name,
+            });
         }
-        const { password } = req.body ?? {};
-        if (!password) {
-            res.status(400).json({ error: 'password is required' });
-            return;
+        res.status(204).end();
+    }));
+
+    // POST /:idOrName/verify-password — self or users:update → { valid }
+    router.post('/:idOrName/verify-password', asyncHandler(async (req: Request, res: Response) => {
+        if (options.externalAuth) throw notAvailable();
+        const auth = getAuth(req);
+        const body = bodyOf(req);
+        const { target } = await resolveSelfOr(req, P.UsersUpdate);
+        const password = body.password;
+        if (typeof password !== 'string' || password.length === 0) {
+            throw badRequest('password is required');
         }
-        const valid = await authService.verifyPassword(req.params.id, password);
+        const valid = await authService.verifyPasswordWithLockout(target, password, {
+            actor: auth.user.name,
+            remoteAddress: req.ip,
+            details: 'Password verification failed',
+        });
         res.json({ valid });
-    });
+    }));
 
     return router;
 }

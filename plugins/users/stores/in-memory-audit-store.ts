@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { AuditEntry, AuditQueryOptions } from '../models';
 import { ICliAuditStore } from './interfaces';
 
@@ -6,23 +7,27 @@ const MAX_ENTRIES = 1000;
 export class InMemoryAuditStore implements ICliAuditStore {
     private entries: AuditEntry[] = [];
 
+    constructor(private readonly maxEntries: number = MAX_ENTRIES) {}
+
     async log(entry: AuditEntry): Promise<void> {
-        this.entries.push(entry);
-        if (this.entries.length > MAX_ENTRIES) {
+        this.entries.push({ id: entry.id ?? randomUUID(), ...entry, timestamp: entry.timestamp ?? Date.now() });
+        while (this.entries.length > this.maxEntries) {
             this.entries.shift();
         }
     }
 
     async getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]> {
-        // Return newest-first
+        // Newest first
         let result = [...this.entries].reverse();
 
         if (options?.event) {
-            result = result.filter((e) => e.event === options.event);
+            const event = options.event.toLowerCase();
+            result = result.filter((e) => e.event.toLowerCase() === event);
         }
 
         if (options?.username) {
-            result = result.filter((e) => e.username === options.username);
+            const username = options.username.toLowerCase();
+            result = result.filter((e) => e.username?.toLowerCase() === username);
         }
 
         if (options?.limit !== undefined && options.limit > 0) {

@@ -2,50 +2,59 @@ import { randomUUID } from 'crypto';
 import { User, CreateUserDto, UpdateUserDto } from '../models';
 import { ICliUserStore } from './interfaces';
 
+const clone = (u: User): User => ({ ...u, groups: [...u.groups] });
+
 export class InMemoryUserStore implements ICliUserStore {
     private users: Map<string, User> = new Map();
 
     async getUsers(): Promise<User[]> {
-        return Array.from(this.users.values());
+        return Array.from(this.users.values()).map(clone);
     }
 
     async getUser(idOrName: string): Promise<User | undefined> {
-        // Try by id first
-        if (this.users.has(idOrName)) {
-            return this.users.get(idOrName);
+        const byId = this.users.get(idOrName);
+        if (byId) {
+            return clone(byId);
         }
-        // Fall back to case-insensitive name lookup
         const lower = idOrName.toLowerCase();
         for (const user of this.users.values()) {
             if (user.name.toLowerCase() === lower) {
-                return user;
+                return clone(user);
             }
         }
         return undefined;
     }
 
-    async createUser(data: CreateUserDto): Promise<User> {
-        // Check for duplicate name (case-insensitive)
-        const lower = data.name.toLowerCase();
+    private assertUnique(name: string | undefined, email: string | undefined, exceptId?: string): void {
         for (const user of this.users.values()) {
-            if (user.name.toLowerCase() === lower) {
-                throw new Error(`User with name '${data.name}' already exists`);
+            if (user.id === exceptId) continue;
+            if (name !== undefined && user.name.toLowerCase() === name.toLowerCase()) {
+                throw new Error(`User with name '${name}' already exists`);
+            }
+            if (email !== undefined && user.email.toLowerCase() === email.toLowerCase()) {
+                throw new Error(`User with email '${email}' already exists`);
             }
         }
+    }
+
+    async createUser(data: CreateUserDto): Promise<User> {
+        this.assertUnique(data.name, data.email);
 
         const now = Date.now();
         const user: User = {
             id: randomUUID(),
             name: data.name,
             email: data.email,
-            groups: data.groups ?? [],
-            data: data.data,
+            groups: [...(data.groups ?? [])],
+            disabled: data.disabled ?? false,
+            ...(data.homeDir !== undefined ? { homeDir: data.homeDir } : {}),
+            ...(data.data !== undefined ? { data: data.data } : {}),
             createdAt: now,
             updatedAt: now,
         };
 
         this.users.set(user.id, user);
-        return user;
+        return clone(user);
     }
 
     async updateUser(id: string, data: UpdateUserDto): Promise<User> {
@@ -53,19 +62,22 @@ export class InMemoryUserStore implements ICliUserStore {
         if (!user) {
             throw new Error(`User with id '${id}' not found`);
         }
+        this.assertUnique(data.name, data.email, id);
 
         const updated: User = {
             ...user,
             ...(data.name !== undefined ? { name: data.name } : {}),
             ...(data.email !== undefined ? { email: data.email } : {}),
-            ...(data.groups !== undefined ? { groups: data.groups } : {}),
+            ...(data.groups !== undefined ? { groups: [...data.groups] } : {}),
             ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+            ...(data.homeDir !== undefined ? { homeDir: data.homeDir } : {}),
             ...(data.data !== undefined ? { data: data.data } : {}),
+            ...(data.lastLoginAt !== undefined ? { lastLoginAt: data.lastLoginAt } : {}),
             updatedAt: Date.now(),
         };
 
         this.users.set(id, updated);
-        return updated;
+        return clone(updated);
     }
 
     async deleteUser(id: string): Promise<void> {
