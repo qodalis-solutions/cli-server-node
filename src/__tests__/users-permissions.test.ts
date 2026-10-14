@@ -38,10 +38,10 @@ describe('Permission matrix', () => {
         // helpdesk: can read users and sessions, revoke sessions, read audit — nothing else
         await createGroup(s.app, root, {
             name: 'helpdesk',
-            permissions: ['users:read', 'sessions:read', 'sessions:revoke', 'groups:read'],
+            permissions: ['users:read', 'sessions:read', 'sessions:revoke', 'groups:read', 'commands:execute'],
         });
         await createGroup(s.app, root, { name: 'auditors', permissions: ['audit:read'] });
-        await createGroup(s.app, root, { name: 'managers', permissions: ['users:*'] });
+        await createGroup(s.app, root, { name: 'managers', permissions: ['users:*', 'commands:execute'] });
         await createUser(s.app, root, { name: 'helper', email: 'helper@x.com', password: 'helppass', groups: ['helpdesk'] });
         await createUser(s.app, root, { name: 'plain', email: 'plain@x.com', password: 'plainpass' });
         await createUser(s.app, root, { name: 'target', email: 'target@x.com', password: 'targetpass' });
@@ -59,7 +59,7 @@ describe('Permission matrix', () => {
 
     it('the session carries the group permissions', async () => {
         const res = await as(helper.token).get('/sessions/current');
-        expect(res.body.permissions).toEqual(['users:read', 'sessions:read', 'sessions:revoke', 'groups:read']);
+        expect(res.body.permissions).toEqual(['users:read', 'sessions:read', 'sessions:revoke', 'groups:read', 'commands:execute']);
         expect(res.body.user.groups).toEqual(['helpdesk']);
     });
 
@@ -109,7 +109,7 @@ describe('Permission matrix', () => {
         expect((await p.get('/users/ghost')).status).toBe(403); // no existence leak
         const perms = await p.get('/users/plain/permissions');
         expect(perms.status).toBe(200);
-        expect(perms.body).toEqual({ userId: plain.userId, groups: ['users'], permissions: [] });
+        expect(perms.body).toEqual({ userId: plain.userId, groups: ['users'], permissions: ['commands:execute'] });
         expect((await p.get('/users/target/permissions')).status).toBe(403);
         expect((await p.get('/sessions')).status).toBe(403);
         expect((await p.get('/groups')).status).toBe(200);
@@ -142,10 +142,14 @@ describe('Permission matrix', () => {
         const m = as((await login(s.app, 'mgr', 'mgrpass')).token);
         const created = await m.post('/users', { name: 'hire', email: 'hire@x.com', password: 'hirepass' });
         expect(created.status).toBe(201);
-        expect((await m.put('/users/hire', { groups: ['auditors'] })).status).toBe(200);
+        expect((await m.put('/users/hire', { groups: ['managers'] })).status).toBe(200);
+        // escalation: auditors grants audit:read, which mgr does not hold
+        expect((await m.put('/users/hire', { groups: ['auditors'] })).status).toBe(403);
         expect((await m.put('/users/hire/password', { password: 'reset99' })).status).toBe(204);
         expect((await m.post('/users/hire/verify-password', { password: 'reset99' })).body).toEqual({ valid: true });
         expect((await m.del('/users/hire')).status).toBe(204);
+        // cannot act on an admin (P(root) = * is not covered by users:*)
+        expect((await m.put('/users/root', { name: 'pwned' })).status).toBe(403);
         expect((await m.get('/audit')).status).toBe(403);
         expect((await m.get('/sessions')).status).toBe(403);
         expect((await m.post('/groups', { name: 'x' })).status).toBe(403);

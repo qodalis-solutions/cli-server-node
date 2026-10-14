@@ -21,7 +21,7 @@ describe('CliUsersBuilder', () => {
         expect(admin.permissions).toEqual(['*']);
         expect(admin.builtIn).toBe(true);
         const usersGroup = groups.find((g) => g.name === 'users')!;
-        expect(usersGroup.permissions).toEqual([]);
+        expect(usersGroup.permissions).toEqual(['commands:execute']);
         expect(usersGroup.builtIn).toBe(true);
         const root = await plugin.userStore.getUser('root');
         expect(root).toMatchObject({ email: 'root@localhost', groups: ['admin'] });
@@ -581,25 +581,27 @@ describe('Protections and cascades', () => {
     });
 
     it('last enabled admin cannot be deleted, disabled or removed from admin', async () => {
-        // a delegated user manager (not admin) so that "self delete" does not mask the rule
-        await createGroup(s.app, rootToken, { name: 'managers', permissions: ['users:*', 'groups:*'] });
-        await createUser(s.app, rootToken, { name: 'mgr', email: 'mgr@x.com', password: 'mgrpass', groups: ['managers'] });
-        const mgr = (await login(s.app, 'mgr', 'mgrpass')).token;
+        // a superuser outside the admin group (holds '*', so privilege checks pass)
+        await createGroup(s.app, rootToken, { name: 'super', permissions: ['*'] });
+        await createUser(s.app, rootToken, { name: 'su', email: 'su@x.com', password: 'supass', groups: ['super'] });
+        const su = (await login(s.app, 'su', 'supass')).token;
 
-        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(mgr))).status).toBe(409);
-        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(mgr)).send({ disabled: true })).status).toBe(409);
-        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(mgr)).send({ groups: ['users'] })).status).toBe(409);
-        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(mgr))).status).toBe(409);
+        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(su))).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(su)).send({ disabled: true })).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(su)).send({ groups: ['users'] })).status).toBe(409);
+        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(su))).status).toBe(409);
+        // root on itself: disabling / leaving admin is refused too
+        expect((await request(s.app).put(`${BASE}/users/root`).set(auth(rootToken)).send({ disabled: true })).status).toBe(409);
 
         // a disabled admin does not count as an enabled member
         await createUser(s.app, rootToken, { name: 'sleeper', email: 's@x.com', groups: ['admin'], disabled: true });
-        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(mgr))).status).toBe(409);
+        expect((await request(s.app).delete(`${BASE}/users/root`).set(auth(su))).status).toBe(409);
 
         // with a second enabled admin the rules no longer bite
         await createUser(s.app, rootToken, { name: 'admin2', email: 'a2@x.com', groups: ['admin'] });
-        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(mgr))).status).toBe(204);
+        expect((await request(s.app).delete(`${BASE}/groups/admin/members/root`).set(auth(su))).status).toBe(204);
         // admin2 is now the last enabled admin
-        expect((await request(s.app).put(`${BASE}/users/admin2`).set(auth(mgr)).send({ disabled: true })).status).toBe(409);
+        expect((await request(s.app).put(`${BASE}/users/admin2`).set(auth(su)).send({ disabled: true })).status).toBe(409);
     });
 
     it('deleting a user removes credentials and revokes sessions', async () => {
@@ -662,7 +664,7 @@ describe('Live user resolution', () => {
         await request(s.app).post(`${BASE}/groups/admin/members/liv`).set(auth(rootToken)).expect(204);
         expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(200);
         const current = await request(s.app).get(`${BASE}/sessions/current`).set(auth(token));
-        expect(current.body.permissions).toEqual(['*']);
+        expect(current.body.permissions).toContain('*');
         expect(current.body.user.groups).toContain('admin');
 
         // demote → stale admin rights are gone
@@ -670,7 +672,7 @@ describe('Live user resolution', () => {
         expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(403);
 
         // grant a permission to the user's group → immediate
-        await request(s.app).put(`${BASE}/groups/users`).set(auth(rootToken)).send({ permissions: ['users:read'] }).expect(200);
+        await request(s.app).put(`${BASE}/groups/users`).set(auth(rootToken)).send({ permissions: ['commands:execute', 'users:read'] }).expect(200);
         expect((await request(s.app).get(`${BASE}/users`).set(auth(token))).status).toBe(200);
     });
 
@@ -824,6 +826,8 @@ describe('External Auth Adapter', () => {
         updatedAt: Date.now(),
     };
 
+    const ORIGIN = 'http://localhost:4300';
+
     const testAdapter: AuthAdapter = (req: Request) => {
         const header = req.headers['x-test-user'] as string | undefined;
         if (header === 'admin') return { user: adminUser, isAdmin: true };
@@ -832,7 +836,7 @@ describe('External Auth Adapter', () => {
     };
 
     beforeAll(async () => {
-        plugin = new CliUsersBuilder().setAuthAdapter(testAdapter).build();
+        plugin = new CliUsersBuilder().setAuthAdapter(testAdapter).setAllowedOrigins([ORIGIN]).build();
         await plugin.ready;
         app = express();
         app.use(express.json());
@@ -842,10 +846,10 @@ describe('External Auth Adapter', () => {
 
     it('login, logout, verify-password and password endpoints return 501 {error}', async () => {
         const responses = [
-            await request(app).post(`${BASE}/sessions`).send({ username: 'root', password: 'root' }),
-            await request(app).delete(`${BASE}/sessions/current`).set('X-Test-User', 'admin'),
-            await request(app).post(`${BASE}/users/extadmin/verify-password`).set('X-Test-User', 'admin').send({ password: 'pass' }),
-            await request(app).put(`${BASE}/users/extadmin/password`).set('X-Test-User', 'admin').send({ password: 'passpass' }),
+            await request(app).post(`${BASE}/sessions`).set('Origin', ORIGIN).send({ username: 'root', password: 'root' }),
+            await request(app).delete(`${BASE}/sessions/current`).set('X-Test-User', 'admin').set('Origin', ORIGIN),
+            await request(app).post(`${BASE}/users/extadmin/verify-password`).set('X-Test-User', 'admin').set('Origin', ORIGIN).send({ password: 'pass' }),
+            await request(app).put(`${BASE}/users/extadmin/password`).set('X-Test-User', 'admin').set('Origin', ORIGIN).send({ password: 'passpass' }),
         ];
         for (const res of responses) {
             expect(res.status).toBe(501);
@@ -867,22 +871,22 @@ describe('External Auth Adapter', () => {
         expect(admin.body.permissions).toEqual(['*']);
 
         const user = await request(app).get(`${BASE}/sessions/current`).set('X-Test-User', 'user');
-        expect(user.body.permissions).toEqual([]);
+        expect(user.body.permissions).toEqual(['commands:execute']);
     });
 
     it('enforces permissions for adapter users', async () => {
-        const created = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').send({ name: 'managed', email: 'managed@host.com' });
+        const created = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').set('Origin', ORIGIN).send({ name: 'managed', email: 'managed@host.com' });
         expect(created.status).toBe(201);
         expect((await request(app).get(`${BASE}/audit`).set('X-Test-User', 'admin')).status).toBe(200);
 
-        expect((await request(app).post(`${BASE}/users`).set('X-Test-User', 'user').send({ name: 'nope', email: 'n@h.com' })).status).toBe(403);
+        expect((await request(app).post(`${BASE}/users`).set('X-Test-User', 'user').set('Origin', ORIGIN).send({ name: 'nope', email: 'n@h.com' })).status).toBe(403);
         expect((await request(app).get(`${BASE}/sessions`).set('X-Test-User', 'user')).status).toBe(403);
         expect((await request(app).get(`${BASE}/audit`).set('X-Test-User', 'user')).status).toBe(403);
         expect((await request(app).get(`${BASE}/groups`).set('X-Test-User', 'user')).status).toBe(200);
     });
 
     it('rejects passwords on user creation in external-auth mode', async () => {
-        const res = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').send({ name: 'pw', email: 'pw@host.com', password: 'secret' });
+        const res = await request(app).post(`${BASE}/users`).set('X-Test-User', 'admin').set('Origin', ORIGIN).send({ name: 'pw', email: 'pw@host.com', password: 'secret' });
         expect(res.status).toBe(400);
     });
 

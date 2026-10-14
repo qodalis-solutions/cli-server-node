@@ -7,6 +7,7 @@ import { InMemoryAuditStore } from '../../plugins/users/stores/in-memory-audit-s
 import { InMemoryGroupStore } from '../../plugins/users/stores/in-memory-group-store';
 import { HttpError } from '../../plugins/users/errors';
 import { createHash } from 'crypto';
+import { hashToken } from '../../plugins/users/security';
 
 function buildAuthService(options: { sessionTimeoutMs?: number; maxLoginAttempts?: number; lockoutMs?: number } = {}) {
     const userStore = new InMemoryUserStore();
@@ -132,8 +133,8 @@ describe('AuthService.logout', () => {
         await authService.setPassword(user.id, 'pass');
         const { token } = await authService.login('ivan', 'pass', {});
 
-        await authService.logout(token);
-        const session = await sessionStore.getSession(token);
+        await authService.logout(hashToken(token));
+        const session = await sessionStore.getSession(hashToken(token));
         expect(session).toBeUndefined();
     });
 
@@ -142,7 +143,7 @@ describe('AuthService.logout', () => {
         const user = await userStore.createUser({ name: 'jane', email: 'jane@example.com' });
         await authService.setPassword(user.id, 'pass');
         const { token } = await authService.login('jane', 'pass', {});
-        await authService.logout(token);
+        await authService.logout(hashToken(token));
 
         const entries = await auditStore.getEntries({ event: 'logout' });
         expect(entries.length).toBeGreaterThanOrEqual(1);
@@ -308,7 +309,7 @@ describe('AuthService.authenticateToken', () => {
         await new Promise((r) => setTimeout(r, 50));
         const err = await authService.authenticateToken(token).catch((e) => e);
         expect(err.status).toBe(401);
-        expect(await sessionStore.getSession(token)).toBeUndefined();
+        expect(await sessionStore.getSession(hashToken(token))).toBeUndefined();
     });
 
     it('rejects sessions of deleted users', async () => {

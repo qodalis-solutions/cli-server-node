@@ -15,7 +15,9 @@ export interface TestServer {
 export async function createTestServer(options: UsersModuleOptions = {}): Promise<TestServer> {
     const broadcast = vi.fn();
     const plugin = new CliUsersBuilder()
-        .setOptions({ defaultAdminPassword: ROOT_PASS, ...options })
+        // Short test passwords and many logins per test: relax the policy and
+        // the per-IP limiter here; dedicated tests cover the defaults.
+        .setOptions({ defaultAdminPassword: ROOT_PASS, minPasswordLength: 4, ipRateLimit: 10_000, ...options })
         .build(broadcast);
     await plugin.ready;
     const app = express();

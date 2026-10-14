@@ -115,7 +115,7 @@ describe('InMemorySessionStore', () => {
             remoteAddress: '127.0.0.1',
         });
         expect(session.id).toBeDefined();
-        expect(session.token).toBe('token-abc');
+        expect(session.tokenHash).toBe('token-abc');
         expect(session.userId).toBe('user-1');
         expect((session as any).user).toBeUndefined();
         expect(session.createdAt).toBeDefined();
@@ -126,7 +126,7 @@ describe('InMemorySessionStore', () => {
         await store.createSession('user-1', 'my-token', {});
         const found = await store.getSession('my-token');
         expect(found).toBeDefined();
-        expect(found!.token).toBe('my-token');
+        expect(found!.tokenHash).toBe('my-token');
     });
 
     it('gets session by id', async () => {
