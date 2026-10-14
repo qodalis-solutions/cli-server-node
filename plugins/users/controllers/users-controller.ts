@@ -3,11 +3,17 @@ import { ICliUserStore, ICliCredentialStore, ICliSessionStore } from '../stores/
 import { AuthService } from '../services/auth-service';
 import { requireAdmin } from '../middleware/auth-middleware';
 
+export interface UsersControllerOptions {
+    /** When true, authentication is managed by the host app: verify-password returns 501 */
+    externalAuth?: boolean;
+}
+
 export function createUsersController(
     userStore: ICliUserStore,
     authService: AuthService,
     credentialStore: ICliCredentialStore,
     sessionStore: ICliSessionStore,
+    options: UsersControllerOptions = {},
 ): Router {
     const router = Router();
 
@@ -91,7 +97,8 @@ export function createUsersController(
             }
             const valid = await authService.verifyPassword(targetId, currentPassword);
             if (!valid) {
-                res.status(401).json({ error: 'Current password is incorrect' });
+                // 403, not 401: the session is valid, the supplied password is not
+                res.status(403).json({ error: 'Current password is incorrect' });
                 return;
             }
         }
@@ -102,6 +109,22 @@ export function createUsersController(
         } catch (err: any) {
             res.status(400).json({ error: err.message });
         }
+    });
+
+    // POST /:id/verify-password — check a user's password, returns { valid }.
+    // Requires an authenticated session (used by `su` and `passwd` on the client).
+    router.post('/:id/verify-password', async (req: Request, res: Response): Promise<void> => {
+        if (options.externalAuth) {
+            res.status(501).json({ error: 'Authentication is managed by the host application' });
+            return;
+        }
+        const { password } = req.body ?? {};
+        if (!password) {
+            res.status(400).json({ error: 'password is required' });
+            return;
+        }
+        const valid = await authService.verifyPassword(req.params.id, password);
+        res.json({ valid });
     });
 
     return router;

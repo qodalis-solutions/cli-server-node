@@ -55,15 +55,15 @@ All routes are mounted under `/api/v1/qcli`. Protected routes expect `Authorizat
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/auth/login` | POST | None | `{ username, password }` → `{ token, session }` |
-| `/auth/logout` | POST | Required | Invalidate the current token (204) |
-| `/auth/verify` | POST | None | `{ userId, password }` → `{ valid }` |
+| `/sessions` | POST | None | Login: `{ username, password }` → `201 { token, session }` |
+| `/sessions/current` | DELETE | Required | Logout: end the current session (204) |
 | `/users` | GET | Required | List users (`?query=&skip=&take=`) |
 | `/users/:idOrName` | GET | Required | Get a user |
 | `/users` | POST | Admin | Create a user `{ name, email, password?, groups?, data? }` |
 | `/users/:id` | PUT | Admin | Update a user |
 | `/users/:id` | DELETE | Admin | Delete a user and its sessions/credentials (204) |
-| `/users/:id/password` | PUT | Self or admin | `{ currentPassword?, newPassword }` (204) |
+| `/users/:id/password` | PUT | Self or admin | `{ currentPassword?, newPassword }`; a wrong current password returns 403 |
+| `/users/:id/verify-password` | POST | Required | `{ password }` → `{ valid }` |
 | `/sessions` | GET | Admin | List active sessions |
 | `/sessions/current` | GET | Required | Current session |
 | `/sessions/:id` | DELETE | Admin | Kick a session (204) and broadcast `session-kicked` |
@@ -75,6 +75,8 @@ All routes are mounted under `/api/v1/qcli`. Protected routes expect `Authorizat
 | `/groups/:name/members/:userId` | DELETE | Admin | Remove a user from a group (204) |
 | `/audit` | GET | Admin | Audit entries (`?event=&username=&limit=`) |
 | `/audit` | DELETE | Admin | Clear the audit log (204) |
+
+The admin dashboard plugin keeps its own login at `/auth/login`; both plugins can be mounted at the same prefix.
 
 Tokens are opaque random strings validated against the session store on every request; `lastActivity` is refreshed on each authenticated call.
 
@@ -101,7 +103,7 @@ const usersPlugin = await buildUsersPlugin({
 
 ## External auth adapter
 
-If the host application already authenticates requests, pass an `authAdapter`. It receives the Express request (after your own auth middleware) and returns the CLI user plus an admin flag, or `null`/`undefined` when unauthenticated. The built-in `login`/`logout`/`verify` endpoints then answer `501`, and no `root` user is seeded.
+If the host application already authenticates requests, pass an `authAdapter`. It receives the Express request (after your own auth middleware) and returns the CLI user plus an admin flag, or `null`/`undefined` when unauthenticated. Login (`POST /sessions`), logout (`DELETE /sessions/current`) and `verify-password` then answer `501`, and no `root` user is seeded.
 
 ```typescript
 const usersPlugin = await buildUsersPlugin({
@@ -125,7 +127,7 @@ engine.registerModule(usersModule.configure({ server: 'node' }));
 // options.servers must contain { name: 'node', url: 'http://localhost:8047' }
 ```
 
-The client then logs in through `/auth/login`, attaches the bearer token to every request to that server, and gains the `sessions` and `session-kick` commands.
+The client then logs in through `POST /sessions`, attaches the bearer token to every request to that server, and gains the `sessions` and `session-kick` commands.
 
 ## License
 

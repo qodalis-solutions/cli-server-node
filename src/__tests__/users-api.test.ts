@@ -18,7 +18,7 @@ describe('Users API Integration', () => {
 
         // Login as admin to get token
         const res = await request(app)
-            .post('/api/v1/qcli/auth/login')
+            .post('/api/v1/qcli/sessions')
             .send({ username: 'root', password: 'admin123' });
         adminToken = res.body.token;
         adminUserId = res.body.session?.userId;
@@ -32,13 +32,13 @@ describe('Users API Integration', () => {
     // Auth
     // -------------------------------------------------------------------------
 
-    describe('POST /auth/login', () => {
-        it('returns 200 with token and session for valid credentials', async () => {
+    describe('POST /sessions (login)', () => {
+        it('returns 201 with token and session for valid credentials', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root', password: 'admin123' });
 
-            expect(res.status).toBe(200);
+            expect(res.status).toBe(201);
             expect(res.body.token).toBeDefined();
             expect(res.body.session).toBeDefined();
             expect(res.body.session.userId).toBeDefined();
@@ -46,7 +46,7 @@ describe('Users API Integration', () => {
 
         it('returns 401 for invalid credentials', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root', password: 'wrongpassword' });
 
             expect(res.status).toBe(401);
@@ -55,7 +55,7 @@ describe('Users API Integration', () => {
 
         it('returns 401 for unknown username', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'nobody', password: 'pass' });
 
             expect(res.status).toBe(401);
@@ -63,7 +63,7 @@ describe('Users API Integration', () => {
 
         it('returns 400 when username is missing', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ password: 'admin123' });
 
             expect(res.status).toBe(400);
@@ -71,7 +71,7 @@ describe('Users API Integration', () => {
 
         it('returns 400 when password is missing', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root' });
 
             expect(res.status).toBe(400);
@@ -91,7 +91,7 @@ describe('Users API Integration', () => {
                 .send({ disabled: true });
 
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'disableduser', password: 'disabledpass' });
 
             expect(loginRes.status).toBe(401);
@@ -99,17 +99,17 @@ describe('Users API Integration', () => {
         });
     });
 
-    describe('POST /auth/logout', () => {
+    describe('DELETE /sessions/current (logout)', () => {
         it('returns 204 and invalidates the session', async () => {
             // Create a separate login session to logout
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root', password: 'admin123' });
 
             const tempToken = loginRes.body.token;
 
             const logoutRes = await request(app)
-                .post('/api/v1/qcli/auth/logout')
+                .delete('/api/v1/qcli/sessions/current')
                 .set('Authorization', `Bearer ${tempToken}`);
 
             expect(logoutRes.status).toBe(204);
@@ -123,16 +123,17 @@ describe('Users API Integration', () => {
         });
 
         it('returns 401 without a token', async () => {
-            const res = await request(app).post('/api/v1/qcli/auth/logout');
+            const res = await request(app).delete('/api/v1/qcli/sessions/current');
             expect(res.status).toBe(401);
         });
     });
 
-    describe('POST /auth/verify', () => {
+    describe('POST /users/:id/verify-password', () => {
         it('returns { valid: true } for correct password', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/verify')
-                .send({ userId: adminUserId, password: 'admin123' });
+                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ password: 'admin123' });
 
             expect(res.status).toBe(200);
             expect(res.body.valid).toBe(true);
@@ -140,27 +141,29 @@ describe('Users API Integration', () => {
 
         it('returns { valid: false } for wrong password', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/verify')
-                .send({ userId: adminUserId, password: 'wrongpassword' });
+                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ password: 'wrongpassword' });
 
             expect(res.status).toBe(200);
             expect(res.body.valid).toBe(false);
         });
 
-        it('returns 400 when userId is missing', async () => {
+        it('returns 400 when password is missing', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/verify')
-                .send({ password: 'admin123' });
+                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({});
 
             expect(res.status).toBe(400);
         });
 
-        it('returns 400 when password is missing', async () => {
+        it('returns 401 without a session', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/verify')
-                .send({ userId: adminUserId });
+                .post(`/api/v1/qcli/users/${adminUserId}/verify-password`)
+                .send({ password: 'admin123' });
 
-            expect(res.status).toBe(400);
+            expect(res.status).toBe(401);
         });
     });
 
@@ -323,7 +326,7 @@ describe('Users API Integration', () => {
 
             // Login as alice with newAlicePass set above
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'alice', password: 'newAlicePass' });
             const aliceToken = loginRes.body.token;
 
@@ -335,9 +338,9 @@ describe('Users API Integration', () => {
             expect(res.status).toBe(200);
         });
 
-        it('returns 401 when self-change currentPassword is wrong', async () => {
+        it('returns 403 when self-change currentPassword is wrong', async () => {
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'alice', password: 'alicepass2' });
             const aliceToken = loginRes.body.token;
             const aliceId = loginRes.body.session.userId;
@@ -347,7 +350,7 @@ describe('Users API Integration', () => {
                 .set('Authorization', `Bearer ${aliceToken}`)
                 .send({ currentPassword: 'wrongcurrent', newPassword: 'newpass' });
 
-            expect(res.status).toBe(401);
+            expect(res.status).toBe(403);
         });
 
         it('returns 400 when newPassword is missing', async () => {
@@ -367,7 +370,7 @@ describe('Users API Integration', () => {
 
         it('returns 400 when non-admin self-change is missing currentPassword', async () => {
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'alice', password: 'alicepass2' });
             const aliceToken = loginRes.body.token;
             const aliceId = loginRes.body.session.userId;
@@ -412,7 +415,7 @@ describe('Users API Integration', () => {
         it('admin can kick another session, and that token no longer works', async () => {
             // Login as alice to get her session
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'alice', password: 'alicepass2' });
             const aliceToken = loginRes.body.token;
             const aliceSessionId = loginRes.body.session.id;
@@ -632,7 +635,7 @@ describe('Users API Integration', () => {
 
             // Bob logs in
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'bob', password: 'bobpass' });
             bobToken = loginRes.body.token;
             bobUserId = loginRes.body.session.userId;
@@ -710,7 +713,7 @@ describe('Users API Integration', () => {
         it('cannot kick another session (403)', async () => {
             // Create a temporary login session to target
             const loginRes = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root', password: 'admin123' });
             const targetSessionId = loginRes.body.session.id;
 
@@ -808,27 +811,28 @@ describe('External Auth Adapter', () => {
     // -------------------------------------------------------------------------
 
     describe('Auth endpoints return 501 when external auth is active', () => {
-        it('POST /auth/login returns 501', async () => {
+        it('POST /sessions (login) returns 501', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/login')
+                .post('/api/v1/qcli/sessions')
                 .send({ username: 'root', password: 'root' });
 
             expect(res.status).toBe(501);
             expect(res.body.error).toContain('host application');
         });
 
-        it('POST /auth/logout returns 501', async () => {
+        it('DELETE /sessions/current (logout) returns 501', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/logout');
+                .delete('/api/v1/qcli/sessions/current');
 
             expect(res.status).toBe(501);
             expect(res.body.error).toContain('host application');
         });
 
-        it('POST /auth/verify returns 501', async () => {
+        it('POST /users/:id/verify-password returns 501', async () => {
             const res = await request(app)
-                .post('/api/v1/qcli/auth/verify')
-                .send({ userId: 'ext-admin-1', password: 'pass' });
+                .post('/api/v1/qcli/users/ext-admin-1/verify-password')
+                .set('X-Test-User', 'admin')
+                .send({ password: 'pass' });
 
             expect(res.status).toBe(501);
             expect(res.body.error).toContain('host application');

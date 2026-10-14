@@ -8,7 +8,6 @@ import { InMemoryAuditStore } from './stores/in-memory-audit-store';
 import { InMemoryGroupStore } from './stores/in-memory-group-store';
 import { AuthService } from './services/auth-service';
 import { createAuthMiddleware } from './middleware/auth-middleware';
-import { createAuthController } from './controllers/auth-controller';
 import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
@@ -83,14 +82,16 @@ export async function buildUsersPlugin(
     // 6. Build the router
     const router = Router();
 
-    // /auth — no global auth requirement
-    router.use('/auth', createAuthController(authService, sessionStore, {
+    // /sessions — login (POST /sessions) is public; the controller applies auth to the rest
+    router.use('/sessions', createSessionsController(sessionStore, authService, authMiddleware, {
         externalAuth: useExternalAuth,
+        broadcastEvent,
     }));
 
-    // /users, /sessions, /groups, /audit — auth required globally
-    router.use('/users', authMiddleware, createUsersController(userStore, authService, credentialStore, sessionStore));
-    router.use('/sessions', authMiddleware, createSessionsController(sessionStore, broadcastEvent));
+    // /users, /groups, /audit — auth required globally
+    router.use('/users', authMiddleware, createUsersController(userStore, authService, credentialStore, sessionStore, {
+        externalAuth: useExternalAuth,
+    }));
     router.use('/groups', authMiddleware, createGroupsController(groupStore, userStore));
     router.use('/audit', authMiddleware, createAuditController(auditStore));
 
