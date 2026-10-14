@@ -143,8 +143,10 @@ export class CliAdminBuilder {
         const authResult = createAuthController(this._config, secret);
         router.use('/auth', authResult.router);
 
-        // Apply auth middleware to all routes below
-        router.use(authMiddleware);
+        // Auth is applied per admin route group (not router-wide): this router
+        // is mounted at the shared /api/v1/qcli prefix, so an unscoped
+        // `router.use(authMiddleware)` would reject requests meant for other
+        // plugins mounted at the same prefix (e.g. the users plugin).
 
         // Status
         const registeredJobs = this._registeredJobs;
@@ -166,19 +168,19 @@ export class CliAdminBuilder {
                 return features;
             },
         };
-        router.use('/status', createStatusController(statusDeps));
+        router.use('/status', authMiddleware, createStatusController(statusDeps));
 
         // Plugins
-        router.use('/plugins', createPluginsController(moduleRegistry));
+        router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry));
 
         // Config
-        router.use('/config', createConfigController(this._config));
+        router.use('/config', authMiddleware, createConfigController(this._config));
 
         // Logs
-        router.use('/logs', createLogsController(logBuffer));
+        router.use('/logs', authMiddleware, createLogsController(logBuffer));
 
         // WebSocket clients
-        router.use('/ws/clients', createWsClientsController(eventSocketManager));
+        router.use('/ws/clients', authMiddleware, createWsClientsController(eventSocketManager));
 
         // Dashboard SPA static file serving
         const dashboardRouter = Router();
