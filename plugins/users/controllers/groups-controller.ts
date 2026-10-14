@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { DirectoryService, bodyOf } from '../services/directory-service';
+import { DirectoryService, bodyOf, callerOf } from '../services/directory-service';
 import { toUserJson } from '../services/auth-service';
 import { can, getAuth, requirePermission } from '../middleware/auth-middleware';
 import { asyncHandler, forbidden } from '../errors';
@@ -16,7 +16,7 @@ export function createGroupsController(directory: DirectoryService): Router {
 
     // POST / — groups:create
     router.post('/', requirePermission(P.GroupsCreate), asyncHandler(async (req: Request, res: Response) => {
-        const group = await directory.createGroup(bodyOf(req), getAuth(req).user.name);
+        const group = await directory.createGroup(bodyOf(req), callerOf(getAuth(req)));
         res.status(201).json(group);
     }));
 
@@ -29,13 +29,13 @@ export function createGroupsController(directory: DirectoryService): Router {
     router.put('/:name', requirePermission(P.GroupsUpdate), asyncHandler(async (req: Request, res: Response) => {
         const body = bodyOf(req);
         const group = await directory.getGroupOr404(req.params.name);
-        res.json(await directory.updateGroup(group, body, getAuth(req).user.name));
+        res.json(await directory.updateGroup(group, body, callerOf(getAuth(req))));
     }));
 
     // DELETE /:name — groups:delete
     router.delete('/:name', requirePermission(P.GroupsDelete), asyncHandler(async (req: Request, res: Response) => {
         const group = await directory.getGroupOr404(req.params.name);
-        await directory.deleteGroup(group, getAuth(req).user.name);
+        await directory.deleteGroup(group, callerOf(getAuth(req)));
         res.status(204).end();
     }));
 
@@ -52,7 +52,7 @@ export function createGroupsController(directory: DirectoryService): Router {
 
     // POST /:name/members/:idOrName — groups:update (PUT kept as a legacy alias)
     const addMember = asyncHandler(async (req: Request, res: Response) => {
-        await directory.addMember(req.params.name, req.params.idOrName, getAuth(req).user.name);
+        await directory.addMember(req.params.name, req.params.idOrName, callerOf(getAuth(req)));
         res.status(204).end();
     });
     router.post('/:name/members/:idOrName', requirePermission(P.GroupsUpdate), addMember);
@@ -62,7 +62,7 @@ export function createGroupsController(directory: DirectoryService): Router {
     router.delete('/:name/members/:idOrName', requirePermission(P.GroupsUpdate), asyncHandler(async (req: Request, res: Response) => {
         const group = await directory.getGroupOr404(req.params.name);
         const user = await directory.getUserOr404(req.params.idOrName);
-        await directory.removeMember(group, user, getAuth(req).user.name);
+        await directory.removeMember(group, user, callerOf(getAuth(req)));
         res.status(204).end();
     }));
 

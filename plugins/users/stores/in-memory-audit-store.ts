@@ -3,22 +3,44 @@ import { AuditEntry, AuditQueryOptions } from '../models';
 import { ICliAuditStore } from './interfaces';
 
 const MAX_ENTRIES = 1000;
+const MAX_FAILED_LOGIN_ENTRIES = 200;
 
+interface Stored {
+    seq: number;
+    entry: AuditEntry;
+}
+
+/**
+ * In-memory audit log. `login_failed` entries are capped separately (last 200)
+ * so a flood of failed logins cannot evict the rest of the history (last 1000).
+ */
 export class InMemoryAuditStore implements ICliAuditStore {
-    private entries: AuditEntry[] = [];
+    private entries: Stored[] = [];
+    private failedLogins: Stored[] = [];
+    private seq = 0;
 
-    constructor(private readonly maxEntries: number = MAX_ENTRIES) {}
+    constructor(
+        private readonly maxEntries: number = MAX_ENTRIES,
+        private readonly maxFailedLoginEntries: number = MAX_FAILED_LOGIN_ENTRIES,
+    ) {}
 
     async log(entry: AuditEntry): Promise<void> {
-        this.entries.push({ id: entry.id ?? randomUUID(), ...entry, timestamp: entry.timestamp ?? Date.now() });
-        while (this.entries.length > this.maxEntries) {
-            this.entries.shift();
+        const stored: Stored = {
+            seq: this.seq++,
+            entry: { id: entry.id ?? randomUUID(), ...entry, timestamp: entry.timestamp ?? Date.now() },
+        };
+        if (entry.event === 'login_failed') {
+            this.failedLogins.push(stored);
+            while (this.failedLogins.length > this.maxFailedLoginEntries) this.failedLogins.shift();
+        } else {
+            this.entries.push(stored);
+            while (this.entries.length > this.maxEntries) this.entries.shift();
         }
     }
 
     async getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]> {
         // Newest first
-        let result = [...this.entries].reverse();
+        let result = [...this.entries, ...this.failedLogins].sort((a, b) => b.seq - a.seq).map((s) => s.entry);
 
         if (options?.event) {
             const event = options.event.toLowerCase();
@@ -39,5 +61,6 @@ export class InMemoryAuditStore implements ICliAuditStore {
 
     async clear(): Promise<void> {
         this.entries = [];
+        this.failedLogins = [];
     }
 }

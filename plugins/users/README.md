@@ -29,7 +29,9 @@ await usersPlugin.ready;       // optional: seeding done (requests wait for it a
 usersPlugin.dispose();
 ```
 
-`build()` is synchronous; seeding runs in the background and is exposed as `ready`. Seeding creates the built-in groups `admin` (`["*"]`) and `users` (`[]`) when missing and, unless an auth adapter is configured and the user store is empty, a `root` user (`root@localhost`, group `admin`, password from `setDefaultAdminPassword`, default `root`).
+Mounting the plugin protects the **whole** CLI server by default (`protectServer`): every `/api/...` route and WebSocket then requires a users session — see *Server protection* below.
+
+`build()` is synchronous; seeding runs in the background and is exposed as `ready`. Seeding creates the built-in groups `admin` (`["*"]`) and `users` (`["commands:execute"]`) when missing and, unless an auth adapter is configured, a `root` user (`root@localhost`, group `admin`) when the user store is empty. Without `setDefaultAdminPassword` a random 16-character password is generated, logged once with a warning, and root must change it at first login (`mustChangePassword`). An explicit well-known password (`root`, `admin`, `password`) logs a warning.
 
 `buildUsersPlugin(options, broadcastFn)` is still exported as a **deprecated** async wrapper around the builder.
 
@@ -43,11 +45,34 @@ usersPlugin.dispose();
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
 | `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout |
 | `setLockoutDuration(ms)` | 5 min | Lockout duration |
-| `setMinPasswordLength(n)` | 4 | Password policy |
+| `setMinPasswordLength(n)` | 8 | Password policy (max length is always 1024) |
+| `setMaxSessionLifetime(ms)` | 12 h | Absolute session lifetime; `expiresAt` = min(idle, absolute) |
+| `setProtectServer(bool)` | `true` | Protect every server route and socket when mounted |
+| `setAllowedOrigins(list)` | server's | Origins accepted for adapter/cookie-mode state changes (CSRF) |
+| `setTrustProxy(bool)` | `false` | Use `X-Forwarded-For` for the client IP |
+| `setIpRateLimit(max, windowMs)` | 20 / min | Per-IP limit on login, verify-password and self password change |
 | `setCleanupInterval(ms)` | 5 min | Background sweep of expired sessions |
 | `setOptions(options)` | — | Same options as a plain object |
 
-The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the five stores and `dispose()`.
+The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the five stores, `serverAuth` (the server/admin auth provider), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
+
+## Server protection
+
+`mountPlugin(usersPlugin)` (or `createCliServer({ auth: usersPlugin.serverAuth })`) protects every CLI server route and socket. Public: `POST /api/v1/qcli/sessions`, version discovery and capabilities.
+
+| Surface | Permission |
+|---|---|
+| `GET /commands` | authenticated |
+| `POST /execute`, `/execute/stream` | `commands:execute` + the processor's `requiredPermissions` |
+| fs read / write | `files:read` / `files:write` |
+| data explorer | `data:query` |
+| jobs read / manage | `jobs:read` / `jobs:manage` |
+| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
+| admin dashboard (`setAuthProvider`) | `admin:access` |
+
+WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticket, expiresIn: 30 }`, then `?ticket=<ticket>` on the upgrade URL (bound to the session, 30 s, consumed on first use). Bearer tokens are not accepted in WS query strings. `session-kicked` is sent only to sockets of the affected user. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('deploy:run')`.
+
+While a user has `mustChangePassword`, only `GET/DELETE /sessions/current` and `PUT /users/{self}/password` work; everything else answers `403 { "error": "password change required" }`.
 
 ## Permissions
 
@@ -76,6 +101,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | `POST /users/:idOrName/verify-password` | self or `users:update` | `{ password }` → `{ valid }`; failures count toward lockout |
 | `GET /groups`, `GET /groups/:name` | authenticated | |
 | `GET /groups/:name/members` | `groups:read` or member | `User[]` |
+| `POST /sessions/ws-ticket` | authenticated | `201 { ticket, expiresIn: 30 }` |
 | `POST /groups` | `groups:create` | `{ name, description?, permissions? }` → 201 |
 | `PUT /groups/:name` | `groups:update` | `{ description?, permissions? }`; `admin` permissions → 409 |
 | `DELETE /groups/:name` | `groups:delete` | built-in → 409 |
@@ -86,16 +112,23 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 
 ### Protections and cascades
 
-- Duplicate user name/email or group → 409; unknown referenced group → 400 `unknown group: x`.
+- Duplicate user name/email (one shared namespace) or group → 409; unknown referenced group → 400 `unknown group: x`.
+- No privilege escalation: granting permissions, adding to groups, or acting on a user (name/groups/disabled, password reset, delete, session revoke) requires holding every permission involved; otherwise 403 (`cannot grant permissions you do not hold: …` / `insufficient privileges for this user`).
+- Validation (400): names 1–64 `[A-Za-z0-9][A-Za-z0-9._@-]*`, email `local@domain` ≤ 254, permissions ≤ 128 chars (≤ 100 per group), description ≤ 256, `data` ≤ 16 KB, no control characters; request bodies ≤ 1 MB.
+- An admin password reset makes the password temporary (`mustChangePassword`) unless the body has `"temporary": false`, and clears the target's lockout.
 - You cannot delete yourself; the last enabled member of `admin` cannot be deleted, disabled or removed from `admin` (409).
 - Deleting a group removes it from every user. Deleting a user deletes its credentials and revokes its sessions. Disabling a user revokes its sessions. A password change by the user revokes their other sessions; by someone else, all of the target's sessions.
 - Every revoked session is broadcast as `{ "type": "session-kicked", "data": { "sessionId", "userId", "reason" } }`.
 
 ### Credentials
 
-Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte salt, 32-byte key), stored as `pbkdf2$100000$<saltB64>$<hashB64>` and compared in constant time. After 5 consecutive failures an account is locked for 5 minutes (`429 { "error": "account locked, try again later" }`).
+Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte salt, 32-byte key, at most 4 concurrent hashes), stored as `pbkdf2$100000$<saltB64>$<hashB64>` and compared in constant time. After 5 consecutive failures an account is locked for 5 minutes (`429 { "error": "account locked, try again later" }`); attempts are reserved before hashing so concurrent requests cannot exceed the limit, and unknown usernames are tracked and locked the same way (with a dummy hash for equal timing). Session stores only keep `SHA-256(token)`.
+
+In adapter/cookie mode, state-changing requests without a bearer header must come from an `Origin` in `allowedOrigins` (CSRF), otherwise 403.
 
 ### Audit events
+
+Entries carry `userId` / `actorId` when known. `login_failed` entries are capped separately (last 200).
 
 `login`, `login_failed`, `logout`, `user_created`, `user_updated`, `user_deleted`, `user_disabled`, `user_enabled`, `password_changed`, `group_created`, `group_updated`, `group_deleted`, `group_member_added`, `group_member_removed`, `session_revoked`, `audit_cleared` — with `actor` set to the acting user. The in-memory store keeps the last 1000 entries.
 

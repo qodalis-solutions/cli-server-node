@@ -21,15 +21,19 @@ export interface ICliUserStore {
     deleteUser(id: string): Promise<void>;
 }
 
+/**
+ * Session storage. Every `tokenHash` is `SHA-256(token)` as hex — stores
+ * never see raw tokens.
+ */
 export interface ICliSessionStore {
-    createSession(userId: string, token: string, metadata: SessionMetadata): Promise<Session>;
-    getSession(token: string): Promise<Session | undefined>;
+    createSession(userId: string, tokenHash: string, metadata: SessionMetadata): Promise<Session>;
+    getSession(tokenHash: string): Promise<Session | undefined>;
     getSessionById(id: string): Promise<Session | undefined>;
     getActiveSessions(): Promise<Session[]>;
-    deleteSession(token: string): Promise<void>;
+    deleteSession(tokenHash: string): Promise<void>;
     deleteSessionById(id: string): Promise<void>;
     deleteUserSessions(userId: string): Promise<void>;
-    updateLastActivity(token: string): Promise<void>;
+    updateLastActivity(tokenHash: string): Promise<void>;
     /** Removes sessions idle for longer than `maxAgeMs`. */
     cleanup(maxAgeMs: number): Promise<void>;
 }

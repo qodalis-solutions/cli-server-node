@@ -3,6 +3,7 @@ import { AuthAdapter } from '../models';
 import { AuthService, AuthContext } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup } from '../permissions';
+import { isOriginAllowed } from '../security';
 
 declare global {
     namespace Express {
@@ -12,6 +13,10 @@ declare global {
         }
     }
 }
+
+export const PASSWORD_CHANGE_REQUIRED = 'password change required';
+
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /** Extracts the bearer token from the Authorization header. */
 export function getBearerToken(req: Request): string | undefined {
@@ -24,13 +29,23 @@ export function getBearerToken(req: Request): string | undefined {
 }
 
 /**
- * Authenticates the request (bearer token, or the host's auth adapter) and
- * attaches the live user and effective permissions as `req.qcliAuth`.
+ * Authenticates requests: bearer token, or the host's auth adapter.
+ * Enforces the CSRF rule: a state-changing request without a bearer token
+ * (adapter/cookie mode) must come from an allowed `Origin`.
  */
-export function createAuthMiddleware(authService: AuthService, authAdapter?: AuthAdapter): RequestHandler {
-    return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
-        if (authAdapter) {
-            const result = authAdapter(req);
+export class RequestAuthenticator {
+    constructor(
+        private readonly authService: AuthService,
+        private readonly authAdapter: AuthAdapter | undefined,
+        private readonly getAllowedOrigins: () => readonly string[] | undefined,
+    ) {}
+
+    async authenticate(req: Request): Promise<AuthContext> {
+        const token = getBearerToken(req);
+        let ctx: AuthContext;
+
+        if (this.authAdapter) {
+            const result = this.authAdapter(req);
             if (!result || !result.user) {
                 throw unauthorized();
             }
@@ -43,16 +58,53 @@ export function createAuthMiddleware(authService: AuthService, authAdapter?: Aut
                 groups.push(ADMIN_GROUP);
             }
             const liveUser = { ...user, groups };
-            req.qcliAuth = { user: liveUser, permissions: await authService.getEffectivePermissions(liveUser) };
-            next();
-            return;
+            ctx = { user: liveUser, permissions: await this.authService.getEffectivePermissions(liveUser) };
+        } else {
+            if (!token) {
+                throw unauthorized();
+            }
+            ctx = await this.authService.authenticateToken(token);
         }
 
-        const token = getBearerToken(req);
-        if (!token) {
-            throw unauthorized();
+        if (!token && STATE_CHANGING.has(req.method.toUpperCase())) {
+            const origin = req.headers.origin;
+            if (!isOriginAllowed(origin, this.getAllowedOrigins())) {
+                throw forbidden('cross-site request rejected: origin not allowed');
+            }
         }
-        req.qcliAuth = await authService.authenticateToken(token);
+        return ctx;
+    }
+}
+
+/**
+ * True for the only calls allowed while the user must change their password:
+ * `GET/DELETE /sessions/current` and `PUT /users/{id}/password` (the controller
+ * additionally checks that the target is the caller).
+ */
+function allowedDuringPasswordChange(req: Request): boolean {
+    const base = req.baseUrl.toLowerCase().replace(/\/+$/, '');
+    const path = req.path.toLowerCase().replace(/\/+$/, '');
+    const method = req.method.toUpperCase();
+    if (base.endsWith('/sessions') && path === '/current' && (method === 'GET' || method === 'DELETE')) {
+        return true;
+    }
+    if (base.endsWith('/users') && method === 'PUT' && /^\/[^/]+\/password$/.test(path)) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Users-plugin route middleware: authenticates and attaches `req.qcliAuth`;
+ * blocks everything but the password change while `mustChangePassword` is set.
+ */
+export function createAuthMiddleware(authenticator: RequestAuthenticator): RequestHandler {
+    return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+        const ctx = await authenticator.authenticate(req);
+        if (ctx.user.mustChangePassword && !allowedDuringPasswordChange(req)) {
+            throw forbidden(PASSWORD_CHANGE_REQUIRED);
+        }
+        req.qcliAuth = ctx;
         next();
     });
 }

@@ -3,25 +3,25 @@ import { Session, SessionMetadata } from '../models';
 import { ICliSessionStore } from './interfaces';
 
 export class InMemorySessionStore implements ICliSessionStore {
-    /** Keyed by token. */
+    /** Keyed by token hash (SHA-256 hex); raw tokens are never stored. */
     private sessions: Map<string, Session> = new Map();
 
-    async createSession(userId: string, token: string, metadata: SessionMetadata): Promise<Session> {
+    async createSession(userId: string, tokenHash: string, metadata: SessionMetadata): Promise<Session> {
         const now = Date.now();
         const session: Session = {
             id: randomUUID(),
-            token,
+            tokenHash,
             userId,
             createdAt: now,
             lastActivity: now,
             metadata: { ...metadata },
         };
-        this.sessions.set(token, session);
+        this.sessions.set(tokenHash, session);
         return { ...session };
     }
 
-    async getSession(token: string): Promise<Session | undefined> {
-        const s = this.sessions.get(token);
+    async getSession(tokenHash: string): Promise<Session | undefined> {
+        const s = this.sessions.get(tokenHash);
         return s ? { ...s } : undefined;
     }
 
@@ -38,8 +38,8 @@ export class InMemorySessionStore implements ICliSessionStore {
         return Array.from(this.sessions.values()).map((s) => ({ ...s }));
     }
 
-    async deleteSession(token: string): Promise<void> {
-        this.sessions.delete(token);
+    async deleteSession(tokenHash: string): Promise<void> {
+        this.sessions.delete(tokenHash);
     }
 
     async deleteSessionById(id: string): Promise<void> {
@@ -59,8 +59,8 @@ export class InMemorySessionStore implements ICliSessionStore {
         }
     }
 
-    async updateLastActivity(token: string): Promise<void> {
-        const session = this.sessions.get(token);
+    async updateLastActivity(tokenHash: string): Promise<void> {
+        const session = this.sessions.get(tokenHash);
         if (session) {
             session.lastActivity = Date.now();
         }

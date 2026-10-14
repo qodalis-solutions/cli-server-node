@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { AuthService, toUserJson } from '../services/auth-service';
-import { DirectoryService, bodyOf } from '../services/directory-service';
-import { can, getAuth, requirePermission } from '../middleware/auth-middleware';
+import { DirectoryService, bodyOf, callerOf, optionalBoolean } from '../services/directory-service';
+import { can, getAuth, requirePermission, PASSWORD_CHANGE_REQUIRED } from '../middleware/auth-middleware';
 import { asyncHandler, badRequest, forbidden, HttpError } from '../errors';
 import { UsersPermissions as P } from '../permissions';
 import { User } from '../models';
@@ -9,6 +9,8 @@ import { User } from '../models';
 export interface UsersControllerOptions {
     /** When true, password endpoints return 501 (the host app owns credentials). */
     externalAuth?: boolean;
+    /** Per-IP attempt limiter for verify-password and self password change (throws 429). */
+    limitAttempt?: (req: Request) => void;
 }
 
 const notAvailable = () => new HttpError(501, 'Authentication is managed by the host application');
@@ -58,7 +60,7 @@ export function createUsersController(
     // POST / — create user
     router.post('/', requirePermission(P.UsersCreate), asyncHandler(async (req: Request, res: Response) => {
         const auth = getAuth(req);
-        const user = await directory.createUser(bodyOf(req), auth.user.name, options.externalAuth);
+        const user = await directory.createUser(bodyOf(req), callerOf(auth), options.externalAuth);
         res.status(201).json(toUserJson(user));
     }));
 
@@ -86,7 +88,7 @@ export function createUsersController(
                 throw forbidden(`forbidden: cannot change ${restricted.join(', ')} without ${P.UsersUpdate}`);
             }
         }
-        const updated = await directory.updateUser(target, body, auth.user.name);
+        const updated = await directory.updateUser(target, body, callerOf(auth));
         res.json(toUserJson(updated));
     }));
 
@@ -94,7 +96,7 @@ export function createUsersController(
     router.delete('/:idOrName', requirePermission(P.UsersDelete), asyncHandler(async (req: Request, res: Response) => {
         const auth = getAuth(req);
         const target = await directory.getUserOr404(req.params.idOrName);
-        await directory.deleteUser(target, auth.user.id, auth.user.name);
+        await directory.deleteUser(target, callerOf(auth));
         res.status(204).end();
     }));
 
@@ -102,38 +104,55 @@ export function createUsersController(
     router.put('/:idOrName/password', asyncHandler(async (req: Request, res: Response) => {
         if (options.externalAuth) throw notAvailable();
         const auth = getAuth(req);
+        const caller = callerOf(auth);
         const body = bodyOf(req);
         const { target, privileged, isSelf } = await resolveSelfOr(req, P.UsersUpdate);
+        if (auth.user.mustChangePassword && !isSelf) {
+            throw forbidden(PASSWORD_CHANGE_REQUIRED);
+        }
+        const temporary = optionalBoolean(body, 'temporary');
         const password = body.password;
         authService.validatePassword(password);
 
-        if (!privileged) {
+        if (isSelf) {
+            options.limitAttempt?.(req);
             const current = body.currentPassword;
-            if (typeof current !== 'string' || current.length === 0) {
+            if (!privileged && (typeof current !== 'string' || current.length === 0)) {
                 throw badRequest('currentPassword is required');
             }
-            const valid = await authService.verifyPasswordWithLockout(target, current, {
-                actor: auth.user.name,
-                remoteAddress: req.ip,
-                details: 'Wrong current password',
-            });
-            if (!valid) {
-                throw forbidden('current password is incorrect');
+            if (typeof current === 'string' && current.length > 0) {
+                const valid = await authService.verifyPasswordWithLockout(target, current, {
+                    actor: caller.name,
+                    actorId: caller.id,
+                    remoteAddress: req.ip,
+                    details: 'Wrong current password',
+                });
+                if (!valid) {
+                    throw forbidden('current password is incorrect');
+                }
             }
+        } else {
+            await directory.assertCanActOn(caller, target);
         }
 
         await authService.setPassword(target.id, password);
-        await authService.audit({ event: 'password_changed', username: target.name, actor: auth.user.name });
+        // Self change clears the flag; an admin reset makes the password temporary unless `temporary: false`.
+        const mustChangePassword = isSelf ? false : temporary !== false;
+        await directory.setMustChangePassword(target, mustChangePassword);
+        await authService.audit({ event: 'password_changed', username: target.name, userId: target.id, actor: caller.name, actorId: caller.id });
 
         if (isSelf) {
             await authService.revokeUserSessions(target.id, 'password changed', {
-                actor: auth.user.name,
+                actor: caller.name,
+                actorId: caller.id,
                 exceptSessionId: auth.session?.id,
                 userName: target.name,
             });
         } else {
+            authService.clearLockout(target.id);
             await authService.revokeUserSessions(target.id, 'password changed', {
-                actor: auth.user.name,
+                actor: caller.name,
+                actorId: caller.id,
                 userName: target.name,
             });
         }
@@ -144,14 +163,20 @@ export function createUsersController(
     router.post('/:idOrName/verify-password', asyncHandler(async (req: Request, res: Response) => {
         if (options.externalAuth) throw notAvailable();
         const auth = getAuth(req);
+        const caller = callerOf(auth);
         const body = bodyOf(req);
-        const { target } = await resolveSelfOr(req, P.UsersUpdate);
+        const { target, isSelf } = await resolveSelfOr(req, P.UsersUpdate);
+        if (!isSelf) {
+            await directory.assertCanActOn(caller, target);
+        }
         const password = body.password;
         if (typeof password !== 'string' || password.length === 0) {
             throw badRequest('password is required');
         }
+        options.limitAttempt?.(req);
         const valid = await authService.verifyPasswordWithLockout(target, password, {
-            actor: auth.user.name,
+            actor: caller.name,
+            actorId: caller.id,
             remoteAddress: req.ip,
             details: 'Password verification failed',
         });

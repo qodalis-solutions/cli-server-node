@@ -1,7 +1,11 @@
 import { UsersModuleOptions, UsersBroadcastFn } from './models';
 import { CliUsersBuilder, UsersPluginResult } from './cli-users-builder';
 
-export { CliUsersBuilder } from './cli-users-builder';
+export { CliUsersBuilder, generatePassword } from './cli-users-builder';
+export { UsersServerAuth } from './server-auth';
+export type { UsersServerAuthContext } from './server-auth';
+export { RequestAuthenticator } from './middleware/auth-middleware';
+export { hashToken, isOriginAllowed } from './security';
 export type { UsersPluginResult } from './cli-users-builder';
 export type {
     UsersModuleOptions,

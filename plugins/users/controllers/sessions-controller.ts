@@ -1,7 +1,7 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import { ICliUserStore } from '../stores/interfaces';
 import { AuthService, toUserJson } from '../services/auth-service';
-import { bodyOf } from '../services/directory-service';
+import { DirectoryService, bodyOf, callerOf } from '../services/directory-service';
 import { can, getAuth, requirePermission } from '../middleware/auth-middleware';
 import { asyncHandler, badRequest, forbidden, HttpError, notFound } from '../errors';
 import { UsersPermissions as P } from '../permissions';
@@ -9,6 +9,8 @@ import { UsersPermissions as P } from '../permissions';
 export interface SessionsControllerOptions {
     /** When true, login/logout return 501 (the host app owns authentication). */
     externalAuth?: boolean;
+    /** Per-IP attempt limiter for login (throws 429). */
+    limitAttempt?: (req: Request) => void;
 }
 
 const notAvailable = () => new HttpError(501, 'Authentication is managed by the host application');
@@ -25,6 +27,7 @@ const notAvailable = () => new HttpError(501, 'Authentication is managed by the 
 export function createSessionsController(
     authService: AuthService,
     userStore: ICliUserStore,
+    directory: DirectoryService,
     authMiddleware: RequestHandler,
     options: SessionsControllerOptions = {},
 ): Router {
@@ -41,6 +44,10 @@ export function createSessionsController(
             if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
                 throw badRequest('username and password are required');
             }
+            if (username.length > 254 || password.length > 1024) {
+                throw badRequest('username or password too long');
+            }
+            options.limitAttempt?.(req);
             const result = await authService.login(username.trim(), password, {
                 remoteAddress: req.ip,
                 userAgent: req.headers['user-agent'],
@@ -72,12 +79,17 @@ export function createSessionsController(
     if (!externalAuth) {
         router.delete('/current', asyncHandler(async (req: Request, res: Response) => {
             const auth = getAuth(req);
-            if (auth.token) {
-                await authService.logout(auth.token);
+            if (auth.tokenHash) {
+                await authService.logout(auth.tokenHash);
             }
             res.status(204).end();
         }));
     }
+
+    // POST /ws-ticket — single-use WebSocket ticket bound to this session (30 s)
+    router.post('/ws-ticket', asyncHandler(async (req: Request, res: Response) => {
+        res.status(201).json(authService.issueTicket(getAuth(req)));
+    }));
 
     router.get('/', requirePermission(P.SessionsRead), asyncHandler(async (req: Request, res: Response) => {
         const auth = getAuth(req);
@@ -97,10 +109,16 @@ export function createSessionsController(
         if (!session) {
             throw notFound('session not found');
         }
-        if (session.userId !== auth.user.id && !can(req, P.SessionsRevoke)) {
-            throw forbidden(`forbidden: missing permission ${P.SessionsRevoke}`);
+        if (session.userId !== auth.user.id) {
+            if (!can(req, P.SessionsRevoke)) {
+                throw forbidden(`forbidden: missing permission ${P.SessionsRevoke}`);
+            }
+            const owner = await userStore.getUser(session.userId);
+            if (owner) {
+                await directory.assertCanActOn(callerOf(auth), owner);
+            }
         }
-        await authService.revokeSession(session, 'revoked', auth.user.name);
+        await authService.revokeSession(session, 'revoked', auth.user.name, undefined, auth.user.id);
         res.status(204).end();
     }));
 

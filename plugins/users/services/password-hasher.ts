@@ -1,7 +1,30 @@
 import { pbkdf2, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import { promisify } from 'util';
 
-const pbkdf2Async = promisify(pbkdf2);
+const pbkdf2Raw = promisify(pbkdf2);
+
+/** Maximum concurrent PBKDF2 computations (they run on the libuv thread pool). */
+export const PBKDF2_CONCURRENCY = 4;
+let active = 0;
+const waiters: Array<() => void> = [];
+
+async function pbkdf2Async(password: string, salt: Buffer, iterations: number, keylen: number, digest: string): Promise<Buffer> {
+    if (active >= PBKDF2_CONCURRENCY) {
+        await new Promise<void>((resolve) => waiters.push(resolve));
+    } else {
+        active++;
+    }
+    try {
+        return await pbkdf2Raw(password, salt, iterations, keylen, digest);
+    } finally {
+        const next = waiters.shift();
+        if (next) {
+            next(); // hand the slot over
+        } else {
+            active--;
+        }
+    }
+}
 
 export const PBKDF2_ITERATIONS = 100_000;
 const SALT_BYTES = 16;
@@ -56,4 +79,17 @@ export async function verifyPasswordHash(password: string, encoded: string, lega
     const actual = createHash('sha256').update(legacySalt + password).digest();
     const expected = Buffer.from(encoded, 'hex');
     return expected.length === actual.length && timingSafeEqual(actual, expected);
+}
+
+let dummyHash: Promise<EncodedPassword> | undefined;
+
+/**
+ * Runs a full PBKDF2 verification against a throw-away hash so that requests
+ * for unknown users take as long as requests for known ones. Always false.
+ */
+export async function dummyVerify(password: string): Promise<false> {
+    dummyHash ??= hashPassword('dummy-password-for-timing');
+    const { hash } = await dummyHash;
+    await verifyPasswordHash(password, hash);
+    return false;
 }

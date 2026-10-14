@@ -16,6 +16,8 @@ export interface User {
     groups: string[];
     /** Always present in API responses (false by default). */
     disabled?: boolean;
+    /** When true the user must change their password before doing anything else. Always present in API responses. */
+    mustChangePassword?: boolean;
     homeDir?: string;
     data?: Record<string, any>;
     lastLoginAt?: number;
@@ -30,6 +32,7 @@ export interface CreateUserDto {
     password?: string;
     groups?: string[];
     disabled?: boolean;
+    mustChangePassword?: boolean;
     homeDir?: string;
     data?: Record<string, any>;
 }
@@ -39,6 +42,7 @@ export interface UpdateUserDto {
     email?: string;
     groups?: string[];
     disabled?: boolean;
+    mustChangePassword?: boolean;
     homeDir?: string;
     data?: Record<string, any>;
     lastLoginAt?: number;
@@ -53,10 +57,13 @@ export interface Credentials {
     lastChanged: number;
 }
 
-/** A stored session. The user is referenced by id and resolved live on every request. */
+/**
+ * A stored session. The user is referenced by id and resolved live on every
+ * request. Stores keep only `SHA-256(token)` (hex), never the raw token.
+ */
 export interface Session {
     id: string;
-    token: string;
+    tokenHash: string;
     userId: string;
     createdAt: number;
     lastActivity: number;
@@ -102,8 +109,12 @@ export interface AuditEntry {
     /** The user the event is about. */
     username: string;
     details?: string;
+    /** Id of the user the event is about, when known. */
+    userId?: string;
     /** The acting user, when different from / in addition to `username`. */
     actor?: string;
+    /** Id of the acting user, when known. */
+    actorId?: string;
     metadata?: {
         remoteAddress?: string;
         sessionId?: string;
@@ -163,8 +174,24 @@ export interface UsersModuleOptions {
     maxLoginAttempts?: number;
     /** Lockout duration in ms (default 5 minutes). */
     lockoutMs?: number;
-    /** Minimum password length (default 4). */
+    /** Minimum password length (default 8; maximum length is always 1024). */
     minPasswordLength?: number;
+    /** Absolute session lifetime in ms regardless of activity (default 12 hours). */
+    maxSessionLifetimeMs?: number;
+    /**
+     * Protect every CLI server route and socket with users sessions (default true).
+     * Takes effect when the plugin is mounted with `mountPlugin` or passed to
+     * `createCliServer({ auth })`.
+     */
+    protectServer?: boolean;
+    /** Origins allowed for CORS, WebSocket upgrades and cookie/adapter-mode state changes (CSRF). */
+    allowedOrigins?: string[];
+    /** Trust `X-Forwarded-For` for the client IP (default false). */
+    trustProxy?: boolean;
+    /** Per-IP attempts on login / verify-password / self password change per window (default 20). */
+    ipRateLimit?: number;
+    /** Per-IP limiter window in ms (default 60 seconds). */
+    ipRateLimitWindowMs?: number;
     /** Interval of the background expired-session sweep in ms (default 5 minutes). */
     cleanupIntervalMs?: number;
     /**

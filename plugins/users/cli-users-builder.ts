@@ -1,4 +1,4 @@
-import { Router, json, Request, Response, NextFunction } from 'express';
+import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthAdapter, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
     ICliUserStore,
@@ -14,12 +14,15 @@ import { InMemoryAuditStore } from './stores/in-memory-audit-store';
 import { InMemoryGroupStore } from './stores/in-memory-group-store';
 import { AuthService } from './services/auth-service';
 import { DirectoryService } from './services/directory-service';
-import { createAuthMiddleware } from './middleware/auth-middleware';
+import { createAuthMiddleware, RequestAuthenticator } from './middleware/auth-middleware';
+import { UsersServerAuth } from './server-auth';
+import { RateLimiter, clientIp } from './security';
+import { randomInt } from 'crypto';
 import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
 import { createAuditController } from './controllers/audit-controller';
-import { errorHandler } from './errors';
+import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -37,6 +40,17 @@ export interface UsersPluginResult {
     credentialStore: ICliCredentialStore;
     groupStore: ICliGroupStore;
     auditStore: ICliAuditStore;
+    /**
+     * Auth provider for the CLI server and the admin dashboard. Installed by
+     * `mountPlugin(usersPlugin)` or `createCliServer({ auth: usersPlugin.serverAuth })`.
+     */
+    serverAuth: UsersServerAuth;
+    /** Whether mounting this plugin protects every server route and socket. */
+    protectServer: boolean;
+    /** Express middleware for host routes: requires a users session. */
+    requireAuth: () => RequestHandler;
+    /** Express middleware for host routes: requires all the given permissions. */
+    requirePermission: (...permissions: string[]) => RequestHandler;
     /** Stops the background session sweep. */
     dispose: () => void;
 }
@@ -120,9 +134,40 @@ export class CliUsersBuilder {
         return this;
     }
 
-    /** Minimum password length (default 4). */
+    /** Minimum password length (default 8). */
     setMinPasswordLength(length: number): this {
         this.options.minPasswordLength = length;
+        return this;
+    }
+
+    /** Absolute session lifetime in milliseconds (default 12 hours). */
+    setMaxSessionLifetime(ms: number): this {
+        this.options.maxSessionLifetimeMs = ms;
+        return this;
+    }
+
+    /** Protect every CLI server route and socket when mounted (default true). */
+    setProtectServer(protect: boolean): this {
+        this.options.protectServer = protect;
+        return this;
+    }
+
+    /** Origins allowed for adapter/cookie-mode state changes (CSRF); inherited from the server when unset. */
+    setAllowedOrigins(origins: string[]): this {
+        this.options.allowedOrigins = origins;
+        return this;
+    }
+
+    /** Trust `X-Forwarded-For` for the client IP used by the per-IP limiter. */
+    setTrustProxy(trust: boolean): this {
+        this.options.trustProxy = trust;
+        return this;
+    }
+
+    /** Per-IP attempts on login / verify-password / self password change (default 20 per minute). */
+    setIpRateLimit(max: number, windowMs = 60_000): this {
+        this.options.ipRateLimit = max;
+        this.options.ipRateLimitWindowMs = windowMs;
         return this;
     }
 
@@ -154,29 +199,51 @@ export class CliUsersBuilder {
             maxLoginAttempts: options.maxLoginAttempts,
             lockoutMs: options.lockoutMs,
             minPasswordLength: options.minPasswordLength,
+            maxSessionLifetimeMs: options.maxSessionLifetimeMs,
             broadcast: broadcastFn,
         });
         const directory = new DirectoryService(userStore, groupStore, authService);
 
-        const ready = seed(userStore, groupStore, authService, externalAuth, options.defaultAdminPassword ?? 'root');
+        const ready = seed(userStore, groupStore, authService, externalAuth, options.defaultAdminPassword);
         ready.catch((err) => console.error('[users] seeding failed:', err));
 
         const waitReady = (_req: Request, _res: Response, next: NextFunction) => {
             ready.then(() => next(), next);
         };
 
-        const authMiddleware = createAuthMiddleware(authService, options.authAdapter);
+        let allowedOrigins = options.allowedOrigins;
+        const authenticator = new RequestAuthenticator(authService, options.authAdapter, () => allowedOrigins);
+        const authMiddleware = createAuthMiddleware(authenticator);
+
+        const trustProxy = options.trustProxy ?? false;
+        const ipLimiter = new RateLimiter(options.ipRateLimit ?? 20, options.ipRateLimitWindowMs ?? 60_000);
+        const limitAttempt = (req: Request) => {
+            if (!ipLimiter.tryAcquire(clientIp(req, trustProxy))) {
+                throw new HttpError(429, 'too many attempts, try again later');
+            }
+        };
+
+        const protectServer = options.protectServer ?? true;
+        const serverAuth = new UsersServerAuth(authService, authenticator, protectServer, (server) => {
+            if (!allowedOrigins && server.allowedOrigins) {
+                allowedOrigins = server.allowedOrigins;
+            }
+            if (!authService.hasBroadcast()) {
+                authService.setBroadcast(server.broadcast);
+            }
+        });
 
         const router = Router();
         const scoped = ['/sessions', '/users', '/groups', '/audit'];
-        router.use(scoped, json(), waitReady);
-        router.use('/sessions', createSessionsController(authService, userStore, authMiddleware, { externalAuth }));
-        router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth }));
+        router.use(scoped, json({ limit: '1mb' }), waitReady);
+        router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
+        router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
         router.use('/groups', authMiddleware, createGroupsController(directory));
         router.use('/audit', authMiddleware, createAuditController(auditStore, authService));
         router.use(scoped, errorHandler);
 
         const cleanupInterval = setInterval(() => {
+            ipLimiter.sweep();
             authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
         }, options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS);
         cleanupInterval.unref?.();
@@ -192,9 +259,25 @@ export class CliUsersBuilder {
             credentialStore,
             groupStore,
             auditStore,
+            serverAuth,
+            protectServer,
+            requireAuth: () => serverAuth.requireAuth(),
+            requirePermission: (...permissions: string[]) => serverAuth.requirePermission(...permissions),
             dispose: () => clearInterval(cleanupInterval),
         };
     }
+}
+
+const WEAK_PASSWORDS = new Set(['root', 'admin', 'password']);
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+/** A random 16-character password. */
+export function generatePassword(length = 16): string {
+    let out = '';
+    for (let i = 0; i < length; i++) {
+        out += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
+    }
+    return out;
 }
 
 async function seed(
@@ -202,7 +285,7 @@ async function seed(
     groupStore: ICliGroupStore,
     authService: AuthService,
     externalAuth: boolean,
-    adminPassword: string,
+    configuredPassword: string | undefined,
 ): Promise<void> {
     if (!(await groupStore.getGroup(ADMIN_GROUP))) {
         await groupStore.createGroup({
@@ -216,7 +299,7 @@ async function seed(
         await groupStore.createGroup({
             name: USERS_GROUP,
             description: 'Default group for new accounts',
-            permissions: [],
+            permissions: ['commands:execute'],
             builtIn: true,
         });
     }
@@ -226,7 +309,22 @@ async function seed(
     }
     const existing = await userStore.getUsers();
     if (existing.length === 0) {
-        const root = await userStore.createUser({ name: 'root', email: 'root@localhost', groups: [ADMIN_GROUP] });
-        await authService.setPassword(root.id, adminPassword);
+        const generated = configuredPassword === undefined;
+        const password = configuredPassword ?? generatePassword();
+        const root = await userStore.createUser({
+            name: 'root',
+            email: 'root@localhost',
+            groups: [ADMIN_GROUP],
+            mustChangePassword: generated,
+        });
+        await authService.setPassword(root.id, password);
+        if (generated) {
+            console.warn(
+                '[users] WARNING: no defaultAdminPassword configured. Generated password for user "root": ' +
+                    `${password} — it must be changed at first login.`,
+            );
+        } else if (WEAK_PASSWORDS.has(password.toLowerCase())) {
+            console.warn(`[users] WARNING: the "root" user uses a well-known default password. Change it before exposing this server.`);
+        }
     }
 }

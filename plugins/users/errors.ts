@@ -37,7 +37,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     // body-parser errors (malformed JSON, payload too large) carry a status
     const status = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : 500;
     if (status >= 400 && status < 500) {
-        res.status(status).json({ error: err?.type === 'entity.parse.failed' ? 'invalid JSON body' : String(err?.message ?? 'bad request') });
+        res.status(status).json({ error: err?.type === 'entity.parse.failed' ? 'invalid JSON body' : err?.type === 'entity.too.large' ? 'request body too large' : 'bad request' });
         return;
     }
     console.error('[users] unhandled error:', err);

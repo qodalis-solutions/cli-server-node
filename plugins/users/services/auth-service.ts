@@ -17,13 +17,17 @@ import {
     UsersBroadcastFn,
 } from '../models';
 import { HttpError, badRequest, unauthorized } from '../errors';
-import { hashPassword, verifyPasswordHash } from './password-hasher';
+import { hashPassword, verifyPasswordHash, dummyVerify } from './password-hasher';
 import { mergePermissions } from '../permissions';
+import { hashToken, sanitize } from '../security';
 
 export const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_MAX_LOGIN_ATTEMPTS = 5;
 export const DEFAULT_LOCKOUT_MS = 5 * 60 * 1000;
-export const DEFAULT_MIN_PASSWORD_LENGTH = 4;
+export const DEFAULT_MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 1024;
+export const DEFAULT_MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
+export const WS_TICKET_TTL_SECONDS = 30;
 
 export const LOCKED_MESSAGE = 'account locked, try again later';
 
@@ -34,6 +38,7 @@ export interface AuthServiceOptions {
     maxLoginAttempts?: number;
     lockoutMs?: number;
     minPasswordLength?: number;
+    maxSessionLifetimeMs?: number;
     /** Broadcasts `session-kicked` events over the events socket. */
     broadcast?: UsersBroadcastFn;
 }
@@ -44,12 +49,22 @@ export interface AuthContext {
     permissions: string[];
     /** Absent for external-auth (adapter) requests. */
     session?: Session;
-    token?: string;
+    /** SHA-256 of the bearer token, for token-authenticated requests. */
+    tokenHash?: string;
 }
 
 interface LockoutState {
+    /** Failed + in-flight attempts (reserved before verification). */
     failures: number;
     lockedUntil: number;
+}
+
+interface TicketEntry {
+    expiresAt: number;
+    userId: string;
+    sessionId?: string;
+    /** External-auth (adapter) requests have no stored session: keep the resolved context. */
+    adapterContext?: AuthContext;
 }
 
 /**
@@ -61,9 +76,11 @@ export class AuthService {
     readonly maxLoginAttempts: number;
     readonly lockoutMs: number;
     readonly minPasswordLength: number;
+    readonly maxSessionLifetimeMs: number;
     private readonly groupStore?: ICliGroupStore;
     private broadcast?: UsersBroadcastFn;
     private readonly lockouts = new Map<string, LockoutState>();
+    private readonly tickets = new Map<string, TicketEntry>();
 
     constructor(
         private readonly userStore: ICliUserStore,
@@ -77,11 +94,16 @@ export class AuthService {
         this.maxLoginAttempts = options.maxLoginAttempts ?? DEFAULT_MAX_LOGIN_ATTEMPTS;
         this.lockoutMs = options.lockoutMs ?? DEFAULT_LOCKOUT_MS;
         this.minPasswordLength = options.minPasswordLength ?? DEFAULT_MIN_PASSWORD_LENGTH;
+        this.maxSessionLifetimeMs = options.maxSessionLifetimeMs ?? DEFAULT_MAX_SESSION_LIFETIME_MS;
         this.broadcast = options.broadcast;
     }
 
     setBroadcast(fn: UsersBroadcastFn | undefined): void {
         this.broadcast = fn;
+    }
+
+    hasBroadcast(): boolean {
+        return !!this.broadcast;
     }
 
     generateToken(): string {
@@ -90,11 +112,18 @@ export class AuthService {
 
     // ---------------------------------------------------------------- audit
 
+    /** Logs an audit entry; string fields are stripped of control characters. */
     async audit(entry: Omit<AuditEntry, 'timestamp'> & { timestamp?: number }): Promise<void> {
-        const clean: AuditEntry = { timestamp: entry.timestamp ?? Date.now(), event: entry.event, username: entry.username };
+        const clean: AuditEntry = {
+            timestamp: entry.timestamp ?? Date.now(),
+            event: entry.event,
+            username: sanitize(entry.username ?? ''),
+        };
         if (entry.id !== undefined) clean.id = entry.id;
-        if (entry.details !== undefined) clean.details = entry.details;
-        if (entry.actor !== undefined) clean.actor = entry.actor;
+        if (entry.userId !== undefined) clean.userId = entry.userId;
+        if (entry.details !== undefined) clean.details = sanitize(entry.details, 1024);
+        if (entry.actor !== undefined) clean.actor = sanitize(entry.actor);
+        if (entry.actorId !== undefined) clean.actorId = entry.actorId;
         if (entry.metadata !== undefined) {
             const metadata = Object.fromEntries(Object.entries(entry.metadata).filter(([, v]) => v !== undefined));
             if (Object.keys(metadata).length > 0) clean.metadata = metadata;
@@ -111,6 +140,9 @@ export class AuthService {
         }
         if (password.length < this.minPasswordLength) {
             throw badRequest(`password must be at least ${this.minPasswordLength} characters`);
+        }
+        if (password.length > MAX_PASSWORD_LENGTH) {
+            throw badRequest(`password must be at most ${MAX_PASSWORD_LENGTH} characters`);
         }
     }
 
@@ -129,69 +161,116 @@ export class AuthService {
 
     async deleteCredentials(userId: string): Promise<void> {
         await this.credentialStore.deleteCredentials(userId);
-        this.lockouts.delete(userId);
+        this.clearLockout(userId);
     }
 
     // -------------------------------------------------------------- lockout
 
+    private static userKey(userId: string): string {
+        return `id:${userId}`;
+    }
+
+    private static nameKey(name: string): string {
+        return `name:${name.toLowerCase()}`;
+    }
+
     isLocked(userId: string): boolean {
-        const state = this.lockouts.get(userId);
-        if (!state || state.lockedUntil === 0) {
-            return false;
-        }
-        if (Date.now() >= state.lockedUntil) {
-            this.lockouts.delete(userId);
-            return false;
-        }
-        return true;
+        return this.isKeyLocked(AuthService.userKey(userId));
     }
 
-    private recordFailure(userId: string): void {
-        const state = this.lockouts.get(userId) ?? { failures: 0, lockedUntil: 0 };
-        state.failures += 1;
-        if (state.failures >= this.maxLoginAttempts) {
-            state.lockedUntil = Date.now() + this.lockoutMs;
+    private isKeyLocked(key: string): boolean {
+        const state = this.lockouts.get(key);
+        if (!state) return false;
+        if (state.lockedUntil !== 0 && Date.now() >= state.lockedUntil) {
+            this.lockouts.delete(key);
+            return false;
         }
-        this.lockouts.set(userId, state);
+        return state.lockedUntil !== 0;
     }
 
-    private resetFailures(userId: string): void {
-        this.lockouts.delete(userId);
+    /** Clears the lockout of a user (admin password reset, deletion). */
+    clearLockout(userId: string): void {
+        this.lockouts.delete(AuthService.userKey(userId));
     }
 
     /**
-     * Verifies a user's password, applying lockout: throws 429 while locked,
-     * counts failures, resets on success. Failures are audited as `login_failed`.
+     * Synchronously reserves an attempt before the (slow) PBKDF2 check, so
+     * concurrent requests can never exceed `maxLoginAttempts`. Throws 429 when
+     * the key is locked or every remaining attempt is already in flight.
+     */
+    private reserveAttempt(key: string): void {
+        const now = Date.now();
+        let state = this.lockouts.get(key);
+        if (state && state.lockedUntil !== 0 && now >= state.lockedUntil) {
+            this.lockouts.delete(key);
+            state = undefined;
+        }
+        if (!state) {
+            state = { failures: 0, lockedUntil: 0 };
+            this.lockouts.set(key, state);
+        }
+        if (state.lockedUntil > now || state.failures >= this.maxLoginAttempts) {
+            throw new HttpError(429, LOCKED_MESSAGE);
+        }
+        state.failures += 1;
+    }
+
+    private attemptFailed(key: string): void {
+        const state = this.lockouts.get(key) ?? { failures: 1, lockedUntil: 0 };
+        if (state.failures >= this.maxLoginAttempts && state.lockedUntil === 0) {
+            state.lockedUntil = Date.now() + this.lockoutMs;
+        }
+        this.lockouts.set(key, state);
+    }
+
+    private attemptSucceeded(key: string): void {
+        this.lockouts.delete(key);
+    }
+
+    /**
+     * Verifies a password with lockout: reserves the attempt first (429 while
+     * locked), resets on success, audits `login_failed` on mismatch. Unknown
+     * users (`user` undefined) are tracked by the attempted name and run a
+     * dummy PBKDF2 so timing does not reveal whether the account exists.
      */
     async verifyPasswordWithLockout(
-        user: User,
+        user: User | undefined,
         password: string,
-        context: { actor?: string; remoteAddress?: string; details?: string } = {},
+        context: { attemptedName?: string; actor?: string; actorId?: string; remoteAddress?: string; details?: string } = {},
     ): Promise<boolean> {
-        if (this.isLocked(user.id)) {
+        const attempted = sanitize(context.attemptedName ?? user?.name ?? '', 64);
+        const key = user ? AuthService.userKey(user.id) : AuthService.nameKey(attempted);
+        try {
+            this.reserveAttempt(key);
+        } catch (err) {
             await this.audit({
                 event: 'login_failed',
-                username: user.name,
+                username: user?.name ?? attempted,
+                userId: user?.id,
                 actor: context.actor,
+                actorId: context.actorId,
                 details: 'Account locked',
                 metadata: { remoteAddress: context.remoteAddress },
             });
-            throw new HttpError(429, LOCKED_MESSAGE);
+            throw err;
         }
-        const valid = await this.verifyPassword(user.id, password);
+
+        const valid = user ? await this.verifyPassword(user.id, password) : await dummyVerify(password);
         if (valid) {
-            this.resetFailures(user.id);
-        } else {
-            this.recordFailure(user.id);
-            await this.audit({
-                event: 'login_failed',
-                username: user.name,
-                actor: context.actor,
-                details: context.details ?? 'Wrong password',
-                metadata: { remoteAddress: context.remoteAddress },
-            });
+            this.attemptSucceeded(key);
+            return true;
         }
-        return valid;
+        this.attemptFailed(key);
+        await this.audit({
+            event: 'login_failed',
+            username: user?.name ?? attempted,
+            userId: user?.id,
+            actor: context.actor,
+            actorId: context.actorId,
+            details: user ? context.details ?? 'Wrong password' : 'User not found',
+            metadata: { remoteAddress: context.remoteAddress },
+        });
+        return false;
     }
 
     // ---------------------------------------------------------------- users
@@ -225,18 +304,11 @@ export class AuthService {
 
     async login(username: string, password: string, metadata: SessionMetadata = {}): Promise<LoginResult> {
         const user = await this.findUser(username);
-        if (!user) {
-            await this.audit({
-                event: 'login_failed',
-                username,
-                details: 'User not found',
-                metadata: { remoteAddress: metadata.remoteAddress },
-            });
-            throw unauthorized('invalid credentials');
-        }
-
-        const valid = await this.verifyPasswordWithLockout(user, password, { remoteAddress: metadata.remoteAddress });
-        if (!valid) {
+        const valid = await this.verifyPasswordWithLockout(user, password, {
+            attemptedName: username,
+            remoteAddress: metadata.remoteAddress,
+        });
+        if (!user || !valid) {
             throw unauthorized('invalid credentials');
         }
 
@@ -244,6 +316,7 @@ export class AuthService {
             await this.audit({
                 event: 'login_failed',
                 username: user.name,
+                userId: user.id,
                 details: 'Account disabled',
                 metadata: { remoteAddress: metadata.remoteAddress },
             });
@@ -253,11 +326,12 @@ export class AuthService {
         const liveUser = await this.userStore.updateUser(user.id, { lastLoginAt: Date.now() });
 
         const token = this.generateToken();
-        const session = await this.sessionStore.createSession(user.id, token, metadata);
+        const session = await this.sessionStore.createSession(user.id, hashToken(token), metadata);
 
         await this.audit({
             event: 'login',
             username: user.name,
+            userId: user.id,
             details: 'Login successful',
             metadata: { remoteAddress: metadata.remoteAddress, sessionId: session.id },
         });
@@ -266,9 +340,10 @@ export class AuthService {
         return { token, session: this.toSessionPayload(session, liveUser, permissions) };
     }
 
-    async logout(token: string): Promise<void> {
-        const session = await this.sessionStore.getSession(token);
-        await this.sessionStore.deleteSession(token);
+    /** Ends the session identified by the token hash. */
+    async logout(tokenHash: string): Promise<void> {
+        const session = await this.sessionStore.getSession(tokenHash);
+        await this.sessionStore.deleteSession(tokenHash);
         if (!session) {
             return;
         }
@@ -276,37 +351,95 @@ export class AuthService {
         await this.audit({
             event: 'logout',
             username: user?.name ?? session.userId,
+            userId: session.userId,
             details: 'User logged out',
             metadata: { sessionId: session.id },
         });
     }
 
+    /** `min(lastActivity + idle timeout, createdAt + absolute lifetime)`. */
+    expiresAt(session: Session): number {
+        return Math.min(session.lastActivity + this.sessionTimeoutMs, session.createdAt + this.maxSessionLifetimeMs);
+    }
+
+    private isExpired(session: Session, now = Date.now()): boolean {
+        return now > this.expiresAt(session);
+    }
+
+    /** Validates a stored session: expiry (deleted, 401) and live user (missing/disabled → 401). */
+    private async validateSession(session: Session): Promise<{ user: User; permissions: string[] }> {
+        if (this.isExpired(session)) {
+            await this.sessionStore.deleteSession(session.tokenHash);
+            throw unauthorized('session expired');
+        }
+        const user = await this.userStore.getUser(session.userId);
+        if (!user || user.id !== session.userId || user.disabled) {
+            await this.sessionStore.deleteSession(session.tokenHash);
+            throw unauthorized('invalid or expired token');
+        }
+        return { user, permissions: await this.getEffectivePermissions(user) };
+    }
+
     /**
-     * Resolves a bearer token: checks idle expiry (expired → deleted, 401),
-     * resolves the live user (missing/disabled → 401) and slides `lastActivity`.
+     * Resolves a bearer token: checks idle/absolute expiry (expired → deleted,
+     * 401), resolves the live user (missing/disabled → 401) and slides
+     * `lastActivity`.
      */
     async authenticateToken(token: string): Promise<AuthContext> {
-        const session = await this.sessionStore.getSession(token);
+        const tokenHash = hashToken(token);
+        const session = await this.sessionStore.getSession(tokenHash);
         if (!session) {
             throw unauthorized('invalid or expired token');
         }
-
+        const { user, permissions } = await this.validateSession(session);
         const now = Date.now();
-        if (now - session.lastActivity > this.sessionTimeoutMs) {
-            await this.sessionStore.deleteSession(token);
-            throw unauthorized('session expired');
-        }
-
-        const user = await this.userStore.getUser(session.userId);
-        if (!user || user.id !== session.userId || user.disabled) {
-            await this.sessionStore.deleteSession(token);
-            throw unauthorized('invalid or expired token');
-        }
-
-        await this.sessionStore.updateLastActivity(token);
+        await this.sessionStore.updateLastActivity(tokenHash);
         session.lastActivity = now;
+        return { user, permissions, session, tokenHash };
+    }
 
-        return { user, permissions: await this.getEffectivePermissions(user), session, token };
+    // --------------------------------------------------------- ws tickets
+
+    /** Issues a single-use WebSocket ticket bound to the caller's session (30 s). */
+    issueTicket(ctx: AuthContext): { ticket: string; expiresIn: number } {
+        this.sweepTickets();
+        const ticket = randomBytes(32).toString('hex');
+        this.tickets.set(hashToken(ticket), {
+            expiresAt: Date.now() + WS_TICKET_TTL_SECONDS * 1000,
+            userId: ctx.user.id,
+            sessionId: ctx.session?.id,
+            adapterContext: ctx.session ? undefined : ctx,
+        });
+        return { ticket, expiresIn: WS_TICKET_TTL_SECONDS };
+    }
+
+    /** Consumes a ticket (single use). Returns the live context, or undefined when invalid/expired. */
+    async consumeTicket(ticket: string): Promise<AuthContext | undefined> {
+        if (typeof ticket !== 'string' || ticket.length === 0) return undefined;
+        const key = hashToken(ticket);
+        const entry = this.tickets.get(key);
+        this.tickets.delete(key);
+        if (!entry || Date.now() > entry.expiresAt) return undefined;
+
+        if (!entry.sessionId) {
+            return entry.adapterContext;
+        }
+        const session = await this.sessionStore.getSessionById(entry.sessionId);
+        if (!session || session.userId !== entry.userId) return undefined;
+        try {
+            const { user, permissions } = await this.validateSession(session);
+            if (user.mustChangePassword) return undefined;
+            return { user, permissions, session, tokenHash: session.tokenHash };
+        } catch {
+            return undefined;
+        }
+    }
+
+    private sweepTickets(): void {
+        const now = Date.now();
+        for (const [k, v] of this.tickets) {
+            if (now > v.expiresAt) this.tickets.delete(k);
+        }
     }
 
     toSessionPayload(session: Session, user: User, permissions: string[]): SessionPayload {
@@ -316,7 +449,7 @@ export class AuthService {
             permissions,
             loginTime: session.createdAt,
             lastActivity: session.lastActivity,
-            expiresAt: session.lastActivity + this.sessionTimeoutMs,
+            expiresAt: this.expiresAt(session),
         };
     }
 
@@ -327,7 +460,7 @@ export class AuthService {
             userName,
             createdAt: session.createdAt,
             lastActivity: session.lastActivity,
-            expiresAt: session.lastActivity + this.sessionTimeoutMs,
+            expiresAt: this.expiresAt(session),
             metadata: {
                 ...(session.metadata?.userAgent !== undefined ? { userAgent: session.metadata.userAgent } : {}),
                 ...(session.metadata?.remoteAddress !== undefined ? { remoteAddress: session.metadata.remoteAddress } : {}),
@@ -345,8 +478,8 @@ export class AuthService {
         const sessions = await this.sessionStore.getActiveSessions();
         const live: Session[] = [];
         for (const s of sessions) {
-            if (now - s.lastActivity > this.sessionTimeoutMs) {
-                await this.sessionStore.deleteSession(s.token);
+            if (this.isExpired(s, now)) {
+                await this.sessionStore.deleteSession(s.tokenHash);
             } else {
                 live.push(s);
             }
@@ -359,13 +492,15 @@ export class AuthService {
     }
 
     /** Deletes a session, audits `session_revoked` and broadcasts `session-kicked`. */
-    async revokeSession(session: Session, reason: string, actor?: string, userName?: string): Promise<void> {
+    async revokeSession(session: Session, reason: string, actor?: string, userName?: string, actorId?: string): Promise<void> {
         await this.sessionStore.deleteSessionById(session.id);
         const name = userName ?? (await this.userStore.getUser(session.userId))?.name ?? session.userId;
         await this.audit({
             event: 'session_revoked',
             username: name,
+            userId: session.userId,
             actor,
+            actorId,
             details: reason,
             metadata: { sessionId: session.id },
         });
@@ -383,19 +518,21 @@ export class AuthService {
     async revokeUserSessions(
         userId: string,
         reason: string,
-        options: { actor?: string; exceptSessionId?: string; userName?: string } = {},
+        options: { actor?: string; actorId?: string; exceptSessionId?: string; userName?: string } = {},
     ): Promise<number> {
         const sessions = (await this.sessionStore.getActiveSessions()).filter(
             (s) => s.userId === userId && s.id !== options.exceptSessionId,
         );
         for (const s of sessions) {
-            await this.revokeSession(s, reason, options.actor, options.userName);
+            await this.revokeSession(s, reason, options.actor, options.userName, options.actorId);
         }
         return sessions.length;
     }
 
     async cleanupExpiredSessions(): Promise<void> {
         await this.sessionStore.cleanup(this.sessionTimeoutMs);
+        await this.listSessions(); // also drops sessions past the absolute lifetime
+        this.sweepTickets();
     }
 }
 
@@ -407,6 +544,7 @@ export function toUserJson(user: User): User {
         email: user.email,
         groups: [...(user.groups ?? [])],
         disabled: !!user.disabled,
+        mustChangePassword: !!user.mustChangePassword,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
     };
