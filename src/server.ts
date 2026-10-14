@@ -14,7 +14,11 @@ import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 
 const port = process.env.PORT ?? 8047;
 
+// CORS / WebSocket origins, e.g. QCLI_ALLOWED_ORIGINS=http://localhost:4200,http://localhost:4300
+const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean);
+
 const { app, eventSocketManager } = createCliServer({
+    allowedOrigins,
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())

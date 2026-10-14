@@ -2,6 +2,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { createLogger } from '../utils/logger';
+import { CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
+import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
 
 const logger = createLogger('LogSocket');
 
@@ -60,6 +62,21 @@ export class CliLogSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Map<string, LogClientEntry>();
     private _nextClientId = 1;
+    private _auth?: ICliServerAuth;
+    private _allowedOrigins?: string[];
+
+    constructor(options: { allowedOrigins?: string[] } = {}) {
+        this._allowedOrigins = options.allowedOrigins;
+    }
+
+    /** Installs the auth provider; when it protects the server, upgrades need a ticket and `logs:read`. */
+    setAuth(auth: ICliServerAuth | undefined): void {
+        this._auth = auth;
+    }
+
+    setAllowedOrigins(origins: string[] | undefined): void {
+        this._allowedOrigins = origins;
+    }
 
     private static readonly LOG_PATHS = new Set([
         '/ws/v1/qcli/logs',
@@ -110,10 +127,23 @@ export class CliLogSocketManager {
 
             if (!CliLogSocketManager.LOG_PATHS.has(pathname)) return;
 
-            this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                const levelFilter = parsed.searchParams.get('level') || null;
-                this._handleConnection(ws, request, levelFilter);
-            });
+            authorizeWsUpgrade(request, parsed, {
+                auth: this._auth,
+                allowedOrigins: this._allowedOrigins,
+                permission: CliServerPermissions.LogsRead,
+            }).then(
+                (result) => {
+                    if (!result.ok) {
+                        rejectUpgrade(socket, result.status);
+                        return;
+                    }
+                    this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                        const levelFilter = parsed.searchParams.get('level') || null;
+                        this._handleConnection(ws, request, levelFilter);
+                    });
+                },
+                () => rejectUpgrade(socket, 401),
+            );
         });
     }
 

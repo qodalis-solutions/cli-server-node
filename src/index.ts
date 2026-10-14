@@ -34,6 +34,20 @@ export {
     CliLogSocketManager,
 } from './services';
 
+// Server auth (implemented by the users plugin)
+export {
+    CliServerAuthContext,
+    CliServerAuthError,
+    ICliServerAuth,
+    CliServerPermissions,
+    isOriginAllowed,
+    createServerAuthGate,
+    ServerAuthGateOptions,
+    requiredServerPermissions,
+    authorizeWsUpgrade,
+    rejectUpgrade,
+} from './auth';
+
 // Controllers
 export { createCliController } from './controllers/cli-controller';
 export { createCliVersionController } from './controllers/cli-version-controller';

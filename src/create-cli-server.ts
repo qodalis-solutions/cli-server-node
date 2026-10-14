@@ -8,6 +8,8 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
+import { ICliServerAuth, isOriginAllowed } from './auth/cli-server-auth';
+import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -19,6 +21,14 @@ export interface MountablePlugin {
     router: Router;
     dashboardPrefix?: string;
     dashboardRouter?: Router;
+    /**
+     * Auth provider exposed by the users plugin. Mounting such a plugin
+     * installs it: when `protectServer` is on, every server route and socket
+     * then requires a users session.
+     */
+    serverAuth?: ICliServerAuth;
+    /** Routes that stay public under server protection, as `"METHOD /path"` (e.g. a plugin's login). */
+    publicRoutes?: string[];
 }
 
 const logger = createLogger('Server');
@@ -27,8 +37,24 @@ const logger = createLogger('Server');
 export interface CliServerOptions {
     /** Base path for CLI routes. Defaults to '/api/qcli'. */
     basePath?: string;
-    /** CORS configuration. Pass `true` for permissive, `false` to disable, or a cors options object. */
+    /**
+     * CORS configuration. `true` = permissive (any origin, no credentials),
+     * `false` = disabled, or a cors options object. When omitted, CORS is
+     * enabled only for `allowedOrigins` (disabled if none are set).
+     */
     cors?: boolean | cors.CorsOptions;
+    /**
+     * Origins allowed for CORS and WebSocket upgrades (exact match; `http://host:*`
+     * matches any port). Every WS upgrade with an `Origin` header is checked.
+     */
+    allowedOrigins?: string[];
+    /** Accept interactive shell WebSocket sessions (default false). */
+    enableShell?: boolean;
+    /**
+     * Auth provider protecting the whole server (e.g. `usersPlugin.serverAuth`).
+     * Can also be installed later with `setAuth()` or by `mountPlugin(usersPlugin)`.
+     */
+    auth?: ICliServerAuth;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -59,21 +85,51 @@ export interface CliServerResult {
      * ```
      */
     mountPlugin(plugin: MountablePlugin): void;
+    /** Installs (or removes) the auth provider protecting server routes and sockets. */
+    setAuth(auth: ICliServerAuth | undefined): void;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
-    const { basePath = '/api/qcli', cors: corsOption = true, configure } = options;
+    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false } = options;
 
     const app = express();
 
-    if (corsOption !== false) {
-        app.use(cors(corsOption === true ? undefined : corsOption));
+    if (corsOption === true) {
+        app.use(cors());
+    } else if (corsOption && typeof corsOption === 'object') {
+        app.use(cors(corsOption));
+    } else if (corsOption === undefined && allowedOrigins && allowedOrigins.length > 0) {
+        app.use(
+            cors({
+                origin: (origin, callback) => callback(null, isOriginAllowed(origin, allowedOrigins)),
+            }),
+        );
     }
 
-    app.use(express.json());
+    app.use(express.json({ limit: '1mb' }));
+    // Render body-parser failures (malformed JSON, too large) as JSON `{ error }`
+    app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+        if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large')) {
+            const status = err.type === 'entity.too.large' ? 413 : 400;
+            res.status(status).json({ error: status === 413 ? 'request body too large' : 'invalid JSON body' });
+            return;
+        }
+        next(err);
+    });
 
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
+
+    // Server-wide auth gate (no-op until an auth provider is installed)
+    let serverAuth: ICliServerAuth | undefined;
+    const publicRoutes = new Set<string>();
+    app.use(
+        createServerAuthGate(() => serverAuth, {
+            registry,
+            cliPrefixes: Array.from(new Set(['/api/v1/qcli', normalizePath(basePath)])),
+            publicRoutes,
+        }),
+    );
 
     if (configure) {
         configure(builder);
@@ -109,17 +165,38 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         app.use('/api/qcli/data-explorer', createDataExplorerController(deBuilder.registry, deExecutor));
     }
 
-    const eventSocketManager = new CliEventSocketManager();
-    const logSocketManager = new CliLogSocketManager();
+    const eventSocketManager = new CliEventSocketManager({ enableShell, allowedOrigins });
+    const logSocketManager = new CliLogSocketManager({ allowedOrigins });
 
     logger.info('CLI server created with %d processors', registry.processors.length);
 
+    const setAuth = (auth: ICliServerAuth | undefined) => {
+        serverAuth = auth;
+        eventSocketManager.setAuth(auth);
+        logSocketManager.setAuth(auth);
+        auth?.attachToServer?.({
+            allowedOrigins,
+            broadcast: (msg) => eventSocketManager.broadcastMessage(msg),
+        });
+    };
+
+    if (options.auth) {
+        setAuth(options.auth);
+    }
+
     const mountPlugin = (plugin: MountablePlugin) => {
+        for (const route of plugin.publicRoutes ?? []) {
+            const [method, ...rest] = route.trim().split(/\s+/);
+            publicRoutes.add(`${method.toUpperCase()} ${normalizePath(rest.join(' '))}`);
+        }
+        if (plugin.serverAuth && plugin.serverAuth !== serverAuth) {
+            setAuth(plugin.serverAuth);
+        }
         app.use(plugin.prefix, plugin.router);
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
             app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
         }
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin, setAuth };
 }
