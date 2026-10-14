@@ -21,7 +21,7 @@ import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-ser
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { AwsModule } from '@qodalis/cli-server-plugin-aws';
-import { buildUsersPlugin } from '../../plugins/users/index';
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -279,51 +279,46 @@ const adminPlugin = new CliAdminBuilder()
 
 mountPlugin(adminPlugin);
 
-(async () => {
-    // -----------------------------------------------------------
-    // Users Plugin (user management + session tracking)
-    // -----------------------------------------------------------
-    const usersPlugin = await buildUsersPlugin(
-        { defaultAdminPassword: 'admin' },
-        (msg) => eventSocketManager.broadcastMessage(msg),
-    );
-    mountPlugin(usersPlugin);
+// -----------------------------------------------------------
+// Users Plugin (users, groups/permissions, sessions, audit)
+// -----------------------------------------------------------
+const usersPlugin = new CliUsersBuilder()
+    .setDefaultAdminPassword('admin')
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
 
-    const server = app.listen(port, () => {
-        console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
-        console.log(`  Commands:  http://localhost:${port}/api/qcli/commands`);
-        console.log(`  Execute:   http://localhost:${port}/api/qcli/execute`);
-        console.log(`  Jobs:      http://localhost:${port}/api/v1/qcli/jobs`);
-        console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
-        console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
-        console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
-        console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
-        console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
+mountPlugin(usersPlugin);
 
-        jobsPlugin.scheduler.start().catch((err) => {
-            console.error('Failed to start job scheduler:', err);
-        });
+const server = app.listen(port, () => {
+    console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
+    console.log(`  Commands:  http://localhost:${port}/api/qcli/commands`);
+    console.log(`  Execute:   http://localhost:${port}/api/qcli/execute`);
+    console.log(`  Jobs:      http://localhost:${port}/api/v1/qcli/jobs`);
+    console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
+    console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
+    console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
+    console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
+    console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
+
+    jobsPlugin.scheduler.start().catch((err) => {
+        console.error('Failed to start job scheduler:', err);
     });
+});
 
-    eventSocketManager.attach(server);
-    logSocketManager.attach(server);
+eventSocketManager.attach(server);
+logSocketManager.attach(server);
 
-    process.on('SIGINT', async () => {
-        console.log('\nShutting down...');
-        await jobsPlugin.scheduler.stop();
-        usersPlugin.dispose();
-        await eventSocketManager.broadcastDisconnect();
-        await logSocketManager.broadcastDisconnect();
-        server.close();
-        process.exit(0);
-    });
+const shutdown = async () => {
+    await jobsPlugin.scheduler.stop();
+    usersPlugin.dispose();
+    await eventSocketManager.broadcastDisconnect();
+    await logSocketManager.broadcastDisconnect();
+    server.close();
+    process.exit(0);
+};
 
-    process.on('SIGTERM', async () => {
-        await jobsPlugin.scheduler.stop();
-        usersPlugin.dispose();
-        await eventSocketManager.broadcastDisconnect();
-        await logSocketManager.broadcastDisconnect();
-        server.close();
-        process.exit(0);
-    });
-})();
+process.on('SIGINT', async () => {
+    console.log('\nShutting down...');
+    await shutdown();
+});
+
+process.on('SIGTERM', shutdown);

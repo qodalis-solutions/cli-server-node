@@ -625,15 +625,14 @@ See [`plugins/aws/README.md`](plugins/aws/README.md) for the full command refere
 
 ### Users Plugin
 
-The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under `/api/v1/qcli` for authentication, users, sessions, groups and an audit log, with swappable storage (in-memory by default). It is the server side of the `@qodalis/cli-users` browser plugin's *server mode*.
+The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under `/api/v1/qcli` for authentication, users, groups with permissions, sessions and an audit log, with swappable storage (in-memory by default). It is the server side of the `@qodalis/cli-users` browser plugin's *server mode*.
 
 ```typescript
-import { buildUsersPlugin } from '@qodalis/cli-server-plugin-users';
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 
-const usersPlugin = await buildUsersPlugin(
-    { defaultAdminPassword: 'admin' },
-    (msg) => eventSocketManager.broadcastMessage(msg),
-);
+const usersPlugin = new CliUsersBuilder()
+    .setDefaultAdminPassword('admin')
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
 mountPlugin(usersPlugin);
 ```
 
