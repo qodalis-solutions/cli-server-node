@@ -335,10 +335,17 @@ The server exposes versioned endpoints:
 ```typescript
 interface CliServerOptions {
     basePath?: string;                     // API base path (default: '/api/qcli')
-    cors?: boolean | cors.CorsOptions;     // CORS config (default: true)
+    cors?: boolean | cors.CorsOptions;     // CORS config (default: only allowedOrigins; off when none)
+    allowedOrigins?: string[];             // CORS + WebSocket Origin allow-list ('http://host:*' = any port)
+    enableShell?: boolean;                 // Interactive shell WebSocket (default: false)
+    auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
 ```
+
+CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`.
+
+When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth`, every `/api/...` route and every WebSocket requires a users session (see [Users Plugin](#users-plugin)); without it the server behaves as before.
 
 `createCliServer()` returns:
 
@@ -350,7 +357,8 @@ interface CliServerOptions {
     executor: CliCommandExecutorService;   // Command executor
     eventSocketManager: CliEventSocketManager;  // WebSocket event manager
     logSocketManager: CliLogSocketManager;      // WebSocket log manager
-    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes
+    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes (installs plugin.serverAuth)
+    setAuth(auth?: ICliServerAuth): void;       // Install/remove the server auth provider
 }
 ```
 
@@ -631,10 +639,24 @@ The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under 
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 
 const usersPlugin = new CliUsersBuilder()
-    .setDefaultAdminPassword('admin')
     .build((msg) => eventSocketManager.broadcastMessage(msg));
-mountPlugin(usersPlugin);
+mountPlugin(usersPlugin); // protects the whole server (protectServer: true)
 ```
+
+Once mounted, every server route and socket requires a users session (login, version discovery and capabilities stay public):
+
+| Surface | Permission |
+|---|---|
+| `GET /commands` | authenticated |
+| `POST /execute`, `/execute/stream` | `commands:execute` + the processor's `requiredPermissions` |
+| fs `ls`/`cat`/`stat`/`download` | `files:read` |
+| fs `upload`/`mkdir`/`rm` | `files:write` |
+| data explorer | `data:query` |
+| jobs read / manage | `jobs:read` / `jobs:manage` |
+| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
+| admin dashboard | `admin:access` |
+
+WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws-ticket` → `{ ticket, expiresIn: 30 }`, then connect with `?ticket=<ticket>`. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('perm')`. Processors declare `requiredPermissions: ['deploy:run']` to be enforced server-side.
 
 See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, custom storage and external auth adapters.
 

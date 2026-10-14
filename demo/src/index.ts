@@ -33,7 +33,24 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
+// Browser origins allowed for CORS and WebSocket upgrades (local dev apps + the
+// admin dashboard served by this server). Override with QCLI_ALLOWED_ORIGINS.
+const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
+    ? process.env.QCLI_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [
+          'http://localhost:4200',
+          'http://localhost:4300',
+          'http://localhost:4301',
+          'http://localhost:4302',
+          'http://localhost:4303',
+          `http://localhost:${port}`,
+          'http://127.0.0.1:*',
+      ];
+
 const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
+    allowedOrigins,
+    // The demo exposes the interactive shell; it requires the shell:execute permission.
+    enableShell: true,
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -251,13 +268,21 @@ const jobsPlugin = new CliJobsBuilder()
 mountPlugin(jobsPlugin);
 
 // -----------------------------------------------------------
-// Admin Dashboard (via plugin)
+// Users Plugin (users, groups/permissions, sessions, audit).
+// Mounting it protects every server route and socket (protectServer).
+// -----------------------------------------------------------
+const usersPlugin = new CliUsersBuilder()
+    // Demo-only well-known password (a startup warning is logged).
+    .setDefaultAdminPassword('admin')
+    .setAllowedOrigins(allowedOrigins)
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+
+// -----------------------------------------------------------
+// Admin Dashboard (via plugin) — authenticates through the users plugin
+// and requires the admin:access permission (root/admin has it via '*').
 // -----------------------------------------------------------
 const adminPlugin = new CliAdminBuilder()
-    .setCredentials(
-        process.env.QCLI_ADMIN_USERNAME ?? 'admin',
-        process.env.QCLI_ADMIN_PASSWORD ?? 'admin',
-    )
+    .setAuthProvider(usersPlugin.serverAuth)
     .setRegisteredJobs(1) // number of registered jobs above
     .build({
         registry,
@@ -278,14 +303,6 @@ const adminPlugin = new CliAdminBuilder()
     });
 
 mountPlugin(adminPlugin);
-
-// -----------------------------------------------------------
-// Users Plugin (users, groups/permissions, sessions, audit)
-// -----------------------------------------------------------
-const usersPlugin = new CliUsersBuilder()
-    .setDefaultAdminPassword('admin')
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
-
 mountPlugin(usersPlugin);
 
 const server = app.listen(port, () => {
