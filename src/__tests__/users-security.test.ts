@@ -396,17 +396,17 @@ describe('B7: input validation', () => {
 
     it('rejects invalid user fields with 400 {error}', async () => {
         const bad: object[] = [
-            { name: '', email: 'a@b.c' },
-            { name: '-lead', email: 'a@b.c' },
-            { name: 'has space', email: 'a@b.c' },
-            { name: 'x'.repeat(65), email: 'a@b.c' },
-            { name: 'ctl\u0007', email: 'a@b.c' },
+            { name: '', email: 'a@b.co' },
+            { name: '-lead', email: 'a@b.co' },
+            { name: 'has space', email: 'a@b.co' },
+            { name: 'x'.repeat(65), email: 'a@b.co' },
+            { name: 'ctl\u0007', email: 'a@b.co' },
             { name: 'okname', email: 'no-at-sign' },
             { name: 'okname', email: 'a b@c.d' },
             { name: 'okname', email: `${'x'.repeat(250)}@b.cd` },
             { name: 'okname', email: 'esc\u001b[31m@b.c' },
-            { name: 'okname', email: 'ok@b.c', homeDir: '/h\u0000x' },
-            { name: 'okname', email: 'ok@b.c', data: { blob: 'x'.repeat(17 * 1024) } },
+            { name: 'okname', email: 'ok@b.co', homeDir: '/h\u0000x' },
+            { name: 'okname', email: 'ok@b.co', data: { blob: 'x'.repeat(17 * 1024) } },
         ];
         for (const body of bad) {
             const res = await post('/users', body);

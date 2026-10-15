@@ -60,6 +60,9 @@ export function createSessionsController(
 
     router.get('/current', asyncHandler(async (req: Request, res: Response) => {
         const auth = getAuth(req);
+        if (auth.apiToken) {
+            throw notFound('not a session');
+        }
         if (auth.session) {
             res.json(authService.toSessionPayload(auth.session, auth.user, auth.permissions));
             return;
@@ -79,6 +82,9 @@ export function createSessionsController(
     if (!externalAuth) {
         router.delete('/current', asyncHandler(async (req: Request, res: Response) => {
             const auth = getAuth(req);
+            if (auth.apiToken) {
+                throw notFound('not a session');
+            }
             if (auth.tokenHash) {
                 await authService.logout(auth.tokenHash);
             }

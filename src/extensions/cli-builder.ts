@@ -3,6 +3,7 @@ import { FileSystemOptions } from '../filesystem';
 import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
 import { CliCommandRegistry } from '../services';
+import type { McpToolProvider } from '../mcp/mcp-types';
 
 /**
  * Fluent builder for configuring CLI server processors, modules, filesystem, and data explorer providers.
@@ -14,6 +15,7 @@ export class CliBuilder {
     private _fileSystemOptions?: FileSystemOptions;
     private _fileStorageProvider?: IFileStorageProvider;
     private _dataExplorerBuilder?: DataExplorerBuilder;
+    private readonly _mcpToolProviders: McpToolProvider[] = [];
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
@@ -81,5 +83,20 @@ export class CliBuilder {
     /** Returns the data explorer builder, if any providers have been registered. */
     get dataExplorerBuilder(): DataExplorerBuilder | undefined {
         return this._dataExplorerBuilder;
+    }
+
+    /**
+     * Registers an MCP tool provider (used when the server's `mcp` option is on).
+     * On a name collision built-in feature tools win, then providers in registration
+     * order, then command tools.
+     */
+    addMcpToolProvider(provider: McpToolProvider): CliBuilder {
+        this._mcpToolProviders.push(provider);
+        return this;
+    }
+
+    /** MCP tool providers registered by plugins and the host, in registration order. */
+    get mcpToolProviders(): ReadonlyArray<McpToolProvider> {
+        return this._mcpToolProviders;
     }
 }

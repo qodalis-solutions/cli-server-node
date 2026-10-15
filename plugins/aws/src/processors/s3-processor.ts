@@ -56,6 +56,7 @@ class S3LsProcessor extends CliCommandProcessor {
     command = 'ls';
     description = 'List S3 buckets or objects in a bucket';
     valueRequired = false;
+    acceptsValue = true;
     parameters = [
         new CliCommandParameterDescriptor('region', 'AWS region override', false, 'string', ['-r']),
         new CliCommandParameterDescriptor('output', 'Output format (table|json|text)', false, 'string', ['-o'], 'table'),

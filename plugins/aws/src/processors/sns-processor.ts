@@ -116,6 +116,7 @@ class SnsPublishProcessor extends CliCommandProcessor {
 /** Sub-processor that lists SNS subscriptions, optionally filtered by topic ARN. */
 class SnsSubscriptionsProcessor extends CliCommandProcessor {
     command = 'subscriptions';
+    acceptsValue = true;
     description = 'List SNS subscriptions (optionally filtered by topic ARN)';
     parameters = [
         new CliCommandParameterDescriptor('region', 'AWS region override', false, 'string', ['-r']),

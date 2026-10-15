@@ -15,6 +15,11 @@ export interface ICliCommandProcessor {
     allowUnlistedCommands?: boolean;
     /** When true, the command requires a positional value argument. */
     valueRequired?: boolean;
+    /**
+     * When true, the command reads an optional positional value (`command.value`).
+     * Implied by {@link valueRequired}. MCP exposes it as an optional `value` argument.
+     */
+    acceptsValue?: boolean;
     /** Semantic version of this processor. */
     version: string;
     /** Nested sub-command processors. */
@@ -53,6 +58,7 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     author: ICliCommandAuthor = DefaultLibraryAuthor;
     allowUnlistedCommands?: boolean;
     valueRequired?: boolean;
+    acceptsValue?: boolean;
     version: string = '1.0.0';
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];

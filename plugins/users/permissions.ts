@@ -48,6 +48,8 @@ export const UsersPermissions = {
     SessionsRevoke: 'sessions:revoke',
     AuditRead: 'audit:read',
     AuditClear: 'audit:clear',
+    TokensRead: 'tokens:read',
+    TokensRevoke: 'tokens:revoke',
 } as const;
 
 export const ADMIN_GROUP = 'admin';

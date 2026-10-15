@@ -7,6 +7,7 @@ import { ICliStreamCommandProcessor, CliStructuredOutput } from '../abstractions
 /** Sub-processor that performs HTTP GET requests. */
 class HttpGetProcessor extends CliCommandProcessor implements ICliStreamCommandProcessor {
     command = 'get';
+    acceptsValue = true;
     description = 'Performs an HTTP GET request';
     parameters = [
         new CliCommandParameterDescriptor('headers', 'Show response headers', false, 'boolean'),
@@ -35,6 +36,7 @@ class HttpGetProcessor extends CliCommandProcessor implements ICliStreamCommandP
 /** Sub-processor that performs HTTP POST requests. */
 class HttpPostProcessor extends CliCommandProcessor implements ICliStreamCommandProcessor {
     command = 'post';
+    acceptsValue = true;
     description = 'Performs an HTTP POST request';
     parameters = [
         new CliCommandParameterDescriptor('body', 'Request body (JSON string)', false, 'string', ['-b']),

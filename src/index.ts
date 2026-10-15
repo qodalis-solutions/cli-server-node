@@ -60,6 +60,37 @@ export {
     rejectUpgrade,
 } from './auth';
 
+// MCP endpoint
+export {
+    CliMcpOptions,
+    MCP_PROTOCOL_VERSIONS,
+    MCP_SERVER_NAME,
+    MCP_SERVER_VERSION,
+    createMcpController,
+    createMcpPreGate,
+    resolveMcpOptions,
+    collectMcpTools,
+    isMcpToolAllowed,
+    McpTool,
+    McpToolProvider,
+    McpToolResult,
+    McpToolCallContext,
+    McpToolAnnotations,
+    McpInputSchema,
+    McpPropertySchema,
+    mcpObjectSchema,
+    mcpError,
+    mcpJson,
+    validateMcpArguments,
+    renderOutputsAsText,
+    CommandsMcpToolProvider,
+    ServerMcpToolProvider,
+    FilesystemMcpToolProvider,
+    DataExplorerMcpToolProvider,
+    JobsMcpToolProvider,
+    mcpToolName,
+} from './mcp';
+
 // Controllers
 export { createCliController } from './controllers/cli-controller';
 export { createCliVersionController } from './controllers/cli-version-controller';
@@ -121,4 +152,4 @@ export { CliBase64CommandProcessor } from './processors/cli-base64-command-proce
 export { Logger, createLogger } from './utils/logger';
 
 // Server factory
-export { createCliServer, CliServerOptions, CliServerResult, MountablePlugin } from './create-cli-server';
+export { createCliServer, CliServerOptions, CliServerResult, CliServerMcp, MountablePlugin } from './create-cli-server';

@@ -2,6 +2,7 @@ import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand }
 
 export class CliHelloCommandProcessor extends CliCommandProcessor {
     command = 'hello';
+    acceptsValue = true;
     description = 'Greets the user';
 
     parameters = [
