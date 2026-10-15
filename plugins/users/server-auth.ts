@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthService, AuthContext } from './services/auth-service';
+import { AuthService, AuthContext, UsersSessionEvent } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { HttpError, forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
@@ -68,6 +68,45 @@ export class UsersServerAuth {
 
     attachToServer(server: { allowedOrigins?: string[]; broadcast: (msg: Record<string, unknown>) => void }): void {
         this.onAttach(server);
+    }
+
+    // ------------------------------------------- long-lived sockets (shell)
+
+    /** Re-validates a socket identity (session alive, user enabled) with fresh permissions. */
+    async revalidate(ctx: UsersServerAuthContext): Promise<UsersServerAuthContext | undefined> {
+        const fresh = await this.authService.revalidate(ctx.userId, ctx.sessionId);
+        return fresh ? UsersServerAuth.toServerContext(fresh) : undefined;
+    }
+
+    /** Slides the session's idle expiry while its shell is in use. */
+    async touch(ctx: UsersServerAuthContext): Promise<void> {
+        if (ctx.sessionId) await this.authService.touchSession(ctx.sessionId);
+    }
+
+    /** Writes a server audit entry (e.g. `shell_opened` / `shell_closed`). */
+    async audit(entry: {
+        event: string;
+        userId: string;
+        userName: string;
+        actorId?: string;
+        actorName?: string;
+        details?: string;
+        metadata?: Record<string, unknown>;
+    }): Promise<void> {
+        await this.authService.audit({
+            event: entry.event,
+            username: entry.userName,
+            userId: entry.userId,
+            actor: entry.actorName ?? entry.userName,
+            actorId: entry.actorId ?? entry.userId,
+            details: entry.details,
+            metadata: entry.metadata,
+        });
+    }
+
+    /** Session lifecycle events (logout, expiry, revoke, user/group changes). */
+    onSessionEvent(listener: (event: UsersSessionEvent) => void): () => void {
+        return this.authService.onSessionEvent(listener);
     }
 
     // ------------------------------------------------ admin dashboard provider

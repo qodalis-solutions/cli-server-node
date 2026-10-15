@@ -53,6 +53,18 @@ export interface AuthContext {
     tokenHash?: string;
 }
 
+/**
+ * Session lifecycle events (consumed by the CLI server to bind open shells to
+ * their session): `session-ended` on logout, expiry, revoke, user disabled or
+ * deleted; `access-changed` when users, groups or permissions change.
+ */
+export type UsersSessionEvent =
+    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string }
+    | { type: 'access-changed'; userId?: string };
+
+/** Audit events that can change someone's effective permissions or account state. */
+const ACCESS_CHANGING_EVENT = /^(user_|group_|password_)/;
+
 interface LockoutState {
     /** Failed + in-flight attempts (reserved before verification). */
     failures: number;
@@ -81,6 +93,7 @@ export class AuthService {
     private broadcast?: UsersBroadcastFn;
     private readonly lockouts = new Map<string, LockoutState>();
     private readonly tickets = new Map<string, TicketEntry>();
+    private readonly sessionListeners = new Set<(event: UsersSessionEvent) => void>();
 
     constructor(
         private readonly userStore: ICliUserStore,
@@ -106,6 +119,22 @@ export class AuthService {
         return !!this.broadcast;
     }
 
+    /** Subscribes to session lifecycle events; returns an unsubscribe function. */
+    onSessionEvent(listener: (event: UsersSessionEvent) => void): () => void {
+        this.sessionListeners.add(listener);
+        return () => this.sessionListeners.delete(listener);
+    }
+
+    private emitSessionEvent(event: UsersSessionEvent): void {
+        for (const listener of [...this.sessionListeners]) {
+            try {
+                listener(event);
+            } catch (err) {
+                console.error('[users] session event listener failed:', err);
+            }
+        }
+    }
+
     generateToken(): string {
         return randomBytes(32).toString('hex');
     }
@@ -129,6 +158,9 @@ export class AuthService {
             if (Object.keys(metadata).length > 0) clean.metadata = metadata;
         }
         await this.auditStore.log(clean);
+        if (ACCESS_CHANGING_EVENT.test(clean.event)) {
+            this.emitSessionEvent({ type: 'access-changed', userId: clean.userId });
+        }
     }
 
     // ---------------------------------------------------------- credentials
@@ -347,6 +379,7 @@ export class AuthService {
         if (!session) {
             return;
         }
+        this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason: 'logout' });
         const user = await this.userStore.getUser(session.userId);
         await this.audit({
             event: 'logout',
@@ -370,11 +403,13 @@ export class AuthService {
     private async validateSession(session: Session): Promise<{ user: User; permissions: string[] }> {
         if (this.isExpired(session)) {
             await this.sessionStore.deleteSession(session.tokenHash);
+            this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason: 'session expired' });
             throw unauthorized('session expired');
         }
         const user = await this.userStore.getUser(session.userId);
         if (!user || user.id !== session.userId || user.disabled) {
             await this.sessionStore.deleteSession(session.tokenHash);
+            this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason: 'user unavailable' });
             throw unauthorized('invalid or expired token');
         }
         return { user, permissions: await this.getEffectivePermissions(user) };
@@ -432,6 +467,37 @@ export class AuthService {
             return { user, permissions, session, tokenHash: session.tokenHash };
         } catch {
             return undefined;
+        }
+    }
+
+    /**
+     * Re-validates an identity without sliding the session (used by long-lived
+     * sockets such as the shell): the session still exists and is not expired,
+     * the user exists, is enabled and has no pending password change. Adapter
+     * identities (no session) only re-check the user. Undefined when ended.
+     */
+    async revalidate(userId: string, sessionId?: string): Promise<AuthContext | undefined> {
+        if (sessionId) {
+            const session = await this.sessionStore.getSessionById(sessionId);
+            if (!session || session.userId !== userId) return undefined;
+            try {
+                const { user, permissions } = await this.validateSession(session);
+                if (user.mustChangePassword) return undefined;
+                return { user, permissions, session, tokenHash: session.tokenHash };
+            } catch {
+                return undefined;
+            }
+        }
+        const user = await this.userStore.getUser(userId);
+        if (!user || user.id !== userId || user.disabled || user.mustChangePassword) return undefined;
+        return { user, permissions: await this.getEffectivePermissions(user) };
+    }
+
+    /** Slides the idle expiry of a session (activity on a long-lived socket). */
+    async touchSession(sessionId: string): Promise<void> {
+        const session = await this.sessionStore.getSessionById(sessionId);
+        if (session && !this.isExpired(session)) {
+            await this.sessionStore.updateLastActivity(session.tokenHash);
         }
     }
 
@@ -494,6 +560,7 @@ export class AuthService {
     /** Deletes a session, audits `session_revoked` and broadcasts `session-kicked`. */
     async revokeSession(session: Session, reason: string, actor?: string, userName?: string, actorId?: string): Promise<void> {
         await this.sessionStore.deleteSessionById(session.id);
+        this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason });
         const name = userName ?? (await this.userStore.getUser(session.userId))?.name ?? session.userId;
         await this.audit({
             event: 'session_revoked',

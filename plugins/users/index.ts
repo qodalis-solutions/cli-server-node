@@ -33,7 +33,7 @@ export { InMemoryCredentialStore } from './stores/in-memory-credential-store';
 export { InMemoryAuditStore } from './stores/in-memory-audit-store';
 export { InMemoryGroupStore } from './stores/in-memory-group-store';
 export { AuthService, toUserJson } from './services/auth-service';
-export type { AuthContext, AuthServiceOptions } from './services/auth-service';
+export type { AuthContext, AuthServiceOptions, UsersSessionEvent } from './services/auth-service';
 export { DirectoryService } from './services/directory-service';
 export { hashPassword, verifyPasswordHash, PBKDF2_ITERATIONS } from './services/password-hasher';
 export { permissionMatches, hasPermission, mergePermissions, UsersPermissions } from './permissions';
