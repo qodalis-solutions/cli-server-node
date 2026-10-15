@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'http';
 import type { Request } from 'express';
 
 /** Identity of an authenticated caller (HTTP request or WebSocket). */
@@ -46,9 +47,11 @@ export interface ICliServerAuth {
      * Re-validates a socket identity without sliding the session: the session still
      * exists and is not expired, the user exists and is enabled. Returns the identity
      * with fresh permissions, or undefined when it ended. Used to bind long-lived
-     * sockets (the shell) to their session.
+     * sockets (the shell) to their session. `request` is the socket's original
+     * upgrade request, for identities without a stored session that the provider
+     * re-authenticates from the request (e.g. a host auth adapter reading cookies).
      */
-    revalidate?(ctx: CliServerAuthContext): Promise<CliServerAuthContext | undefined>;
+    revalidate?(ctx: CliServerAuthContext, request?: IncomingMessage): Promise<CliServerAuthContext | undefined>;
     /** Records activity on the session behind `ctx` (slides the idle expiry). */
     touch?(ctx: CliServerAuthContext): Promise<void>;
     /** Writes an audit entry (never include secrets, command text or stdin). */

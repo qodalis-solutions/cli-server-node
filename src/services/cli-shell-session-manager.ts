@@ -81,6 +81,8 @@ interface ShellSession {
     /** Limit bucket: user id (users mode) or remote address. */
     limitKey: string;
     ctx?: CliServerAuthContext;
+    /** Original upgrade request (re-authenticates adapter identities on re-checks). */
+    request: IncomingMessage;
     startedAt: number;
     lastInput: number;
     /** Stdin received since the last session re-check (counts as session activity). */
@@ -238,6 +240,7 @@ export class CliShellSessionManager {
             remoteAddress,
             limitKey,
             ctx: decision.ctx,
+            request,
             startedAt: now,
             lastInput: now,
             inputSinceCheck: false,
@@ -450,7 +453,9 @@ export class CliShellSessionManager {
 
     /**
      * Re-validates users-mode shells: session alive, user enabled, still holding
-     * `shell:execute`. Otherwise the shell is closed with 4401 `session ended`.
+     * `shell:execute` (identities from a host auth adapter are re-authenticated
+     * from the original upgrade request). Otherwise the shell is closed with 4401
+     * `session ended` (audit reason `session ended` or `permission removed`).
      * The check itself never extends the session; stdin received since the
      * previous check touches it first (at most once per 30 s).
      */
@@ -467,7 +472,7 @@ export class CliShellSessionManager {
                     s.lastTouch = now;
                     await auth.touch(s.ctx);
                 }
-                fresh = auth?.revalidate ? await auth.revalidate(s.ctx) : s.ctx;
+                fresh = auth?.revalidate ? await auth.revalidate(s.ctx, s.request) : s.ctx;
             } catch {
                 fresh = undefined;
             }

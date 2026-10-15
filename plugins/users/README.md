@@ -156,6 +156,8 @@ const usersPlugin = new CliUsersBuilder()
     .build(broadcast);
 ```
 
+**Remote shell.** A shell opened by an adapter-authenticated user has no stored session to re-check. Instead, every periodic/event re-check (and one right after the shell opens) calls the adapter again with the shell socket's original HTTP **upgrade request** (a raw Node `IncomingMessage`: headers such as `Cookie`/`Authorization`, URL, socket — no Express middleware has run on it, so e.g. `req.user` is not set). Returning `null`/`undefined`, throwing, or returning a different user closes the shell with 4401 `session ended`; a user that no longer holds `shell:execute` (after the `isAdmin` → `admin` group mapping) closes it with audit reason `permission removed`. Make sure the adapter can authenticate the upgrade request on its own (e.g. from the session cookie the browser sends with the WebSocket handshake).
+
 The admin dashboard plugin keeps its own login at `/auth/login`; both plugins can be mounted at the same prefix.
 
 ## License

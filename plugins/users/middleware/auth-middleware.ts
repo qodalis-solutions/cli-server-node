@@ -41,25 +41,43 @@ export class RequestAuthenticator {
         private readonly getAllowedOrigins: () => readonly string[] | undefined,
     ) {}
 
+    /** True when a host auth adapter authenticates requests (no stored sessions). */
+    get hasAdapter(): boolean {
+        return !!this.authAdapter;
+    }
+
+    /**
+     * Resolves the identity through the host's auth adapter (no CSRF check):
+     * 401 when the adapter returns nothing or a disabled user; `isAdmin` adds the
+     * `admin` group. Also used to re-authenticate long-lived sockets from their
+     * upgrade request.
+     */
+    async authenticateWithAdapter(req: Request): Promise<AuthContext> {
+        if (!this.authAdapter) {
+            throw unauthorized();
+        }
+        const result = this.authAdapter(req);
+        if (!result || !result.user) {
+            throw unauthorized();
+        }
+        const { user, isAdmin } = result;
+        if (user.disabled) {
+            throw unauthorized('account disabled');
+        }
+        const groups = [...(user.groups ?? [])];
+        if (isAdmin && !inGroup(groups, ADMIN_GROUP)) {
+            groups.push(ADMIN_GROUP);
+        }
+        const liveUser = { ...user, groups };
+        return { user: liveUser, permissions: await this.authService.getEffectivePermissions(liveUser) };
+    }
+
     async authenticate(req: Request): Promise<AuthContext> {
         const token = getBearerToken(req);
         let ctx: AuthContext;
 
         if (this.authAdapter) {
-            const result = this.authAdapter(req);
-            if (!result || !result.user) {
-                throw unauthorized();
-            }
-            const { user, isAdmin } = result;
-            if (user.disabled) {
-                throw unauthorized('account disabled');
-            }
-            const groups = [...(user.groups ?? [])];
-            if (isAdmin && !inGroup(groups, ADMIN_GROUP)) {
-                groups.push(ADMIN_GROUP);
-            }
-            const liveUser = { ...user, groups };
-            ctx = { user: liveUser, permissions: await this.authService.getEffectivePermissions(liveUser) };
+            ctx = await this.authenticateWithAdapter(req);
         } else {
             if (!token) {
                 throw unauthorized();

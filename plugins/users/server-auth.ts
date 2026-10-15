@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthService, AuthContext, UsersSessionEvent } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
@@ -72,8 +73,27 @@ export class UsersServerAuth {
 
     // ------------------------------------------- long-lived sockets (shell)
 
-    /** Re-validates a socket identity (session alive, user enabled) with fresh permissions. */
-    async revalidate(ctx: UsersServerAuthContext): Promise<UsersServerAuthContext | undefined> {
+    /**
+     * Re-validates a socket identity with fresh permissions. Session-backed
+     * identities: session alive, user enabled. Identities from the host's auth
+     * adapter (no session) are re-authenticated by calling the adapter again with
+     * the socket's original upgrade `request`: undefined when it returns nothing,
+     * throws, or resolves a different user (adapter users usually are not in the
+     * user store, and `isAdmin` must map to the admin group again).
+     */
+    async revalidate(ctx: UsersServerAuthContext, request?: IncomingMessage): Promise<UsersServerAuthContext | undefined> {
+        if (!ctx.sessionId && this.authenticator.hasAdapter) {
+            if (!request) return undefined;
+            let fresh: AuthContext;
+            try {
+                // The adapter's contract is an Express request; a raw upgrade request carries the same headers/socket.
+                fresh = await this.authenticator.authenticateWithAdapter(request as Request);
+            } catch {
+                return undefined;
+            }
+            if (fresh.user.id !== ctx.userId || fresh.user.mustChangePassword) return undefined;
+            return UsersServerAuth.toServerContext(fresh);
+        }
         const fresh = await this.authService.revalidate(ctx.userId, ctx.sessionId);
         return fresh ? UsersServerAuth.toServerContext(fresh) : undefined;
     }

@@ -15,7 +15,7 @@ import { WebSocket } from 'ws';
 import { AddressInfo } from 'net';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliShellOptions, tokensEqual, buildShellEnv, SHELL_DEFAULTS } from '../services/cli-shell-options';
-import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
+import { CliUsersBuilder, UsersPluginResult, AuthAdapter, User } from '../../plugins/users/index';
 
 const V1 = '/api/v1/qcli';
 const ROOT_PASS = 'rootpass1';
@@ -544,6 +544,65 @@ describe('C2: session binding', () => {
         await request(app).delete(`${V1}/sessions/${s.sessionId}`).set(bearer(root.token)).expect(204);
         expect((await c.closed).code).toBe(4401);
         await waitFor(() => processDead(child));
+    });
+});
+
+describe('C2: adapter-authenticated shells', () => {
+    const extUser: User = { id: 'ext-1', name: 'extuser', email: 'ext@host.io', groups: [], createdAt: 0, updatedAt: 0 };
+    /** What the host's auth currently says about the `sid=ok` cookie. */
+    let hostSays: 'admin' | 'plain' | 'logged-out' | 'throws';
+    const adapter: AuthAdapter = (req) => {
+        if (hostSays === 'throws') throw new Error('host auth down');
+        if (!req.headers.cookie?.includes('sid=ok') || hostSays === 'logged-out') return null;
+        return { user: extUser, isAdmin: hostSays === 'admin' };
+    };
+
+    const startAdapter = () =>
+        start({ users: true, shell: { sessionCheckIntervalMs: 50 }, configureUsers: (b) => b.setAuthAdapter(adapter) });
+
+    /** Ticket through the adapter (a bearer header makes the POST non-CSRF-able; the adapter ignores it). */
+    const adapterTicket = async (app: express.Express) => {
+        const res = await request(app).post(`${V1}/sessions/ws-ticket`).set('Cookie', 'sid=ok').set(bearer('host-jwt'));
+        expect(res.status).toBe(201);
+        return res.body.ticket as string;
+    };
+
+    const openAdapterShell = async (h: Harness) => {
+        const c = open(h.port, `/ws/v1/qcli/shell?ticket=${await adapterTicket(h.cli.app)}`, { Cookie: 'sid=ok' });
+        await c.ready;
+        return c;
+    };
+
+    it('stay open across re-checks while the host still authenticates the upgrade request (isAdmin => admin group)', async () => {
+        hostSays = 'admin';
+        const h = await startAdapter();
+        const c = await openAdapterShell(h);
+        await sleep(400); // several re-checks
+        expect(c.ws.readyState).toBe(WebSocket.OPEN);
+        c.ws.close();
+        await c.closed;
+    });
+
+    it('close with "session ended" once the adapter no longer authenticates the request (null or throws)', async () => {
+        for (const outcome of ['logged-out', 'throws'] as const) {
+            hostSays = 'admin';
+            const h = await startAdapter();
+            const c = await openAdapterShell(h);
+            hostSays = outcome;
+            expect(await c.closed).toEqual({ code: 4401, reason: 'session ended' });
+            const entry = await auditEntry(h.users!, (e) => e.event === 'shell_closed' && e.userId === extUser.id);
+            expect(entry.metadata).toMatchObject({ reason: 'session ended' });
+        }
+    });
+
+    it('close with reason "permission removed" when the re-authenticated principal lacks shell:execute', async () => {
+        hostSays = 'admin';
+        const h = await startAdapter();
+        const c = await openAdapterShell(h);
+        hostSays = 'plain';
+        expect(await c.closed).toEqual({ code: 4401, reason: 'session ended' });
+        const entry = await auditEntry(h.users!, (e) => e.event === 'shell_closed' && e.userId === extUser.id);
+        expect(entry.metadata).toMatchObject({ reason: 'permission removed' });
     });
 });
 
