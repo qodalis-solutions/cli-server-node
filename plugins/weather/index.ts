@@ -85,6 +85,7 @@ class WeatherCurrentProcessor extends CliCommandProcessor {
     command = 'current';
     description = 'Shows current weather conditions';
     parameters = [locationParam];
+    acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         return formatCurrentWeather(getLocation(command));
@@ -96,6 +97,7 @@ class WeatherForecastProcessor extends CliCommandProcessor {
     command = 'forecast';
     description = 'Shows a 3-day weather forecast';
     parameters = [locationParam];
+    acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         return formatForecast(getLocation(command));
@@ -107,6 +109,7 @@ class CliWeatherCommandProcessor extends CliCommandProcessor {
     command = 'weather';
     description = 'Shows weather information for a location';
     parameters = [locationParam];
+    acceptsValue = true;
     processors: ICliCommandProcessor[] = [
         new WeatherCurrentProcessor(),
         new WeatherForecastProcessor(),

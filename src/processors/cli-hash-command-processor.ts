@@ -9,6 +9,7 @@ const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
 export class CliHashCommandProcessor extends CliCommandProcessor {
     command = 'hash';
     description = 'Computes hash of the input text';
+    acceptsValue = true;
     parameters = [
         new CliCommandParameterDescriptor(
             'algorithm',

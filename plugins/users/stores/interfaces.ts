@@ -10,6 +10,7 @@ import {
     Group,
     CreateGroupDto,
     UpdateGroupDto,
+    ApiToken,
 } from '../models';
 
 export interface ICliUserStore {
@@ -58,4 +59,19 @@ export interface ICliGroupStore {
     createGroup(group: CreateGroupDto): Promise<Group>;
     updateGroup(name: string, data: UpdateGroupDto): Promise<Group>;
     deleteGroup(name: string): Promise<void>;
+}
+
+/**
+ * API token storage. `tokenHash` is `SHA-256(token)` as hex — stores never
+ * see raw tokens.
+ */
+export interface ICliApiTokenStore {
+    createToken(token: ApiToken): Promise<ApiToken>;
+    getTokenByHash(tokenHash: string): Promise<ApiToken | undefined>;
+    getToken(id: string): Promise<ApiToken | undefined>;
+    /** Every token, or only the tokens of `userId`. */
+    getTokens(userId?: string): Promise<ApiToken[]>;
+    deleteToken(id: string): Promise<void>;
+    deleteUserTokens(userId: string): Promise<void>;
+    updateLastUsed(id: string, lastUsedAt: number): Promise<void>;
 }

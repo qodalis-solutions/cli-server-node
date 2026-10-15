@@ -104,6 +104,9 @@ export function createUsersController(
     router.put('/:idOrName/password', asyncHandler(async (req: Request, res: Response) => {
         if (options.externalAuth) throw notAvailable();
         const auth = getAuth(req);
+        if (auth.apiToken) {
+            throw forbidden('forbidden: API tokens cannot change passwords');
+        }
         const caller = callerOf(auth);
         const body = bodyOf(req);
         const { target, privileged, isSelf } = await resolveSelfOr(req, P.UsersUpdate);

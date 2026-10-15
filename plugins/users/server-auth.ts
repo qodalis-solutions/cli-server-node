@@ -12,10 +12,12 @@ export interface UsersServerAuthContext {
     userId: string;
     userName: string;
     sessionId?: string;
+    /** Set when the identity comes from an API token (no session). */
+    tokenId?: string;
     permissions: string[];
 }
 
-const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|audit)(\/.*)?$/;
+const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|audit|tokens)(\/.*)?$/;
 
 /**
  * The users plugin as the CLI server's auth provider (implements
@@ -34,6 +36,7 @@ export class UsersServerAuth {
             userId: ctx.user.id,
             userName: ctx.user.name,
             ...(ctx.session ? { sessionId: ctx.session.id } : {}),
+            ...(ctx.apiToken ? { tokenId: ctx.apiToken.id } : {}),
             permissions: [...ctx.permissions],
         };
     }
@@ -82,6 +85,10 @@ export class UsersServerAuth {
      * user store, and `isAdmin` must map to the admin group again).
      */
     async revalidate(ctx: UsersServerAuthContext, request?: IncomingMessage): Promise<UsersServerAuthContext | undefined> {
+        if (ctx.tokenId) {
+            const fresh = await this.authService.revalidate(ctx.userId, undefined, ctx.tokenId);
+            return fresh ? UsersServerAuth.toServerContext(fresh) : undefined;
+        }
         if (!ctx.sessionId && this.authenticator.hasAdapter) {
             if (!request) return undefined;
             let fresh: AuthContext;

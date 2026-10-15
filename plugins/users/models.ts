@@ -5,6 +5,7 @@ import type {
     ICliCredentialStore,
     ICliAuditStore,
     ICliGroupStore,
+    ICliApiTokenStore,
 } from './stores/interfaces';
 
 /** A CLI user. All timestamps are epoch milliseconds. */
@@ -102,6 +103,43 @@ export interface LoginResult {
     session: SessionPayload;
 }
 
+/**
+ * A long-lived API token (`qcli_pat_…`). Stores keep only `SHA-256(token)`
+ * (hex), never the token itself.
+ */
+export interface ApiToken {
+    id: string;
+    userId: string;
+    /** 1-64 characters of `[A-Za-z0-9._ -]`, unique per user (case-insensitive). */
+    name: string;
+    tokenHash: string;
+    createdAt: number;
+    /** Null when the token never expires. */
+    expiresAt: number | null;
+    /** Updated at most once per 60 seconds. */
+    lastUsedAt?: number;
+    /** Optional scope; absent when the token carries the user's full permissions. */
+    permissions?: string[];
+}
+
+/** API token as exposed by `GET /tokens` — never includes the token or its hash. */
+export interface ApiTokenView {
+    id: string;
+    name: string;
+    userId: string;
+    userName: string;
+    createdAt: number;
+    expiresAt: number | null;
+    lastUsedAt: number | null;
+    permissions?: string[];
+}
+
+/** Result of `POST /tokens`: the token (shown once) and its view. */
+export interface CreateApiTokenResult {
+    token: string;
+    apiToken: ApiTokenView;
+}
+
 export interface AuditEntry {
     id?: string;
     timestamp: number;
@@ -166,6 +204,10 @@ export interface UsersModuleOptions {
     credentialStore?: ICliCredentialStore;
     auditStore?: ICliAuditStore;
     groupStore?: ICliGroupStore;
+    /** API token storage (default in-memory). */
+    apiTokenStore?: ICliApiTokenStore;
+    /** Allow API tokens that never expire (`expiresInDays: null`; default false). */
+    allowNonExpiringTokens?: boolean;
     /** Idle timeout in ms (default 30 minutes). */
     sessionTimeoutMs?: number;
     /** Password of the seeded `root` user (default `root`). */

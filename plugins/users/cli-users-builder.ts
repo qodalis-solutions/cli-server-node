@@ -6,12 +6,14 @@ import {
     ICliCredentialStore,
     ICliAuditStore,
     ICliGroupStore,
+    ICliApiTokenStore,
 } from './stores/interfaces';
 import { InMemoryUserStore } from './stores/in-memory-user-store';
 import { InMemorySessionStore } from './stores/in-memory-session-store';
 import { InMemoryCredentialStore } from './stores/in-memory-credential-store';
 import { InMemoryAuditStore } from './stores/in-memory-audit-store';
 import { InMemoryGroupStore } from './stores/in-memory-group-store';
+import { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 import { AuthService } from './services/auth-service';
 import { DirectoryService } from './services/directory-service';
 import { createAuthMiddleware, RequestAuthenticator } from './middleware/auth-middleware';
@@ -22,6 +24,7 @@ import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
 import { createAuditController } from './controllers/audit-controller';
+import { createTokensController } from './controllers/tokens-controller';
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
 
@@ -40,6 +43,7 @@ export interface UsersPluginResult {
     credentialStore: ICliCredentialStore;
     groupStore: ICliGroupStore;
     auditStore: ICliAuditStore;
+    apiTokenStore: ICliApiTokenStore;
     /**
      * Auth provider for the CLI server and the admin dashboard. Installed by
      * `mountPlugin(usersPlugin)` or `createCliServer({ auth: usersPlugin.serverAuth })`.
@@ -107,6 +111,18 @@ export class CliUsersBuilder {
 
     setGroupStore(store: ICliGroupStore): this {
         this.options.groupStore = store;
+        return this;
+    }
+
+    /** API token storage (default in-memory). */
+    setApiTokenStore(store: ICliApiTokenStore): this {
+        this.options.apiTokenStore = store;
+        return this;
+    }
+
+    /** Allow API tokens that never expire (`expiresInDays: null`; default false). */
+    setAllowNonExpiringTokens(allow: boolean): this {
+        this.options.allowNonExpiringTokens = allow;
         return this;
     }
 
@@ -198,6 +214,7 @@ export class CliUsersBuilder {
         const credentialStore = options.credentialStore ?? new InMemoryCredentialStore();
         const auditStore = options.auditStore ?? new InMemoryAuditStore();
         const groupStore = options.groupStore ?? new InMemoryGroupStore();
+        const apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
 
         const authService = new AuthService(userStore, sessionStore, credentialStore, auditStore, {
             groupStore,
@@ -207,6 +224,8 @@ export class CliUsersBuilder {
             minPasswordLength: options.minPasswordLength,
             maxSessionLifetimeMs: options.maxSessionLifetimeMs,
             broadcast: broadcastFn,
+            apiTokenStore,
+            allowNonExpiringTokens: options.allowNonExpiringTokens,
         });
         const directory = new DirectoryService(userStore, groupStore, authService);
 
@@ -240,12 +259,13 @@ export class CliUsersBuilder {
         });
 
         const router = Router();
-        const scoped = ['/sessions', '/users', '/groups', '/audit'];
+        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens'];
         router.use(scoped, json({ limit: '1mb' }), waitReady);
         router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
         router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
         router.use('/groups', authMiddleware, createGroupsController(directory));
         router.use('/audit', authMiddleware, createAuditController(auditStore, authService));
+        router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
         router.use(scoped, errorHandler);
 
         const cleanupInterval = setInterval(() => {
@@ -266,6 +286,7 @@ export class CliUsersBuilder {
             credentialStore,
             groupStore,
             auditStore,
+            apiTokenStore,
             serverAuth,
             protectServer,
             requireAuth: () => serverAuth.requireAuth(),
