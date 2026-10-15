@@ -9,7 +9,10 @@ import request from 'supertest';
 import { createCliServer, CliServerOptions } from '../create-cli-server';
 import { CliCommandProcessor, CliProcessCommand, ICliCommandProcessor, CliStructuredResponse } from '../abstractions';
 import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
-import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import { InMemoryFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import * as nodeFs from 'fs';
+import * as nodeOs from 'os';
+import * as nodePath from 'path';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
@@ -482,6 +485,43 @@ describe('MCP: tool providers', () => {
         expect(await fs.exists('/docs')).toBe(false);
     });
 
+    it('fs tools go through the OS provider path validator (outside the allow-list → isError)', async () => {
+        const root = nodeFs.realpathSync(nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'qcli-mcp-')));
+        const outside = nodeFs.realpathSync(nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'qcli-out-')));
+        nodeFs.writeFileSync(nodePath.join(outside, 'secret.txt'), 'top secret');
+        try {
+            const s = server({ configure: (b) => b.setFileStorageProvider(new OsFileStorageProvider({ allowedPaths: [root] })) });
+            const inside = nodePath.join(root, 'a.txt');
+            expect((await call(s.app, 'fs_write', { path: inside, content: 'ok' })).result.isError).toBe(false);
+            expect((await call(s.app, 'fs_read', { path: inside })).result.content[0].text).toBe('ok');
+            for (const [tool, args] of [
+                ['fs_read', { path: nodePath.join(outside, 'secret.txt') }],
+                ['fs_read', { path: `${root}/../${nodePath.basename(outside)}/secret.txt` }],
+                ['fs_list', { path: outside }],
+                ['fs_write', { path: nodePath.join(outside, 'x.txt'), content: 'x' }],
+                ['fs_delete', { path: outside, recursive: true }],
+            ] as const) {
+                const res = await call(s.app, tool, args);
+                expect(res.result.isError, `${tool} ${JSON.stringify(args)}`).toBe(true);
+                expect(res.result.content[0].text).not.toContain('top secret');
+            }
+            expect(nodeFs.existsSync(nodePath.join(outside, 'x.txt'))).toBe(false);
+            expect(nodeFs.existsSync(nodePath.join(outside, 'secret.txt'))).toBe(true);
+        } finally {
+            nodeFs.rmSync(root, { recursive: true, force: true });
+            nodeFs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('annotations of the feature tools', async () => {
+        const s = server({ configure: (b) => b.setFileStorageProvider(new InMemoryFileStorageProvider()) });
+        s.mountPlugin(new CliJobsBuilder().build());
+        const tools = Object.fromEntries((await listTools(s.app)).map((t) => [t.name, t.annotations]));
+        for (const n of ['server_info', 'fs_list', 'fs_stat', 'fs_read', 'jobs_list', 'jobs_get', 'jobs_history']) expect(tools[n], n).toEqual({ readOnlyHint: true });
+        for (const n of ['fs_delete', 'jobs_stop', 'jobs_cancel']) expect(tools[n], n).toEqual({ destructiveHint: true });
+        for (const n of ['fs_write', 'fs_mkdir', 'jobs_trigger', 'jobs_pause', 'jobs_resume', 'echo']) expect(tools[n], n).toBeUndefined();
+    });
+
     it('no filesystem/data/jobs tools when those features are off', async () => {
         const names = (await listTools(server().app)).map((t) => t.name);
         expect(names.some((n) => n.startsWith('fs_') || n.startsWith('data_') || n.startsWith('jobs_'))).toBe(false);
@@ -571,7 +611,7 @@ describe('MCP: authentication', () => {
         const root = await login('root', ROOT_PASS);
         const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
         const createUser = async (name: string, groups: string[]) => {
-            await request(s.app).post(`${V1}/users`).set(bearer(root)).send({ name, email: `${name}@x`, password: `${name}pw`, groups }).expect(201);
+            await request(s.app).post(`${V1}/users`).set(bearer(root)).send({ name, email: `${name}@example.com`, password: `${name}pw`, groups }).expect(201);
             return login(name, `${name}pw`);
         };
         return { s, root, bearer, login, createUser };
@@ -616,6 +656,34 @@ describe('MCP: authentication', () => {
 
         const rootTools = (await listTools(s.app, bearer(root))).map((t) => t.name);
         expect(rootTools).toEqual(expect.arrayContaining(['secret', 'fs_write', 'fs_delete']));
+    });
+
+    it('data and jobs tools are visible per permission (data:query, jobs:read, jobs:manage)', async () => {
+        const { s, root, bearer, createUser } = await protectedServer({
+            configure: (b) =>
+                b.addDataExplorerProvider(
+                    { executeAsync: async () => ({ success: true, source: 'mem', language: DataExplorerLanguage.Sql, defaultOutputFormat: DataExplorerOutputFormat.Table, executionTime: 0, columns: ['x'], rows: [[1]], rowCount: 1, truncated: false }) },
+                    { name: 'mem', description: 'Memory', language: DataExplorerLanguage.Sql, defaultOutputFormat: DataExplorerOutputFormat.Table },
+                ),
+        });
+        s.mountPlugin(new CliJobsBuilder().build());
+        const names = async (token: string) => (await listTools(s.app, bearer(token))).map((t) => t.name);
+
+        const plain = await createUser('plain', ['users']);
+        const p = await names(plain);
+        expect(p.some((n) => n.startsWith('data_') || n.startsWith('jobs_'))).toBe(false);
+        expect((await call(s.app, 'data_query', { source: 'mem', query: 'q' }, bearer(plain))).error.code).toBe(-32602);
+
+        await request(s.app).post(`${V1}/groups`).set(bearer(root)).send({ name: 'analysts', permissions: ['commands:execute', 'data:query', 'jobs:read'] }).expect(201);
+        const analyst = await createUser('analyst', ['analysts']);
+        const a = await names(analyst);
+        expect(a).toEqual(expect.arrayContaining(['data_sources', 'data_schema', 'data_query', 'jobs_list', 'jobs_get', 'jobs_history']));
+        expect(a).not.toContain('jobs_trigger');
+        expect((await call(s.app, 'data_query', { source: 'mem', query: 'q' }, bearer(analyst))).result.content[0].text).toBe('x\n1\n(1 row)');
+        expect((await call(s.app, 'jobs_trigger', { id: 'x' }, bearer(analyst))).error.code).toBe(-32602);
+
+        const r = await names(root);
+        expect(r).toEqual(expect.arrayContaining(['jobs_trigger', 'jobs_pause', 'jobs_resume', 'jobs_stop', 'jobs_cancel']));
     });
 
     it('API tokens authenticate MCP; scoped tokens see fewer tools; revoked tokens → 401', async () => {

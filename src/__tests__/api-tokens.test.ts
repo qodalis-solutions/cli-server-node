@@ -79,7 +79,7 @@ describe('API tokens: create', () => {
     it('scope: valid entries covered by the caller (403 cannot grant), invalid → 400', async () => {
         const { app } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
         const alice = await login(app, 'alice', 'alicepw');
 
         const ok = await createToken(app, alice.token, { name: 'scoped', permissions: ['commands:execute'] });
@@ -143,7 +143,7 @@ describe('API tokens: list and revoke', () => {
     it('lists own tokens; ?all=true requires tokens:read', async () => {
         const { app } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
         const alice = await login(app, 'alice', 'alicepw');
         await createToken(app, root.token, { name: 'root-1' });
         await createToken(app, alice.token, { name: 'alice-1' });
@@ -171,8 +171,8 @@ describe('API tokens: list and revoke', () => {
     it('revoke: owner 204; another user without tokens:revoke 404; with tokens:revoke 204; unknown 404', async () => {
         const { app } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
-        await createUser(app, root.token, { name: 'bob', email: 'b@x', password: 'bobpw1' });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
+        await createUser(app, root.token, { name: 'bob', email: 'b@example.com', password: 'bobpw1' });
         const alice = await login(app, 'alice', 'alicepw');
         const bob = await login(app, 'bob', 'bobpw1');
         const a1 = (await createToken(app, alice.token, { name: 'a1' })).body;
@@ -204,7 +204,7 @@ describe('API tokens: authentication', () => {
         const { app } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
         await createGroup(app, root.token, { name: 'readers', permissions: ['users:read', 'commands:execute'] });
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw', groups: ['readers'] });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw', groups: ['readers'] });
         const alice = await login(app, 'alice', 'alicepw');
         const scoped = (await createToken(app, alice.token, { name: 's', permissions: ['commands:execute'] })).body;
         const full = (await createToken(app, alice.token, { name: 'f' })).body;
@@ -224,7 +224,7 @@ describe('API tokens: authentication', () => {
         const { app, plugin } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
         await createGroup(app, root.token, { name: 'readers', permissions: ['users:read'] });
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw', groups: ['readers'] });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw', groups: ['readers'] });
         const alice = await login(app, 'alice', 'alicepw');
         const scoped = (await createToken(app, alice.token, { name: 's', permissions: ['users:read'] })).body;
         const ctx = await plugin.authService.authenticateToken(scoped.token);
@@ -239,7 +239,7 @@ describe('API tokens: authentication', () => {
     it('unknown, expired and revoked tokens → 401; disabled user → 401; re-enabled → works', async () => {
         const { app, plugin } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
-        await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
+        await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
         const alice = await login(app, 'alice', 'alicepw');
         const t = (await createToken(app, alice.token, { name: 't', expiresInDays: 1 })).body;
 
@@ -315,7 +315,7 @@ describe('API tokens: authentication', () => {
     it('deleting a user deletes their tokens', async () => {
         const { app, plugin } = await createTestServer();
         const root = await login(app, 'root', ROOT_PASS);
-        const id = await createUser(app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
+        const id = await createUser(app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
         const alice = await login(app, 'alice', 'alicepw');
         const t = (await createToken(app, alice.token, { name: 't' })).body;
         await request(app).delete(`${BASE}/users/alice`).set(auth(root.token)).expect(204);
@@ -429,7 +429,7 @@ describe('API tokens on the protected server', () => {
     it('sockets opened with a token identity close with 4401 when the user is disabled', async () => {
         const h = await startServer();
         const root = await login(h.cli.app, 'root', ROOT_PASS);
-        await createUser(h.cli.app, root.token, { name: 'alice', email: 'a@x', password: 'alicepw' });
+        await createUser(h.cli.app, root.token, { name: 'alice', email: 'a@example.com', password: 'alicepw' });
         const alice = await login(h.cli.app, 'alice', 'alicepw');
         const t = (await createToken(h.cli.app, alice.token, { name: 't' })).body;
         const tk = (await request(h.cli.app).post(`${BASE}/sessions/ws-ticket`).set(auth(t.token)).expect(201)).body.ticket;

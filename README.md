@@ -370,7 +370,7 @@ Tools are collected from **tool providers** on every request, so new registratio
 | jobs (when the jobs plugin is mounted) | `jobs_list`, `jobs_get {id}`, `jobs_history {id, limit?=20}` | `jobs:read` | read-only |
 | | `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` `{id}` | `jobs:manage` | `jobs_stop`/`jobs_cancel` destructive |
 
-Feature tools use the same services as the HTTP routes (the storage provider and its path checks, the data explorer executor with its timeouts and row limits, the job scheduler); their errors become `isError: true` results. `fs_read` returns UTF-8 text (binary files → `isError` `binary file, N bytes`).
+Feature tools use the same services as the HTTP routes (the storage provider and its path checks, the data explorer executor with its timeouts and row limits, the job scheduler); their errors become `isError: true` results. `fs_read` returns UTF-8 text (binary files → `isError` `binary file, N bytes`). Paths outside the provider's allow-list are rejected exactly as by `/api/qcli/fs` (symlinks are resolved first, so on macOS allow `/private/tmp` rather than `/tmp`).
 
 **Command tools**: every root command and sub-command that has no sub-commands, declares parameters or takes a value (`valueRequired`) becomes a tool named after its path joined with `_` (`weather`, `weather_current`), lower-cased, other characters than `[a-z0-9_-]` replaced by `-`, at most 64 characters. The input schema has one property per parameter (`string`, `number`, `boolean`, `array` of strings; anything else is a string) plus `value` (the positional input) when the command takes one. A call builds the same command the CLI would send and runs it through the **same executor as `/execute`**; the outputs are rendered as text (tables as `a | b` rows, lists one item per line, JSON pretty-printed, key-value as `key: value`), `isError` is `exitCode != 0`, and a single JSON-object output is also returned as `structuredContent`. Unknown tools and invalid arguments (wrong type, unknown or missing property) are JSON-RPC `-32602` errors.
 
@@ -404,13 +404,147 @@ Arguments are validated against `inputSchema` before `call` runs. Return `struct
 
 ### Using the MCP endpoint from an MCP client
 
-With the users plugin, sign in, create an API token (`POST /api/v1/qcli/tokens`, or `token create <name>` in the web CLI) and register the server:
+The steps below use the demo server (`cd demo && npm start`, port 8047, users plugin with `root` / `admin`). Replace the URL and credentials with yours.
+
+#### 1. Enable MCP on the server
+
+```typescript
+import { createCliServer, CliEchoCommandProcessor } from '@qodalis/cli-server-node';
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
+
+const { app, eventSocketManager, mountPlugin } = createCliServer({
+    mcp: { instructions: 'Each tool runs one command of this server.' },
+    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
+});
+
+// Optional: users plugin (sign-in, permissions, API tokens)
+const usersPlugin = new CliUsersBuilder()
+    .setDefaultAdminPassword('admin')
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+mountPlugin(usersPlugin);
+
+app.listen(8047);
+```
+
+The endpoint is `http://localhost:8047/api/qcli/mcp`.
+
+#### 2. Get a credential
+
+**With the users plugin**: sign in, then create an API token with the session token (the API token is shown only once; tokens cannot be created with another API token):
+
+```bash
+SESSION=$(curl -s -X POST http://localhost:8047/api/v1/qcli/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"username":"root","password":"admin"}' | jq -r .token)
+
+TOKEN=$(curl -s -X POST http://localhost:8047/api/v1/qcli/tokens \
+  -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"mcp-client","expiresInDays":30}' | jq -r .token)
+
+echo "$TOKEN"   # qcli_pat_…
+```
+
+Add `"permissions": ["commands:execute"]` to the body to restrict the token to a subset of your permissions. List and revoke tokens with `GET /api/v1/qcli/tokens` and `DELETE /api/v1/qcli/tokens/<id>` (see [API tokens](plugins/users/README.md#api-tokens)). Without `jq`, copy the `token` field of each JSON response by hand.
+
+**Without the users plugin**: set a static token on the server and use it as `$TOKEN` (without `mcp.token` the endpoint is open, like `/execute`):
+
+```typescript
+createCliServer({ mcp: { token: process.env.QCLI_MCP_TOKEN } });
+```
+
+#### 3. Connect a client
+
+**Claude Code**:
 
 ```bash
 claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
 ```
 
-Without the users plugin use the `mcp.token` value as `<token>` (or omit the header on an open server).
+**Cursor** (`.cursor/mcp.json`) and **Claude Code project config** (`.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "qcli": {
+      "type": "http",
+      "url": "http://localhost:8047/api/qcli/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+**Claude Desktop**: add the server as a custom connector (Settings → Connectors) with the URL above, or bridge it in `claude_desktop_config.json` with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which forwards the header:
+
+```json
+{
+  "mcpServers": {
+    "qcli": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8047/api/qcli/mcp", "--header", "Authorization:${QCLI_AUTH}"],
+      "env": { "QCLI_AUTH": "Bearer <token>" }
+    }
+  }
+}
+```
+
+**MCP Inspector**: run `npx @modelcontextprotocol/inspector`, choose the *Streamable HTTP* transport, enter the URL and add an `Authorization: Bearer <token>` header. Its CLI mode works too:
+
+```bash
+npx @modelcontextprotocol/inspector --cli http://localhost:8047/api/qcli/mcp \
+  --transport http --header "Authorization: Bearer $TOKEN" --method tools/list
+```
+
+#### 4. Raw requests with curl
+
+Every request is a `POST` of one JSON-RPC message; the server is stateless, so no session header is needed between calls.
+
+```bash
+# initialize
+curl -s http://localhost:8047/api/qcli/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+# list the tools
+curl -s http://localhost:8047/api/qcli/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# call a tool
+curl -s http://localhost:8047/api/qcli/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"value":"hello from MCP"}}}'
+```
+
+Responses:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qodalis-cli-server","version":"1.0.0-beta.7"},"instructions":"…"}}
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"server_info","description":"…","inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"echo", …}, …]}}
+{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"hello from MCP"}],"isError":false}}
+```
+
+A failed command is a normal result with `"isError": true`; an unknown tool or invalid arguments is a JSON-RPC error (`-32602`).
+
+#### 5. Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `401 {"error":"unauthorized"}` / `invalid or expired token` | No `Authorization: Bearer …` header, or the token is wrong, expired or revoked, or its user is disabled or deleted. Create a new token (step 2). Without the users plugin, check `mcp.token`. |
+| `403 {"error":"forbidden: origin not allowed"}` | The request has an `Origin` header that is neither in `allowedOrigins` nor the server's own origin (DNS-rebinding protection). Add the origin to `allowedOrigins`, or call from a client that sends no `Origin`. |
+| `403 {"error":"forbidden: missing permission commands:execute"}` | The user (or the token's scope) lacks `commands:execute`, which the endpoint requires. Add it to one of the user's groups, or create a token whose scope includes it. |
+| `403 {"error":"password change required"}` | The user must change their password first. |
+| `404` | MCP is not enabled (`mcp` option), or the URL is not `{basePath}/mcp`. |
+| `405` | The endpoint only accepts `POST` (clients that probe with `GET` for an SSE stream handle this). |
+| A tool is missing from `tools/list` | The caller lacks one of its permissions (`commands:execute` plus the command's `requiredPermissions`, `files:read`/`files:write`, `data:query`, `jobs:read`/`jobs:manage`); a token scope narrows them further. The `mcp.tools`/`mcp.exclude` lists may filter it out, or the feature (filesystem, data explorer, jobs) is not enabled. Commands whose sub-commands carry all the parameters appear as `<command>_<sub>` tools only. |
+| `-32602 Unknown tool: …` on `tools/call` | Same causes as a missing tool (calls see exactly the tools of `tools/list`). |
 
 ## Remote Shell Security
 
