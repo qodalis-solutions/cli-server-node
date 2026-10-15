@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { signToken } from './jwt-service';
 import { AuthenticatedRequest, createAuthMiddleware } from './auth-middleware';
 import { AdminConfig } from '../services/admin-config';
+import { AdminAuthProvider, ADMIN_ACCESS_PERMISSION, errorMessage, errorStatus } from './auth-provider';
 
 /** Tracks consecutive failed login attempts from a single IP. */
 interface FailedAttempt {
@@ -27,9 +28,9 @@ export interface AuthControllerResult {
  * - POST /login — authenticate and receive JWT
  * - GET  /me    — get current user info from token
  */
-export function createAuthController(config: AdminConfig, jwtSecret: string): AuthControllerResult {
+export function createAuthController(config: AdminConfig, jwtSecret: string, provider?: AdminAuthProvider): AuthControllerResult {
     const router = Router();
-    const authMiddleware = createAuthMiddleware(jwtSecret);
+    const authMiddleware = createAuthMiddleware(jwtSecret, provider);
     const failedAttempts = new Map<string, FailedAttempt>();
 
     // Periodically clean up expired entries (every 5 minutes)
@@ -67,19 +68,49 @@ export function createAuthController(config: AdminConfig, jwtSecret: string): Au
 
         const { username, password } = req.body ?? {};
 
-        if (!username || !password) {
+        if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
             res.status(400).json({ error: 'Username and password are required' });
             return;
         }
 
-        if (!config.validateCredentials(username, password)) {
-            // Track failed attempt
+        const recordFailure = () => {
             const existing = failedAttempts.get(ip);
             if (existing && now - existing.firstAttemptAt <= WINDOW_MS) {
                 existing.count++;
             } else {
                 failedAttempts.set(ip, { count: 1, firstAttemptAt: now });
             }
+        };
+
+        if (provider) {
+            // Users plugin installed: authenticate through it and require admin:access
+            provider
+                .login(username, password, { remoteAddress: ip, userAgent: req.headers['user-agent'] })
+                .then(async (result) => {
+                    if (!provider.hasPermission(result, ADMIN_ACCESS_PERMISSION)) {
+                        await provider.logout?.(result.token).catch(() => undefined);
+                        res.status(403).json({ error: `forbidden: missing permission ${ADMIN_ACCESS_PERMISSION}` });
+                        return;
+                    }
+                    failedAttempts.delete(ip);
+                    res.json({
+                        token: result.token,
+                        expiresIn: Math.max(0, Math.floor((result.expiresAt - Date.now()) / 1000)),
+                        username: result.userName,
+                        mustChangePassword: !!result.mustChangePassword,
+                    });
+                })
+                .catch((err) => {
+                    const status = errorStatus(err);
+                    if (status === 401) recordFailure();
+                    res.status(status).json({ error: errorMessage(err, 'Invalid credentials') });
+                });
+            return;
+        }
+
+        if (!config.validateCredentials(username, password)) {
+            // Track failed attempt
+            recordFailure();
 
             res.status(401).json({ error: 'Invalid credentials' });
             return;

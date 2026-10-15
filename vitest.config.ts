@@ -32,6 +32,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/jobs/index.ts',
             ),
+            '@qodalis/cli-server-plugin-users': path.resolve(
+                __dirname,
+                'plugins/users/index.ts',
+            ),
             '@qodalis/cli-server-plugin-data-explorer-redis': path.resolve(
                 __dirname,
                 'plugins/data-explorer-redis/index.ts',

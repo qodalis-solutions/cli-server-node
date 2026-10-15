@@ -21,6 +21,7 @@ import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-ser
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { AwsModule } from '@qodalis/cli-server-plugin-aws';
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 
 // File storage providers — uncomment the one you want to use:
@@ -32,7 +33,33 @@ import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesyst
 
 const port = process.env.PORT ?? 8047;
 
+// Browser origins allowed for CORS and WebSocket upgrades (local dev apps + the
+// admin dashboard served by this server). Override with QCLI_ALLOWED_ORIGINS.
+const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
+    ? process.env.QCLI_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [
+          'http://localhost:4200',
+          'http://localhost:4300',
+          'http://localhost:4301',
+          'http://localhost:4302',
+          'http://localhost:4303',
+          `http://localhost:${port}`,
+          'http://127.0.0.1:*',
+      ];
+
 const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
+    allowedOrigins,
+    // The demo exposes the interactive shell. The users plugin is mounted below, so
+    // the shell runs in "users" mode: a WS ticket from a session holding
+    // shell:execute (root has '*'). Without the users plugin, set shell.token
+    // (or shell.authorize) instead; with no mode at all the shell stays locked.
+    enableShell: true,
+    shell: {
+        maxSessionsPerUser: 3,
+        idleTimeoutMs: 15 * 60 * 1000,
+        // The shell gets a minimal environment; allow-list extra variables here.
+        env: { allow: ['NODE_ENV'] },
+    },
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -250,13 +277,21 @@ const jobsPlugin = new CliJobsBuilder()
 mountPlugin(jobsPlugin);
 
 // -----------------------------------------------------------
-// Admin Dashboard (via plugin)
+// Users Plugin (users, groups/permissions, sessions, audit).
+// Mounting it protects every server route and socket (protectServer).
+// -----------------------------------------------------------
+const usersPlugin = new CliUsersBuilder()
+    // Demo-only well-known password (a startup warning is logged).
+    .setDefaultAdminPassword('admin')
+    .setAllowedOrigins(allowedOrigins)
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+
+// -----------------------------------------------------------
+// Admin Dashboard (via plugin) — authenticates through the users plugin
+// and requires the admin:access permission (root/admin has it via '*').
 // -----------------------------------------------------------
 const adminPlugin = new CliAdminBuilder()
-    .setCredentials(
-        process.env.QCLI_ADMIN_USERNAME ?? 'admin',
-        process.env.QCLI_ADMIN_PASSWORD ?? 'admin',
-    )
+    .setAuthProvider(usersPlugin.serverAuth)
     .setRegisteredJobs(1) // number of registered jobs above
     .build({
         registry,
@@ -277,6 +312,7 @@ const adminPlugin = new CliAdminBuilder()
     });
 
 mountPlugin(adminPlugin);
+mountPlugin(usersPlugin);
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
@@ -285,6 +321,7 @@ const server = app.listen(port, () => {
     console.log(`  Jobs:      http://localhost:${port}/api/v1/qcli/jobs`);
     console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
     console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
+    console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
     console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
     console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
 
@@ -296,19 +333,18 @@ const server = app.listen(port, () => {
 eventSocketManager.attach(server);
 logSocketManager.attach(server);
 
+const shutdown = async () => {
+    await jobsPlugin.scheduler.stop();
+    usersPlugin.dispose();
+    await eventSocketManager.broadcastDisconnect();
+    await logSocketManager.broadcastDisconnect();
+    server.close();
+    process.exit(0);
+};
+
 process.on('SIGINT', async () => {
     console.log('\nShutting down...');
-    await jobsPlugin.scheduler.stop();
-    await eventSocketManager.broadcastDisconnect();
-    await logSocketManager.broadcastDisconnect();
-    server.close();
-    process.exit(0);
+    await shutdown();
 });
 
-process.on('SIGTERM', async () => {
-    await jobsPlugin.scheduler.stop();
-    await eventSocketManager.broadcastDisconnect();
-    await logSocketManager.broadcastDisconnect();
-    server.close();
-    process.exit(0);
-});
+process.on('SIGTERM', shutdown);

@@ -2,7 +2,11 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
+import { CliShellAuthMode, CliShellOptions } from './cli-shell-options';
 import { createLogger } from '../utils/logger';
+import { CliServerAuthContext, CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
+import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
+import { SessionBoundSockets } from './session-bound-sockets';
 
 const logger = createLogger('EventSocket');
 
@@ -18,18 +22,86 @@ interface ClientEntry {
     id: string;
     connectedAt: Date;
     remoteAddress: string;
+    /** Identity from a WS ticket, when one was presented. */
+    auth?: CliServerAuthContext;
 }
+
+export interface CliEventSocketManagerOptions {
+    /** Accept interactive shell sessions on `/ws/v1/qcli/shell` (default false). */
+    enableShell?: boolean;
+    /** Shell security options (access mode, limits, timeouts, environment). */
+    shell?: CliShellOptions;
+    /**
+     * Trusted reverse-proxy hops (`true` = 1, `false`/0 = none) for `X-Forwarded-*`
+     * headers (shell per-address limits/logs, same-origin checks).
+     */
+    trustProxy?: boolean | number;
+    /** When set, every upgrade with an `Origin` header must come from one of these. */
+    allowedOrigins?: string[];
+}
+
+/** Events delivered only to sockets authenticated as the event's user. */
+const USER_SCOPED_EVENTS = new Set(['session-kicked']);
 
 /**
  * Manages WebSocket connections for server-push events and interactive shell sessions.
- * Handles upgrades on `/ws/v1/qcli/events` and `/ws/v1/qcli/shell` paths.
+ * Handles upgrades on `/ws/v1/qcli/events` and (when `enableShell` is set)
+ * `/ws/v1/qcli/shell`. With an auth provider that protects the server, event
+ * upgrades need a single-use `?ticket=`; `session-kicked` is delivered only to
+ * the affected user. Sockets authenticated with a stored session are bound to
+ * it: once it ends they are closed with 4401 `session ended` (after
+ * `session-kicked` for revocations; see {@link SessionBoundSockets}). Shell
+ * access (modes, limits, session binding) is decided by {@link CliShellSessionManager}.
  */
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
     private readonly _clientMeta = new Map<WebSocket, ClientEntry>();
-    private readonly _shellManager = new CliShellSessionManager();
+    private readonly _shellManager: CliShellSessionManager;
     private _nextClientId = 1;
+    private _auth?: ICliServerAuth;
+    private _allowedOrigins?: string[];
+    private readonly _trustProxy: boolean | number;
+    private readonly _sessionBound = new SessionBoundSockets({ awaitKick: true });
+
+    constructor(options: CliEventSocketManagerOptions = {}) {
+        this._shellManager = new CliShellSessionManager({
+            enabled: options.enableShell ?? false,
+            shell: options.shell,
+            trustProxy: options.trustProxy,
+        });
+        this._allowedOrigins = options.allowedOrigins;
+        this._trustProxy = options.trustProxy ?? false;
+    }
+
+    /** Installs the auth provider (users plugin) used to authenticate upgrades with tickets. */
+    setAuth(auth: ICliServerAuth | undefined): void {
+        this._auth = auth;
+        this._shellManager.setAuth(auth);
+        this._sessionBound.setAuth(auth);
+    }
+
+    setAllowedOrigins(origins: string[] | undefined): void {
+        this._allowedOrigins = origins;
+    }
+
+    setShellEnabled(enabled: boolean): void {
+        this._shellManager.setEnabled(enabled);
+    }
+
+    get shellEnabled(): boolean {
+        return this._shellManager.enabled;
+    }
+
+    /** Shell access mode (`undefined` while the shell is disabled). */
+    get shellAuthMode(): CliShellAuthMode | undefined {
+        return this._shellManager.authMode;
+    }
+
+    /** The shell session manager (open sessions, limits, binding). */
+    get shellManager(): CliShellSessionManager {
+        return this._shellManager;
+    }
 
     private static readonly EVENT_PATHS = new Set([
         '/ws/v1/qcli/events',
@@ -47,31 +119,50 @@ export class CliEventSocketManager {
      */
     attach(server: Server): void {
         this._wss = new WebSocketServer({ noServer: true });
+        this._shellManager.logStartupState();
 
         server.on('upgrade', (request, socket, head) => {
-            const parsed = new URL(request.url ?? '', 'http://localhost');
+            let parsed: URL;
+            try {
+                parsed = new URL(request.url ?? '', 'http://localhost');
+            } catch {
+                return; // malformed request target: not one of our paths
+            }
             const pathname = parsed.pathname;
 
             if (CliEventSocketManager.EVENT_PATHS.has(pathname)) {
-                this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                    this._wss!.emit('connection', ws, request);
-                });
+                authorizeWsUpgrade(request, parsed, { auth: this._auth, allowedOrigins: this._allowedOrigins, trustProxy: this._trustProxy }).then(
+                    (result) => {
+                        if (!result.ok) {
+                            rejectUpgrade(socket, result.status);
+                            return;
+                        }
+                        this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                            this._wss!.emit('connection', ws, request, result.ctx);
+                        });
+                    },
+                    () => rejectUpgrade(socket, 401),
+                );
                 return;
             }
 
             if (CliEventSocketManager.SHELL_PATHS.has(pathname)) {
-                this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                    const cols = parseInt(parsed.searchParams.get('cols') ?? '80', 10) || 80;
-                    const rows = parseInt(parsed.searchParams.get('rows') ?? '24', 10) || 24;
-                    const cmd = parsed.searchParams.get('cmd') || undefined;
-
-                    this._shellManager.handleSession(ws, cols, rows, cmd).catch((err) => {
-                        try {
-                            ws.send(JSON.stringify({ type: 'error', message: err.message }));
-                            ws.close();
-                        } catch {
-                            // ignore
-                        }
+                // Origin rejection stays an HTTP 403; every other refusal is
+                // "accept, then close" with a code the browser can read (C5).
+                authorizeWsUpgrade(request, parsed, { allowedOrigins: this._allowedOrigins, trustProxy: this._trustProxy }).then((result) => {
+                    if (!result.ok) {
+                        rejectUpgrade(socket, result.status);
+                        return;
+                    }
+                    this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                        this._shellManager.accept(ws, request, parsed).catch((err) => {
+                            logger.error('Shell session error: %s', err?.message ?? err);
+                            try {
+                                ws.close(1011, 'shell error');
+                            } catch {
+                                // ignore
+                            }
+                        });
                     });
                 });
                 return;
@@ -80,30 +171,28 @@ export class CliEventSocketManager {
             // Unrecognized path; leave for other upgrade handlers
         });
 
-        this._wss.on('connection', (ws, request: IncomingMessage) => {
+        this._wss.on('connection', (ws, request: IncomingMessage, auth?: CliServerAuthContext) => {
             this._clients.add(ws);
             const id = `evt-${this._nextClientId++}`;
             this._clientMeta.set(ws, {
                 id,
                 connectedAt: new Date(),
                 remoteAddress: request.socket.remoteAddress ?? 'unknown',
+                auth,
             });
+            this._sessionBound.bind(ws, auth);
             logger.info('Client connected (id=%s)', id);
             ws.send(JSON.stringify({ type: 'connected' }));
 
-            ws.on('close', () => {
+            const disconnected = () => {
                 const meta = this._clientMeta.get(ws);
                 logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
+                this._sessionBound.unbind(ws);
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
-            });
-
-            ws.on('error', () => {
-                const meta = this._clientMeta.get(ws);
-                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
-                this._clients.delete(ws);
-                this._clientMeta.delete(ws);
-            });
+            };
+            ws.on('close', disconnected);
+            ws.on('error', disconnected);
         });
     }
 
@@ -112,10 +201,42 @@ export class CliEventSocketManager {
      */
     broadcastMessage(message: Record<string, unknown>): void {
         const data = JSON.stringify(message);
+        const type = typeof message.type === 'string' ? message.type : '';
+        const payload = (message.data ?? {}) as Record<string, unknown>;
+        const toClose: WebSocket[] = [];
+
         for (const ws of this._clients) {
-            if (ws.readyState === WebSocket.OPEN) {
+            if (ws.readyState !== WebSocket.OPEN) continue;
+            const auth = this._clientMeta.get(ws)?.auth;
+
+            if (USER_SCOPED_EVENTS.has(type)) {
+                // Only the affected user's sockets learn about it
+                if (!auth || auth.userId !== payload.userId) continue;
                 ws.send(data);
+                if (type === 'session-kicked' && auth.sessionId && auth.sessionId === payload.sessionId) {
+                    toClose.push(ws);
+                }
+                continue;
             }
+
+            // A socket whose session ended only waits for its session-kicked
+            if (this._sessionBound.isEnding(ws)) continue;
+
+            if (this._auth?.protectServer) {
+                // Server-wide events need the matching read permission
+                const needed = type === 'log' || type.startsWith('log:')
+                    ? CliServerPermissions.LogsRead
+                    : type.startsWith('job:')
+                        ? CliServerPermissions.JobsRead
+                        : undefined;
+                if (needed && (!auth || !this._auth.hasPermission(auth, needed))) continue;
+            }
+
+            ws.send(data);
+        }
+
+        for (const ws of toClose) {
+            this._sessionBound.kicked(ws);
         }
     }
 
@@ -142,6 +263,8 @@ export class CliEventSocketManager {
         }
 
         await Promise.all(promises);
+        this._shellManager.dispose();
+        this._sessionBound.dispose();
         this._clients.clear();
         this._clientMeta.clear();
     }
@@ -169,6 +292,8 @@ export class CliEventSocketManager {
 
     /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
+        this._shellManager.dispose();
+        this._sessionBound.dispose();
         for (const ws of this._clients) {
             ws.terminate();
         }

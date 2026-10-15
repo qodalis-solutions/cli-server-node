@@ -22,6 +22,11 @@ export interface ICliCommandProcessor {
     /** Parameter descriptors for this command. */
     parameters?: ICliCommandParameterDescriptor[];
     /**
+     * Permissions required to execute this command (all of them), enforced
+     * server-side when the users plugin protects the server.
+     */
+    requiredPermissions?: string[];
+    /**
      * Executes the command and returns a plain-text result.
      * @param command - Parsed command with arguments.
      * @param signal - Optional AbortSignal to cancel the operation.
@@ -51,6 +56,7 @@ export abstract class CliCommandProcessor implements ICliCommandProcessor {
     version: string = '1.0.0';
     processors?: ICliCommandProcessor[];
     parameters?: ICliCommandParameterDescriptor[];
+    requiredPermissions?: string[];
 
     abstract handleAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<string>;
     handleStructuredAsync?(command: CliProcessCommand, signal?: AbortSignal): Promise<CliStructuredResponse>;

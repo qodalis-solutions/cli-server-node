@@ -35,6 +35,8 @@ app.use(adminPlugin.dashboardPrefix, adminPlugin.dashboardRouter);
 
 ## Configuration
 
+When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth)`: the dashboard then logs in with users credentials, its token is a users session token, and every admin route requires `admin:access`. The static credentials below are only used when the users plugin is absent.
+
 Credentials and JWT secret can be set via the builder or environment variables:
 
 | Environment Variable | Default | Description |
@@ -47,7 +49,8 @@ Credentials and JWT secret can be set via the builder or environment variables:
 
 | Method | Description |
 |---|---|
-| `setCredentials(username, password)` | Set admin login credentials |
+| `setCredentials(username, password)` | Set admin login credentials (only used without the users plugin) |
+| `setAuthProvider(usersPlugin.serverAuth)` | Log in through the users plugin; requires the `admin:access` permission (`admin` has it via `*`) |
 | `setJwtSecret(secret)` | Set JWT signing secret |
 | `setRegisteredJobs(count)` | Report job count in the status endpoint |
 | `setEnabledFeatures(features)` | Add custom feature flags to the status endpoint |
@@ -78,6 +81,8 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 | POST | `/plugins/:id/toggle` | Enable or disable a module |
 
 ### Configuration
+
+When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth)`: the dashboard then logs in with users credentials, its token is a users session token, and every admin route requires `admin:access`. The static credentials below are only used when the users plugin is absent.
 
 | Method | Endpoint | Description |
 |---|---|---|
