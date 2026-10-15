@@ -31,13 +31,21 @@ export {
     CliCommandExecutorService,
     CliEventSocketManager,
     CliShellSessionManager,
+    CliShellSessionInfo,
     CliLogSocketManager,
+    CliShellOptions,
+    CliShellEnvOptions,
+    CliShellAuthMode,
+    CliShellAuthorizeContext,
+    ShellCloseCodes,
 } from './services';
 
 // Server auth (implemented by the users plugin)
 export {
     CliServerAuthContext,
     CliServerAuthError,
+    CliServerAuditEntry,
+    CliServerSessionEvent,
     ICliServerAuth,
     CliServerPermissions,
     isOriginAllowed,

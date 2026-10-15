@@ -37,7 +37,41 @@ export interface ICliServerAuth {
         allowedOrigins?: string[];
         broadcast: (message: Record<string, unknown>) => void;
     }): void;
+    /**
+     * Re-validates a socket identity without sliding the session: the session still
+     * exists and is not expired, the user exists and is enabled. Returns the identity
+     * with fresh permissions, or undefined when it ended. Used to bind long-lived
+     * sockets (the shell) to their session.
+     */
+    revalidate?(ctx: CliServerAuthContext): Promise<CliServerAuthContext | undefined>;
+    /** Records activity on the session behind `ctx` (slides the idle expiry). */
+    touch?(ctx: CliServerAuthContext): Promise<void>;
+    /** Writes an audit entry (never include secrets, command text or stdin). */
+    audit?(entry: CliServerAuditEntry): Promise<void>;
+    /** Subscribes to session lifecycle events; returns an unsubscribe function. */
+    onSessionEvent?(listener: (event: CliServerSessionEvent) => void): () => void;
 }
+
+/** Audit entry written by the server through {@link ICliServerAuth.audit}. */
+export interface CliServerAuditEntry {
+    event: string;
+    userId: string;
+    userName: string;
+    /** Acting user (defaults to the user). */
+    actorId?: string;
+    actorName?: string;
+    details?: string;
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * Session lifecycle events emitted by the auth provider:
+ * - `session-ended`: logout, expiry, revoke (kick), user disabled/deleted;
+ * - `access-changed`: users/groups/permissions changed (re-check permissions).
+ */
+export type CliServerSessionEvent =
+    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string }
+    | { type: 'access-changed'; userId?: string };
 
 /** Server permissions enforced when the users plugin protects the server. */
 export const CliServerPermissions = {

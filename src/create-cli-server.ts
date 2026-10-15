@@ -10,6 +10,8 @@ import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli
 import { createLogger } from './utils/logger';
 import { ICliServerAuth, isOriginAllowed } from './auth/cli-server-auth';
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
+import { CliShellOptions } from './services/cli-shell-options';
+import { ShellCapabilities } from './controllers/cli-version-controller';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -48,8 +50,15 @@ export interface CliServerOptions {
      * matches any port). Every WS upgrade with an `Origin` header is checked.
      */
     allowedOrigins?: string[];
-    /** Accept interactive shell WebSocket sessions (default false). */
+    /**
+     * Accept interactive shell WebSocket sessions (default false). When enabled,
+     * access is decided by one mode: users plugin mounted (ticket +
+     * `shell:execute`), `shell.token`, `shell.authorize` or `shell.allowAnonymous`.
+     * With none of them the shell is locked (every connection closed with 4401).
+     */
     enableShell?: boolean;
+    /** Remote shell security: access mode, limits, timeouts, cwd, shell binary, environment. */
+    shell?: CliShellOptions;
     /**
      * Auth provider protecting the whole server (e.g. `usersPlugin.serverAuth`).
      * Can also be installed later with `setAuth()` or by `mountPlugin(usersPlugin)`.
@@ -90,7 +99,10 @@ export interface CliServerResult {
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
-    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false } = options;
+    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false, shell } = options;
+    if (shell && !enableShell) {
+        logger.warn('shell options are set but enableShell is false: the shell stays disabled');
+    }
 
     const app = express();
 
@@ -137,15 +149,22 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const executor = new CliCommandExecutorService(registry);
 
+    const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins });
+    const logSocketManager = new CliLogSocketManager({ allowedOrigins });
+    const shellCapabilities = (): ShellCapabilities => {
+        const mode = eventSocketManager.shellAuthMode;
+        return mode ? { shell: true, shellAuth: mode } : { shell: false };
+    };
+
     // Version discovery endpoint
-    app.use('/api/qcli', createCliVersionController());
+    app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
 
     // API v1 routes
-    app.use('/api/v1/qcli', createCliController(registry, executor));
+    app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities }));
 
     // Custom basePath fallback (when user overrides the default)
     if (basePath !== '/api/v1/qcli') {
-        app.use(basePath, createCliController(registry, executor));
+        app.use(basePath, createCliController(registry, executor, { shellCapabilities }));
     }
 
     // Filesystem API — provider-based
@@ -164,9 +183,6 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         const deExecutor = new DataExplorerExecutor(deBuilder.registry);
         app.use('/api/qcli/data-explorer', createDataExplorerController(deBuilder.registry, deExecutor));
     }
-
-    const eventSocketManager = new CliEventSocketManager({ enableShell, allowedOrigins });
-    const logSocketManager = new CliLogSocketManager({ allowedOrigins });
 
     logger.info('CLI server created with %d processors', registry.processors.length);
 

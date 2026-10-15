@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
+import { CliShellAuthMode, CliShellOptions } from './cli-shell-options';
 import { createLogger } from '../utils/logger';
 import { CliServerAuthContext, CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
 import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
@@ -27,6 +28,8 @@ interface ClientEntry {
 export interface CliEventSocketManagerOptions {
     /** Accept interactive shell sessions on `/ws/v1/qcli/shell` (default false). */
     enableShell?: boolean;
+    /** Shell security options (access mode, limits, timeouts, environment). */
+    shell?: CliShellOptions;
     /** When set, every upgrade with an `Origin` header must come from one of these. */
     allowedOrigins?: string[];
 }
@@ -37,28 +40,29 @@ const USER_SCOPED_EVENTS = new Set(['session-kicked']);
 /**
  * Manages WebSocket connections for server-push events and interactive shell sessions.
  * Handles upgrades on `/ws/v1/qcli/events` and (when `enableShell` is set)
- * `/ws/v1/qcli/shell`. With an auth provider that protects the server, every
- * upgrade needs a single-use `?ticket=` (events: authenticated, shell:
- * `shell:execute`); `session-kicked` is delivered only to the affected user.
+ * `/ws/v1/qcli/shell`. With an auth provider that protects the server, event
+ * upgrades need a single-use `?ticket=`; `session-kicked` is delivered only to
+ * the affected user. Shell access (modes, limits, session binding) is decided by
+ * {@link CliShellSessionManager}.
  */
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Set<WebSocket>();
     private readonly _clientMeta = new Map<WebSocket, ClientEntry>();
-    private readonly _shellManager = new CliShellSessionManager();
+    private readonly _shellManager: CliShellSessionManager;
     private _nextClientId = 1;
     private _auth?: ICliServerAuth;
-    private _enableShell: boolean;
     private _allowedOrigins?: string[];
 
     constructor(options: CliEventSocketManagerOptions = {}) {
-        this._enableShell = options.enableShell ?? false;
+        this._shellManager = new CliShellSessionManager({ enabled: options.enableShell ?? false, shell: options.shell });
         this._allowedOrigins = options.allowedOrigins;
     }
 
     /** Installs the auth provider (users plugin) used to authenticate upgrades with tickets. */
     setAuth(auth: ICliServerAuth | undefined): void {
         this._auth = auth;
+        this._shellManager.setAuth(auth);
     }
 
     setAllowedOrigins(origins: string[] | undefined): void {
@@ -66,11 +70,21 @@ export class CliEventSocketManager {
     }
 
     setShellEnabled(enabled: boolean): void {
-        this._enableShell = enabled;
+        this._shellManager.setEnabled(enabled);
     }
 
     get shellEnabled(): boolean {
-        return this._enableShell;
+        return this._shellManager.enabled;
+    }
+
+    /** Shell access mode (`undefined` while the shell is disabled). */
+    get shellAuthMode(): CliShellAuthMode | undefined {
+        return this._shellManager.authMode;
+    }
+
+    /** The shell session manager (open sessions, limits, binding). */
+    get shellManager(): CliShellSessionManager {
+        return this._shellManager;
     }
 
     private static readonly EVENT_PATHS = new Set([
@@ -89,6 +103,7 @@ export class CliEventSocketManager {
      */
     attach(server: Server): void {
         this._wss = new WebSocketServer({ noServer: true });
+        this._shellManager.logStartupState();
 
         server.on('upgrade', (request, socket, head) => {
             const parsed = new URL(request.url ?? '', 'http://localhost');
@@ -111,37 +126,24 @@ export class CliEventSocketManager {
             }
 
             if (CliEventSocketManager.SHELL_PATHS.has(pathname)) {
-                if (!this._enableShell) {
-                    rejectUpgrade(socket, 404);
-                    return;
-                }
-                authorizeWsUpgrade(request, parsed, {
-                    auth: this._auth,
-                    allowedOrigins: this._allowedOrigins,
-                    permission: CliServerPermissions.ShellExecute,
-                }).then(
-                    (result) => {
-                        if (!result.ok) {
-                            rejectUpgrade(socket, result.status);
-                            return;
-                        }
-                        this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                            const cols = parseInt(parsed.searchParams.get('cols') ?? '80', 10) || 80;
-                            const rows = parseInt(parsed.searchParams.get('rows') ?? '24', 10) || 24;
-                            const cmd = parsed.searchParams.get('cmd') || undefined;
-
-                            this._shellManager.handleSession(ws, cols, rows, cmd).catch((err) => {
-                                try {
-                                    ws.send(JSON.stringify({ type: 'error', message: err.message }));
-                                    ws.close();
-                                } catch {
-                                    // ignore
-                                }
-                            });
+                // Origin rejection stays an HTTP 403; every other refusal is
+                // "accept, then close" with a code the browser can read (C5).
+                authorizeWsUpgrade(request, parsed, { allowedOrigins: this._allowedOrigins }).then((result) => {
+                    if (!result.ok) {
+                        rejectUpgrade(socket, result.status);
+                        return;
+                    }
+                    this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                        this._shellManager.accept(ws, request, parsed).catch((err) => {
+                            logger.error('Shell session error: %s', err?.message ?? err);
+                            try {
+                                ws.close(1011, 'shell error');
+                            } catch {
+                                // ignore
+                            }
                         });
-                    },
-                    () => rejectUpgrade(socket, 401),
-                );
+                    });
+                });
                 return;
             }
 
@@ -240,6 +242,7 @@ export class CliEventSocketManager {
         }
 
         await Promise.all(promises);
+        this._shellManager.dispose();
         this._clients.clear();
         this._clientMeta.clear();
     }
@@ -267,6 +270,7 @@ export class CliEventSocketManager {
 
     /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
+        this._shellManager.dispose();
         for (const ws of this._clients) {
             ws.terminate();
         }

@@ -114,6 +114,16 @@ function connect(port: number, path: string, headers: Record<string, string> = {
     });
 }
 
+/** Opens a WS that the server accepts and then closes; resolves with the close code and reason. */
+function closeOf(port: number, path: string, headers: Record<string, string> = {}): Promise<{ code: number; reason: string }> {
+    return new Promise((resolve) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers });
+        ws.on('close', (code, reason) => resolve({ code, reason: reason.toString() }));
+        ws.on('unexpected-response', (_req, res) => resolve({ code: -res.statusCode!, reason: '' }));
+        ws.on('error', () => undefined);
+    });
+}
+
 const waitFor = async (cond: () => boolean, ms = 2000) => {
     const start = Date.now();
     while (!cond()) {
@@ -335,10 +345,15 @@ describe('B2: WebSocket tickets, origins, scoping', () => {
         expect(logs.ws).toBeDefined();
         logs.ws!.close();
 
-        expect((await connect(h.port, '/ws/v1/qcli/shell')).status).toBe(401);
-        expect((await connect(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, plain.token)}&cmd=id`)).status).toBe(403);
-        const shell = await connect(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, root.token)}&cmd=true`);
+        // Shell refusals are accept-then-close (C5) so browsers can read them
+        expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4401, reason: 'login required' });
+        expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, plain.token)}&cmd=id`)).toEqual({
+            code: 4403,
+            reason: 'permission denied',
+        });
+        const shell = await connect(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, root.token)}&cmd=sleep%205`);
         expect(shell.ws).toBeDefined();
+        await waitFor(() => shell.messages.some((m) => m.type === 'ready'));
         shell.ws!.terminate();
     });
 
@@ -382,7 +397,10 @@ describe('B2: WebSocket tickets, origins, scoping', () => {
         const off = await startHarness();
         try {
             const r = await login(off.cli.app, 'root', ROOT_PASS);
-            expect((await connect(off.port, `/ws/v1/qcli/shell?ticket=${await ticket(off.cli.app, r.token)}`)).status).toBe(404);
+            expect(await closeOf(off.port, `/ws/v1/qcli/shell?ticket=${await ticket(off.cli.app, r.token)}`)).toEqual({
+                code: 4404,
+                reason: 'shell disabled',
+            });
         } finally {
             await stopHarness(off);
         }

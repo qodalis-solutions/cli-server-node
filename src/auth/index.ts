@@ -1,6 +1,8 @@
 export {
     CliServerAuthContext,
     CliServerAuthError,
+    CliServerAuditEntry,
+    CliServerSessionEvent,
     ICliServerAuth,
     CliServerPermissions,
     isOriginAllowed,
