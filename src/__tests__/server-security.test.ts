@@ -270,6 +270,47 @@ describe('B1: without the users plugin (or protectServer: false) the server stay
     });
 });
 
+describe('B1: server auth gate errors', () => {
+    function gated(error: unknown) {
+        return createCliServer({
+            configure: (b) => b.addProcessor(proc('echo')),
+            auth: {
+                protectServer: true,
+                handlesPath: () => false,
+                authenticateRequest: async () => {
+                    throw error;
+                },
+                consumeTicket: async () => undefined,
+                hasPermission: () => true,
+            },
+        }).app;
+    }
+
+    it('unexpected provider errors give a generic 500 and are logged, never leaked', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const res = await request(gated(new Error('SQLITE_CANTOPEN: /var/secret/users.db'))).post(`${V1}/execute`).send({ command: 'echo' });
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: 'internal server error' });
+            expect(JSON.stringify(res.body)).not.toContain('SQLITE');
+            expect(spy.mock.calls.some((args) => args.some((a) => String(a instanceof Error ? a.message : a).includes('SQLITE_CANTOPEN')))).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('auth errors carrying a status keep their status and message', async () => {
+        const unauth = Object.assign(new Error('session expired'), { status: 401 });
+        const res = await request(gated(unauth)).post(`${V1}/execute`).send({ command: 'echo' });
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({ error: 'session expired' });
+        const pwd = Object.assign(new Error('password change required'), { status: 403 });
+        const res2 = await request(gated(pwd)).post(`${V1}/execute`).send({ command: 'echo' });
+        expect(res2.status).toBe(403);
+        expect(res2.body).toEqual({ error: 'password change required' });
+    });
+});
+
 // ---------------------------------------------------------------------------
 // B2 — WebSockets
 // ---------------------------------------------------------------------------

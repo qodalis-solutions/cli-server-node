@@ -2,6 +2,9 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { ICliCommandProcessor } from '../abstractions';
 import { ICliCommandRegistry } from '../services/cli-command-registry';
 import { CliServerAuthContext, CliServerPermissions as P, ICliServerAuth } from './cli-server-auth';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('ServerAuth');
 
 declare global {
     namespace Express {
@@ -132,8 +135,14 @@ export function createServerAuthGate(
                 next();
             },
             (err: { status?: number; message?: string }) => {
-                const status = typeof err?.status === 'number' ? err.status : 401;
-                res.status(status).json({ error: status === 401 ? err?.message || 'unauthorized' : err?.message || 'forbidden' });
+                if (typeof err?.status !== 'number') {
+                    // not an auth error (e.g. a store failure): never expose its message
+                    logger.error('authentication failed unexpectedly:', err);
+                    res.status(500).json({ error: 'internal server error' });
+                    return;
+                }
+                const status = err.status;
+                res.status(status).json({ error: status === 401 ? err.message || 'unauthorized' : err.message || 'forbidden' });
             },
         );
     };

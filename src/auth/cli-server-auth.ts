@@ -26,7 +26,8 @@ export interface ICliServerAuth {
     handlesPath(path: string, method: string): boolean;
     /**
      * Authenticates an HTTP request. Throws an error with `status`
-     * (401 unauthenticated, 403 e.g. password change required / CSRF).
+     * (401 unauthenticated, 403 e.g. password change required / CSRF); any
+     * other error is logged and answered with a generic 500.
      */
     authenticateRequest(req: Request): Promise<CliServerAuthContext>;
     /**
