@@ -6,7 +6,7 @@ export interface WsUpgradeAuthOptions {
     auth?: ICliServerAuth;
     allowedOrigins?: string[];
     /** Honour `X-Forwarded-Proto`/`X-Forwarded-Host` when deciding whether the Origin is the server's own. */
-    trustProxy?: boolean;
+    trustProxy?: boolean | number;
     /** Permission required on top of authentication (protected mode only). */
     permission?: string;
 }

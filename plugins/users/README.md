@@ -49,7 +49,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setMaxSessionLifetime(ms)` | 12 h | Absolute session lifetime; `expiresAt` = min(idle, absolute) |
 | `setProtectServer(bool)` | `true` | Protect every server route and socket when mounted |
 | `setAllowedOrigins(list)` | server's | Origins accepted for adapter/cookie-mode state changes (CSRF) |
-| `setTrustProxy(bool)` | `false` | Use `X-Forwarded-For` for the client IP |
+| `setTrustProxy(bool \| hops)` | `false` | Trusted proxy hops (`true` = 1): client IP = `X-Forwarded-For` entry at index `len - hops` (rightmost with one hop) |
 | `setIpRateLimit(max, windowMs)` | 20 / min | Per-IP limit on login, verify-password and self password change |
 | `setCleanupInterval(ms)` | 5 min | Background sweep of expired sessions |
 | `setOptions(options)` | — | Same options as a plain object |

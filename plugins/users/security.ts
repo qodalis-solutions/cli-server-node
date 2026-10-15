@@ -40,15 +40,38 @@ export function isOriginAllowed(origin: string | undefined, allowed: readonly st
     });
 }
 
-/** The client IP. `X-Forwarded-For` is only honoured when `trustProxy` is set. */
-export function clientIp(req: Request, trustProxy: boolean): string {
-    if (trustProxy) {
-        const header = req.headers['x-forwarded-for'];
-        const value = Array.isArray(header) ? header[0] : header;
-        const first = value?.split(',')[0]?.trim();
-        if (first) return first;
+/**
+ * Number of trusted reverse-proxy hops for a `trustProxy` setting:
+ * `false`/`0`/absent → 0 (untrusted), `true` → 1, a number n → n (values
+ * below 1 other than 0 count as 1).
+ */
+export function trustedProxyHops(trustProxy: boolean | number | undefined): number {
+    if (typeof trustProxy === 'number') {
+        if (trustProxy === 0) return 0;
+        return trustProxy >= 1 ? Math.floor(trustProxy) : 1;
     }
-    return req.socket?.remoteAddress ?? 'unknown';
+    return trustProxy ? 1 : 0;
+}
+
+/**
+ * The `X-Forwarded-For` entry identifying the client behind `hops` trusted
+ * proxies: index `len - hops` (with one hop, the rightmost entry, appended by
+ * the trusted proxy; leftmost entries are client-controlled). The leftmost
+ * entry when the list is shorter than `hops`; undefined when the header is
+ * absent or the selected entry is empty.
+ */
+function forwardedClient(header: string | string[] | undefined, hops: number): string | undefined {
+    if (hops <= 0 || header === undefined) return undefined;
+    const entries = (Array.isArray(header) ? header.join(',') : header).split(',').map((e) => e.trim());
+    return entries[Math.max(0, entries.length - hops)] || undefined;
+}
+
+/**
+ * The client IP: the socket address, or with `trustProxy` (a hop count,
+ * `true` = 1) the `X-Forwarded-For` entry at index `len - hops`.
+ */
+export function clientIp(req: Request, trustProxy: boolean | number): string {
+    return forwardedClient(req.headers['x-forwarded-for'], trustedProxyHops(trustProxy)) ?? req.socket?.remoteAddress ?? 'unknown';
 }
 
 /** Permissions of `target` not covered by any permission in `caller` (wildcard-aware). */
@@ -117,8 +140,8 @@ function normalizeOrigin(scheme: string, hostPort: string): string | undefined {
     }
 }
 
-function proxyTrusted(req: OriginCheckRequest, trustProxy: boolean | undefined): boolean {
-    if (trustProxy !== undefined) return trustProxy;
+function proxyTrusted(req: OriginCheckRequest, trustProxy: boolean | number | undefined): boolean {
+    if (trustProxy !== undefined) return trustedProxyHops(trustProxy) > 0;
     const fn = req.app?.get?.('trust proxy fn');
     return typeof fn === 'function' ? Boolean((fn as (addr: string | undefined, i: number) => unknown)(req.socket?.remoteAddress, 0)) : false;
 }
@@ -129,7 +152,7 @@ function proxyTrusted(req: OriginCheckRequest, trustProxy: boolean | undefined):
  * (`trustProxy`, or the Express app's `trust proxy` setting when omitted)
  * `X-Forwarded-Proto` / `X-Forwarded-Host` win.
  */
-export function requestOrigin(req: OriginCheckRequest, trustProxy?: boolean): string | undefined {
+export function requestOrigin(req: OriginCheckRequest, trustProxy?: boolean | number): string | undefined {
     const trusted = proxyTrusted(req, trustProxy);
     const scheme = (trusted && firstHeader(req.headers['x-forwarded-proto'])) || (req.socket?.encrypted ? 'https' : 'http');
     const host = (trusted && firstHeader(req.headers['x-forwarded-host'])) || firstHeader(req.headers['host']);
@@ -141,7 +164,7 @@ export function requestOrigin(req: OriginCheckRequest, trustProxy?: boolean): st
  * dashboard served by this server). Same-origin requests are not cross-site
  * and always pass Origin/CSRF checks. Case-insensitive; default ports normalized.
  */
-export function isSameOrigin(origin: string | undefined, req: OriginCheckRequest, trustProxy?: boolean): boolean {
+export function isSameOrigin(origin: string | undefined, req: OriginCheckRequest, trustProxy?: boolean | number): boolean {
     if (!origin || origin === 'null') return false;
     let o: string | undefined;
     try {

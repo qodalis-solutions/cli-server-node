@@ -9,6 +9,7 @@ import {
     CliServerPermissions,
     CliServerSessionEvent,
     ICliServerAuth,
+    clientAddress,
 } from '../auth/cli-server-auth';
 import {
     CliShellAuthMode,
@@ -111,16 +112,19 @@ export class CliShellSessionManager {
     private _nextId = 1;
     private _checkTimer?: NodeJS.Timeout;
 
-    private _trustProxy: boolean;
+    private _trustProxy: boolean | number;
 
-    constructor(options: { enabled?: boolean; shell?: CliShellOptions; trustProxy?: boolean } = {}) {
+    constructor(options: { enabled?: boolean; shell?: CliShellOptions; trustProxy?: boolean | number } = {}) {
         this._enabled = options.enabled ?? false;
         this._options = options.shell ?? {};
         this._trustProxy = options.trustProxy ?? false;
     }
 
-    /** Use the first `X-Forwarded-For` entry as the remote address (behind a trusted proxy). */
-    setTrustProxy(trust: boolean): void {
+    /**
+     * Trusted reverse-proxy hops (`true` = 1): the remote address is the
+     * `X-Forwarded-For` entry at index `len - hops` (`false`/0: the socket address).
+     */
+    setTrustProxy(trust: boolean | number): void {
         this._trustProxy = trust;
     }
 
@@ -552,12 +556,7 @@ export class CliShellSessionManager {
     // -------------------------------------------------------------- helpers
 
     private remoteAddressOf(request: IncomingMessage): string {
-        if (this._trustProxy) {
-            const header = request.headers['x-forwarded-for'];
-            const first = (Array.isArray(header) ? header[0] : header)?.split(',')[0]?.trim();
-            if (first) return first;
-        }
-        return request.socket.remoteAddress ?? 'unknown';
+        return clientAddress(request, this._trustProxy);
     }
 
     /** Determines the shell binary and arguments based on options, platform and optional command. */

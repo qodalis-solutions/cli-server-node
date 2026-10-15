@@ -186,8 +186,12 @@ export interface UsersModuleOptions {
     protectServer?: boolean;
     /** Origins allowed for CORS, WebSocket upgrades and cookie/adapter-mode state changes (CSRF). */
     allowedOrigins?: string[];
-    /** Trust `X-Forwarded-For` for the client IP (default false). */
-    trustProxy?: boolean;
+    /**
+     * Trusted reverse-proxy hops for the client IP (`true` = 1, `false`/0 = none,
+     * the default): the `X-Forwarded-For` entry at index `len - hops` (the
+     * rightmost with one hop); the leftmost when the list is shorter.
+     */
+    trustProxy?: boolean | number;
     /** Per-IP attempts on login / verify-password / self password change per window (default 20). */
     ipRateLimit?: number;
     /** Per-IP limiter window in ms (default 60 seconds). */

@@ -8,7 +8,7 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
-import { ICliServerAuth, isOriginAllowed, isSameOrigin } from './auth/cli-server-auth';
+import { ICliServerAuth, isOriginAllowed, isSameOrigin, trustedProxyHops } from './auth/cli-server-auth';
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
@@ -60,10 +60,14 @@ export interface CliServerOptions {
     /** Remote shell security: access mode, limits, timeouts, cwd, shell binary, environment. */
     shell?: CliShellOptions;
     /**
-     * Behind a reverse proxy: trust `X-Forwarded-For` (Express `trust proxy`, and
-     * the shell's per-address limits). Default false.
+     * Behind reverse proxies: the number of trusted proxy hops (`true` = 1,
+     * `false`/0 = none, the default). The client IP (Express `req.ip`, the
+     * shell's per-address limits) is the `X-Forwarded-For` entry at index
+     * `len - hops` (with one hop, the rightmost entry, appended by the trusted
+     * proxy); the leftmost entry when the list is shorter, the socket address
+     * when the header is absent. `X-Forwarded-Proto`/`-Host` are honoured too.
      */
-    trustProxy?: boolean;
+    trustProxy?: boolean | number;
     /**
      * Auth provider protecting the whole server (e.g. `usersPlugin.serverAuth`).
      * Can also be installed later with `setAuth()` or by `mountPlugin(usersPlugin)`.
@@ -110,8 +114,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     }
 
     const app = express();
-    if (trustProxy) {
-        app.set('trust proxy', true);
+    const proxyHops = trustedProxyHops(trustProxy);
+    if (proxyHops > 0) {
+        app.set('trust proxy', proxyHops);
     }
 
     if (corsOption === true) {

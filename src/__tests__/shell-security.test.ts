@@ -601,10 +601,15 @@ describe('C3: limits', () => {
         cli.eventSocketManager.attach(server);
         const port = (server.address() as AddressInfo).port;
         harnesses.push({ cli, server, port });
-        const x = open(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.1, 172.16.0.1' });
+        // the trusted proxy appends the real address; a client-chosen leftmost entry does not bypass the limit
+        const x = open(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '172.16.0.1, 10.0.0.1' });
         const y = open(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.2' });
         await Promise.all([x.ready, y.ready]);
         expect(await closeOf(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.1' })).toEqual({
+            code: 4429,
+            reason: 'too many shell sessions',
+        });
+        expect(await closeOf(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '6.6.6.6, 10.0.0.1' })).toEqual({
             code: 4429,
             reason: 'too many shell sessions',
         });

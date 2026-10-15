@@ -256,10 +256,11 @@ describe('B5: brute force and DoS', () => {
     it('per-IP limiter honours X-Forwarded-For only with trustProxy', async () => {
         const proxied = await createTestServer({ ipRateLimit: 2, trustProxy: true });
         try {
-            const send = (ip: string) => request(proxied.app).post(`${BASE}/sessions`).set('X-Forwarded-For', `${ip}, 10.0.0.1`).send({ username: 'nobody', password: 'x' });
-            expect((await send('1.1.1.1')).status).toBe(401);
-            expect((await send('1.1.1.1')).status).toBe(401);
-            expect((await send('1.1.1.1')).status).toBe(429);
+            // the proxy appends the real client IP; the leftmost entries are client-controlled
+            const send = (ip: string, spoofed = '6.6.6.6') => request(proxied.app).post(`${BASE}/sessions`).set('X-Forwarded-For', `${spoofed}, ${ip}`).send({ username: 'nobody', password: 'x' });
+            expect((await send('1.1.1.1', '7.7.7.1')).status).toBe(401);
+            expect((await send('1.1.1.1', '7.7.7.2')).status).toBe(401);
+            expect((await send('1.1.1.1', '7.7.7.3')).status).toBe(429);
             expect((await send('2.2.2.2')).status).toBe(401);
         } finally {
             proxied.plugin.dispose();

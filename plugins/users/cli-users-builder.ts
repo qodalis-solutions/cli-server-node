@@ -158,8 +158,11 @@ export class CliUsersBuilder {
         return this;
     }
 
-    /** Trust `X-Forwarded-For` for the client IP used by the per-IP limiter. */
-    setTrustProxy(trust: boolean): this {
+    /**
+     * Trusted reverse-proxy hops (`true` = 1, `false`/0 = none) for the client IP
+     * used by the per-IP limiter: the `X-Forwarded-For` entry at index `len - hops`.
+     */
+    setTrustProxy(trust: boolean | number): this {
         this.options.trustProxy = trust;
         return this;
     }

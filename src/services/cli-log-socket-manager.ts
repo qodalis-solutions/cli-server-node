@@ -64,9 +64,9 @@ export class CliLogSocketManager {
     private _nextClientId = 1;
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
-    private readonly _trustProxy: boolean;
+    private readonly _trustProxy: boolean | number;
 
-    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean } = {}) {
+    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean | number } = {}) {
         this._allowedOrigins = options.allowedOrigins;
         this._trustProxy = options.trustProxy ?? false;
     }

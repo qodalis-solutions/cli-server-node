@@ -8,6 +8,8 @@ export {
     isOriginAllowed,
     isSameOrigin,
     requestOrigin,
+    clientAddress,
+    trustedProxyHops,
 } from './cli-server-auth';
 export {
     createServerAuthGate,

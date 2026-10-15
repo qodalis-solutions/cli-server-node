@@ -51,6 +51,8 @@ export {
     isOriginAllowed,
     isSameOrigin,
     requestOrigin,
+    clientAddress,
+    trustedProxyHops,
     createServerAuthGate,
     ServerAuthGateOptions,
     requiredServerPermissions,
