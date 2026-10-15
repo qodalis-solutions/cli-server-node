@@ -40,6 +40,7 @@ jobs:
           cd ../filesystem-sqlite && npx tsc
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
+          cd ../users && npx tsc
           cd ../admin && npm install && npx tsc
 
       - name: Build
@@ -76,6 +77,7 @@ jobs:
           publish_pkg plugins/filesystem-s3
           publish_pkg plugins/weather
           publish_pkg plugins/jobs
+          publish_pkg plugins/users
           publish_pkg plugins/admin
           publish_pkg .
         env:

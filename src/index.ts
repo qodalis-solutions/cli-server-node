@@ -31,8 +31,34 @@ export {
     CliCommandExecutorService,
     CliEventSocketManager,
     CliShellSessionManager,
+    CliShellSessionInfo,
     CliLogSocketManager,
+    CliShellOptions,
+    CliShellEnvOptions,
+    CliShellAuthMode,
+    CliShellAuthorizeContext,
+    ShellCloseCodes,
 } from './services';
+
+// Server auth (implemented by the users plugin)
+export {
+    CliServerAuthContext,
+    CliServerAuthError,
+    CliServerAuditEntry,
+    CliServerSessionEvent,
+    ICliServerAuth,
+    CliServerPermissions,
+    isOriginAllowed,
+    isSameOrigin,
+    requestOrigin,
+    clientAddress,
+    trustedProxyHops,
+    createServerAuthGate,
+    ServerAuthGateOptions,
+    requiredServerPermissions,
+    authorizeWsUpgrade,
+    rejectUpgrade,
+} from './auth';
 
 // Controllers
 export { createCliController } from './controllers/cli-controller';

@@ -4,11 +4,27 @@ import * as path from 'path';
 
 const SERVER_VERSION = '2.0.0';
 
+/** Shell part of `/capabilities`: `shellAuth` only when the shell is enabled. */
+export interface ShellCapabilities {
+    shell: boolean;
+    shellAuth?: 'users' | 'token' | 'custom' | 'anonymous' | 'locked';
+}
+
+export interface CapabilitiesOptions {
+    /** Live shell state; when omitted `/capabilities` reports `shell: true` (legacy). */
+    shellCapabilities?: () => ShellCapabilities;
+}
+
+/** Resolves the shell fields of `/capabilities`. */
+export function resolveShellCapabilities(options?: CapabilitiesOptions): ShellCapabilities {
+    return options?.shellCapabilities ? options.shellCapabilities() : { shell: true };
+}
+
 /**
  * Creates an Express router for API version discovery and server capabilities.
  * @returns Router with `/versions` and `/capabilities` endpoints.
  */
-export function createCliVersionController(): Router {
+export function createCliVersionController(options?: CapabilitiesOptions): Router {
     const router = Router();
 
     router.get('/versions', (_req, res) => {
@@ -36,7 +52,7 @@ export function createCliVersionController(): Router {
             : '/bin/bash';
 
         res.json({
-            shell: true,
+            ...resolveShellCapabilities(options),
             os: detectedOs,
             shellPath,
             version: SERVER_VERSION,

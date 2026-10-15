@@ -46,10 +46,11 @@ export class AdminConfig {
         this._username = process.env.QCLI_ADMIN_USERNAME ?? 'admin';
         this._password = process.env.QCLI_ADMIN_PASSWORD ?? 'admin';
         this._jwtSecret = process.env.QCLI_ADMIN_JWT_SECRET;
+    }
 
-        if (this._username === 'admin' && this._password === 'admin') {
-            console.warn('[qcli-admin] WARNING: Using default admin credentials. Set QCLI_ADMIN_USERNAME and QCLI_ADMIN_PASSWORD environment variables.');
-        }
+    /** True while the well-known `admin` / `admin` credentials are in effect. */
+    usesDefaultCredentials(): boolean {
+        return this._username === 'admin' && this._password === 'admin';
     }
 
     /** Override the admin username and password. */

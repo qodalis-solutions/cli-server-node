@@ -12,6 +12,7 @@ COPY plugins/filesystem-sqlite/package.json plugins/filesystem-sqlite/
 COPY plugins/filesystem-s3/package.json plugins/filesystem-s3/
 COPY plugins/weather/package.json plugins/weather/
 COPY plugins/jobs/package.json plugins/jobs/
+COPY plugins/users/package.json plugins/users/
 COPY plugins/admin/package.json plugins/admin/
 COPY plugins/data-explorer/package.json plugins/data-explorer/
 COPY plugins/data-explorer-sql/package.json plugins/data-explorer-sql/
@@ -35,6 +36,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../filesystem-s3 && (npx tsc || true) \
     && cd ../weather && npx tsc \
     && cd ../jobs && npx tsc \
+    && cd ../users && npx tsc \
     && cd ../data-explorer && npx tsc \
     && cd ../data-explorer-sql && npx tsc \
     && cd ../data-explorer-mongo && npx tsc \
@@ -43,7 +45,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../data-explorer-mssql && npx tsc \
     && cd ../data-explorer-redis && npx tsc \
     && cd ../data-explorer-elasticsearch && npx tsc \
-    && cd ../aws && npx tsc \
+    && cd ../aws && npm install && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
 COPY src/ src/

@@ -2,6 +2,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import { URL } from 'url';
 import { createLogger } from '../utils/logger';
+import { CliServerAuthContext, CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
+import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
+import { SessionBoundSockets } from './session-bound-sockets';
 
 const logger = createLogger('LogSocket');
 
@@ -54,12 +57,33 @@ function normalizeLevel(level: string): string {
  * Manages WebSocket connections for streaming log messages to clients.
  *
  * Parity with CliLogSocketManager in the .NET and Python servers.
- * Handles `/ws/v1/qcli/logs` and `/ws/qcli/logs` upgrade paths.
+ * Handles `/ws/v1/qcli/logs` and `/ws/qcli/logs` upgrade paths. Sockets
+ * authenticated with a stored session are bound to it: once it ends they are
+ * closed with 4401 `session ended` (see {@link SessionBoundSockets}).
  */
 export class CliLogSocketManager {
     private _wss: WebSocketServer | null = null;
     private readonly _clients = new Map<string, LogClientEntry>();
     private _nextClientId = 1;
+    private _auth?: ICliServerAuth;
+    private _allowedOrigins?: string[];
+    private readonly _trustProxy: boolean | number;
+    private readonly _sessionBound = new SessionBoundSockets();
+
+    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean | number } = {}) {
+        this._allowedOrigins = options.allowedOrigins;
+        this._trustProxy = options.trustProxy ?? false;
+    }
+
+    /** Installs the auth provider; when it protects the server, upgrades need a ticket and `logs:read`. */
+    setAuth(auth: ICliServerAuth | undefined): void {
+        this._auth = auth;
+        this._sessionBound.setAuth(auth);
+    }
+
+    setAllowedOrigins(origins: string[] | undefined): void {
+        this._allowedOrigins = origins;
+    }
 
     private static readonly LOG_PATHS = new Set([
         '/ws/v1/qcli/logs',
@@ -105,15 +129,34 @@ export class CliLogSocketManager {
         this._wss = new WebSocketServer({ noServer: true });
 
         server.on('upgrade', (request, socket, head) => {
-            const parsed = new URL(request.url ?? '', 'http://localhost');
+            let parsed: URL;
+            try {
+                parsed = new URL(request.url ?? '', 'http://localhost');
+            } catch {
+                return; // malformed request target: not one of our paths
+            }
             const pathname = parsed.pathname;
 
             if (!CliLogSocketManager.LOG_PATHS.has(pathname)) return;
 
-            this._wss!.handleUpgrade(request, socket, head, (ws) => {
-                const levelFilter = parsed.searchParams.get('level') || null;
-                this._handleConnection(ws, request, levelFilter);
-            });
+            authorizeWsUpgrade(request, parsed, {
+                auth: this._auth,
+                allowedOrigins: this._allowedOrigins,
+                trustProxy: this._trustProxy,
+                permission: CliServerPermissions.LogsRead,
+            }).then(
+                (result) => {
+                    if (!result.ok) {
+                        rejectUpgrade(socket, result.status);
+                        return;
+                    }
+                    this._wss!.handleUpgrade(request, socket, head, (ws) => {
+                        const levelFilter = parsed.searchParams.get('level') || null;
+                        this._handleConnection(ws, request, levelFilter, result.ctx);
+                    });
+                },
+                () => rejectUpgrade(socket, 401),
+            );
         });
     }
 
@@ -164,6 +207,7 @@ export class CliLogSocketManager {
         }
 
         await Promise.all(promises);
+        this._sessionBound.dispose();
         this._clients.clear();
     }
 
@@ -188,6 +232,7 @@ export class CliLogSocketManager {
 
     /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
+        this._sessionBound.dispose();
         for (const entry of this._clients.values()) {
             entry.ws.terminate();
         }
@@ -195,7 +240,7 @@ export class CliLogSocketManager {
         this._wss?.close();
     }
 
-    private _handleConnection(ws: WebSocket, request: IncomingMessage, levelFilter: string | null): void {
+    private _handleConnection(ws: WebSocket, request: IncomingMessage, levelFilter: string | null, auth?: CliServerAuthContext): void {
         const id = `log-${this._nextClientId++}`;
         const entry: LogClientEntry = {
             id,
@@ -206,18 +251,17 @@ export class CliLogSocketManager {
         };
 
         this._clients.set(id, entry);
+        this._sessionBound.bind(ws, auth);
 
         ws.send(JSON.stringify({ type: 'connected' }));
         logger.info('Log client connected (id=%s, level=%s)', id, levelFilter ?? 'all');
 
-        ws.on('close', () => {
+        const disconnected = () => {
             logger.info('Log client disconnected (id=%s)', id);
+            this._sessionBound.unbind(ws);
             this._clients.delete(id);
-        });
-
-        ws.on('error', () => {
-            logger.info('Log client disconnected (id=%s)', id);
-            this._clients.delete(id);
-        });
+        };
+        ws.on('close', disconnected);
+        ws.on('error', disconnected);
     }
 }

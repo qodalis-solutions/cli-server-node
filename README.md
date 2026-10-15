@@ -314,6 +314,96 @@ The server exposes versioned endpoints:
 | WS | `/ws/qcli/events` | WebSocket events (also `/ws/v1/qcli/events`) |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell session |
 
+`GET /capabilities` reports `shell: true|false` and, when the shell is enabled, `shellAuth: 'users' | 'token' | 'custom' | 'anonymous' | 'locked'`.
+
+## Remote Shell Security
+
+The PTY shell (`/ws/v1/qcli/shell`, `/ws/qcli/shell`) gives OS-level access to the server. It is **off** unless `enableShell: true`. When enabled, exactly one access mode applies:
+
+| Mode (`shellAuth`) | When | Client must |
+|---|---|---|
+| `users` | the users plugin is mounted | connect with a WS ticket (`?ticket=`) of a session holding `shell:execute` |
+| `token` | no users plugin, `shell.token` set | send `Authorization: Bearer <token>` (header, or the `_header_Authorization` query parameter) |
+| `custom` | no users plugin, `shell.authorize` set | pass the host's `authorize(request, { url, remoteAddress, mode })` check |
+| `anonymous` | no users plugin, `shell.allowAnonymous: true` | nothing (a startup WARNING is logged) |
+| `locked` | none of the above | — every connection is closed with 4401 and a startup ERROR explains the options |
+
+Precedence: users plugin mounted (even with `protectServer: false`) ⇒ `users`; otherwise `token`, then `custom`, then `anonymous`. Whatever the mode, **every configured check among `token` and `authorize` must pass** (so with both set, both are required and `shellAuth` reports `token`); `allowAnonymous` is ignored once either is set. Tokens are compared in constant time (SHA-256 of both, then `timingSafeEqual`) and never logged; an `authorize` that throws or rejects denies.
+
+### With the users plugin
+
+```typescript
+const { mountPlugin, eventSocketManager } = createCliServer({ enableShell: true });
+mountPlugin(new CliUsersBuilder().build((m) => eventSocketManager.broadcastMessage(m)));
+// Grant shell:execute to a group (root/admin has '*'):
+//   PUT /api/v1/qcli/groups/ops  { "permissions": ["commands:execute", "shell:execute"] }
+```
+
+An open shell is bound to the session that opened it: logout, idle/absolute session expiry, admin revoke (kick), user disabled or deleted, or losing `shell:execute` (checked once more right after the shell is registered and before it is spawned, so a logout racing the open is not missed; then immediately on session/user/group changes and every `sessionCheckIntervalMs`, default 30 s, max 60 s), or a password change becoming required closes it with **4401** `session ended` and kills its process tree. Users authenticated by an external auth adapter have no stored session: their shells are re-checked by calling the adapter again with the shell's original upgrade request (see the users plugin README). Re-checks never extend the session by themselves; stdin received since the previous check counts as session activity (at most one touch per 30 s), so an active shell user is not idle-logged-out. Opens and closes are audited as `shell_opened` / `shell_closed` (`userId`, `actorId`, `metadata: { mode: 'interactive' | 'command', sessionId, durationMs, reason, exitCode? }`), never with the command text or stdin. `reason` is one of `exited` (then `exitCode` is set), `closed`, `session ended`, `permission removed`, `shell timed out`, `server shutdown`, `error`.
+
+### Without the users plugin (token mode)
+
+```typescript
+createCliServer({
+    enableShell: true,
+    shell: { token: process.env.QCLI_SHELL_TOKEN },   // long random secret
+});
+```
+
+Browser clients cannot set WebSocket headers: configure the server in web-cli with `headers: { Authorization: 'Bearer <token>' }` and the client forwards it as `?_header_Authorization=Bearer%20<token>`. The standalone server (`src/server.ts`) enables token mode when `QCLI_SHELL_TOKEN` is set. Use HTTPS/WSS so the token is not sent in clear text.
+
+For your own scheme (reverse-proxy identity, IP allow-list, …) use `authorize`:
+
+```typescript
+createCliServer({
+    enableShell: true,
+    shell: { authorize: async (req, { remoteAddress }) => remoteAddress === '127.0.0.1' && req.headers['x-ops'] === 'yes' },
+});
+```
+
+Non-users modes log one info line per open/close (remote address, mode, reason) without the command text.
+
+### Options
+
+```typescript
+shell: {
+    token?: string;                    // token mode (or extra requirement with the users plugin)
+    authorize?: (req, ctx) => boolean | Promise<boolean>;  // custom mode (or extra requirement)
+    allowAnonymous?: boolean;          // open to anyone who can reach the server (not recommended)
+    maxSessionsPerUser?: number;       // per user (users mode) or per remote address (default 3; X-Forwarded-For only with trustProxy)
+    maxSessions?: number;              // total concurrent shells (default 20)
+    idleTimeoutMs?: number;            // close after no stdin (resize does not count; default 15 min, 0 = off)
+    maxDurationMs?: number;            // absolute limit (default none)
+    sessionCheckIntervalMs?: number;   // users-mode re-check (default 30 000, max 60 000)
+    cwd?: string;                      // working directory (default: home directory)
+    shell?: string;                    // shell binary (default: detected)
+    env?: { allow?: string[]; set?: Record<string, string> };
+}
+```
+
+The shell does **not** inherit the server environment: it gets only `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `COLUMNS`, `LINES`, `SHELL` (plus the variables Windows needs to start PowerShell), the names in `env.allow`, and `env.set`. Secrets such as database passwords stay out of the shell.
+
+### Process cleanup
+
+Whenever a shell ends (exit, client close, session ended or permission removed, timeout, server shutdown), the server first collects everything the shell started — its process group, its descendants by parent PID (including background jobs that interactive shells move to their own process groups, and `setsid`/`nohup` children), on Linux every process of its session, and every process tagged with the shell's marker (below) — and then sends SIGHUP, SIGTERM and, after a 1 s grace period, SIGKILL to all of them (re-collecting before the SIGKILL). The server's own process and process group are never targeted. Linux reads `/proc` for everything (no `ps` needed); macOS and other Unixes run `ps`. On Windows only the shell process is killed.
+
+Every shell gets a unique marker in its environment, `QCLI_SHELL_ID=<random 128-bit hex>`, added after the `env.allow`/`env.set` filtering so configuration can neither override nor remove it. Children inherit it, so processes that were re-parented to init *and* left the shell's process group and session — e.g. `setsid sleep 100 &` from an interactive shell, double-forking daemons — are still found: on Linux by reading `/proc/<pid>/environ`, on macOS through `ps -A -E -ww` (which shows the environment of the server user's processes).
+
+Limitations: a process escapes only if it deliberately unsets or changes `QCLI_SHELL_ID` before detaching (`env -u QCLI_SHELL_ID setsid …`), or runs as a different user whose environment the server cannot read (e.g. via `sudo`). On macOS the environment of Apple platform binaries (`/bin/sleep`, `/usr/bin/perl`, …) is hidden from `ps -E`, so such a binary that left the shell's tree and session is not found there either. Run the server in a container or under a service manager (cgroup) if every process must be contained.
+
+### Close codes
+
+Refusals are sent as *accept, then close* so browsers can read them (a foreign `Origin` is still rejected with HTTP 403):
+
+| Code | Reason | When |
+|---|---|---|
+| 4401 | `login required` / `session ended` / `shell access is not configured` | missing ticket or (Bearer) token; session ended (logout, expiry, kick, user disabled/deleted, `shell:execute` removed, password change now required) — shell, events and logs sockets; shell locked |
+| 4403 | `forbidden` | wrong token, `authorize` false or threw, no `shell:execute`, password change required |
+| 4404 | `shell disabled` | `enableShell` is false |
+| 4408 | `shell timed out` | idle timeout or `maxDurationMs` |
+| 4429 | `too many shell sessions` | `maxSessionsPerUser` or `maxSessions` reached |
+| 1001 | `server shutdown` | the server is shutting down |
+
 ## Processor Base Class Reference
 
 `CliCommandProcessor` provides these members:
@@ -335,10 +425,23 @@ The server exposes versioned endpoints:
 ```typescript
 interface CliServerOptions {
     basePath?: string;                     // API base path (default: '/api/qcli')
-    cors?: boolean | cors.CorsOptions;     // CORS config (default: true)
+    cors?: boolean | cors.CorsOptions;     // CORS config (default: only allowedOrigins; off when none)
+    allowedOrigins?: string[];             // CORS + WebSocket Origin allow-list ('http://host:*' = any port)
+    enableShell?: boolean;                 // Interactive shell WebSocket (default: false)
+    shell?: CliShellOptions;               // Shell access mode, limits, timeouts, env (see Remote Shell Security)
+    trustProxy?: boolean | number;         // Trusted proxy hops for X-Forwarded-* (true = 1; default false = none)
+    auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
 ```
+
+CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`, and even then it is locked until an access mode applies (see [Remote Shell Security](#remote-shell-security)).
+
+Same-origin requests (e.g. the bundled admin dashboard at `/qcli/admin`) are always allowed by the Origin, CORS and CSRF checks, even when `allowedOrigins` does not list the server's own origin (`X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only with `trustProxy`, and read like `X-Forwarded-For`: the entry at index `len - hops`, the leftmost when the list is shorter, an empty entry ignored).
+
+`trustProxy` is the number of trusted reverse-proxy hops in front of the server (`true` = 1, `false`/`0`/absent = none). With n hops the client IP (Express `req.ip`, the shell's per-address limits) is the `X-Forwarded-For` entry at index `len - n` of the comma-separated list, i.e. with one hop the rightmost entry, appended by your proxy; the leftmost entries are client-controlled and never used unless the list is shorter than n. Without the header (or when the selected entry is empty) the socket address is used. Set it to the exact number of proxies you run, otherwise clients can spoof their IP.
+
+When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth`, every `/api/...` route and every WebSocket requires a users session (see [Users Plugin](#users-plugin)); without it the server behaves as before.
 
 `createCliServer()` returns:
 
@@ -350,7 +453,8 @@ interface CliServerOptions {
     executor: CliCommandExecutorService;   // Command executor
     eventSocketManager: CliEventSocketManager;  // WebSocket event manager
     logSocketManager: CliLogSocketManager;      // WebSocket log manager
-    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes
+    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes (installs plugin.serverAuth)
+    setAuth(auth?: ICliServerAuth): void;       // Install/remove the server auth provider
 }
 ```
 
@@ -623,6 +727,37 @@ All commands support `--region` (`-r`) for region override and `--output` (`-o`)
 
 See [`plugins/aws/README.md`](plugins/aws/README.md) for the full command reference.
 
+### Users Plugin
+
+The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under `/api/v1/qcli` for authentication, users, groups with permissions, sessions and an audit log, with swappable storage (in-memory by default). It is the server side of the `@qodalis/cli-users` browser plugin's *server mode*.
+
+```typescript
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
+
+const usersPlugin = new CliUsersBuilder()
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+mountPlugin(usersPlugin); // protects the whole server (protectServer: true)
+```
+
+Once mounted, every server route and socket requires a users session (login, version discovery and capabilities stay public):
+
+| Surface | Permission |
+|---|---|
+| `GET /commands` | authenticated |
+| `POST /execute`, `/execute/stream` | `commands:execute` + the processor's `requiredPermissions` |
+| fs `ls`/`cat`/`stat`/`download` | `files:read` |
+| fs `upload`/`mkdir`/`rm` | `files:write` |
+| data explorer | `data:query` |
+| jobs read / manage | `jobs:read` / `jobs:manage` |
+| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (see [Remote Shell Security](#remote-shell-security)) |
+| admin dashboard | `admin:access` |
+
+WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws-ticket` → `{ ticket, expiresIn: 30 }`, then connect with `?ticket=<ticket>`. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('perm')`. Processors declare `requiredPermissions: ['deploy:run']` to be enforced server-side.
+
+Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with **4401** `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets authenticated by an external auth adapter have no stored session and are not re-checked.
+
+See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, custom storage and external auth adapters.
+
 ## Built-in Processors
 
 These processors ship with the library and are included in the standalone server:
@@ -685,6 +820,7 @@ plugins/
   filesystem-sqlite/                  # SQLite persistence provider (better-sqlite3)
   filesystem-s3/                      # Amazon S3 storage provider (@aws-sdk/client-s3)
   jobs/                               # Job scheduling plugin
+  users/                              # Users plugin (auth, sessions, groups, audit)
   weather/                            # Weather module (example plugin)
 src/
   abstractions/                       # Re-exports from @qodalis/cli-server-abstractions

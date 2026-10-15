@@ -4,6 +4,7 @@ import { CliStructuredOutput, ICliCommandProcessor, isStreamCapable } from '../a
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
 import { createLogger } from '../utils/logger';
+import { CapabilitiesOptions, resolveShellCapabilities } from './cli-version-controller';
 
 const logger = createLogger('CliController');
 const SERVER_VERSION = '1.0.0';
@@ -17,6 +18,7 @@ const SERVER_VERSION = '1.0.0';
 export function createCliController(
     registry: ICliCommandRegistry,
     executor: ICliCommandExecutorService,
+    options?: CapabilitiesOptions,
 ): Router {
     const router = Router();
 
@@ -37,7 +39,7 @@ export function createCliController(
             : '/bin/bash';
 
         res.json({
-            shell: true,
+            ...resolveShellCapabilities(options),
             os: detectedOs,
             shellPath,
             version: SERVER_VERSION,
@@ -52,6 +54,10 @@ export function createCliController(
 
     router.post('/execute', async (req, res) => {
         const command = req.body;
+        if (typeof command?.command !== 'string') {
+            res.status(400).json({ error: 'command is required' });
+            return;
+        }
         logger.debug('Executing command: %s', command.command);
 
         const abortController = new AbortController();
