@@ -64,6 +64,8 @@ export type UsersSessionEvent =
 
 /** Audit events that can change someone's effective permissions or account state. */
 const ACCESS_CHANGING_EVENT = /^(user_|group_|password_)/;
+/** Group-wide changes: they affect every member, not the acting user the entry is logged for. */
+const GROUP_WIDE_EVENT = /^group_(created|updated|deleted)$/;
 
 interface LockoutState {
     /** Failed + in-flight attempts (reserved before verification). */
@@ -159,7 +161,7 @@ export class AuthService {
         }
         await this.auditStore.log(clean);
         if (ACCESS_CHANGING_EVENT.test(clean.event)) {
-            this.emitSessionEvent({ type: 'access-changed', userId: clean.userId });
+            this.emitSessionEvent({ type: 'access-changed', userId: GROUP_WIDE_EVENT.test(clean.event) ? undefined : clean.userId });
         }
     }
 

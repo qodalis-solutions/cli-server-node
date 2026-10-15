@@ -105,3 +105,37 @@ describe('POST /execute with a malformed command', () => {
         expect(res.body).toHaveProperty('error');
     });
 });
+
+describe('group permission changes re-check open shells immediately', () => {
+    const setup = async () => {
+        const h = await start({ users: true, shell: { sessionCheckIntervalMs: 60_000 } });
+        const app = h.cli.app;
+        const root = await login(app, 'root', ROOT_PASS);
+        await request(app).post(`${V1}/groups`).set(bearer(root)).send({ name: 'shellers', permissions: ['shell:execute'] }).expect(201);
+        await request(app)
+            .post(`${V1}/users`)
+            .set(bearer(root))
+            .send({ name: 'ops', email: 'ops@x.io', password: 'opspass1', groups: ['shellers'] })
+            .expect(201);
+        const ops = await login(app, 'ops', 'opspass1');
+        const t = await request(app).post(`${V1}/sessions/ws-ticket`).set(bearer(ops)).expect(201);
+        const c = openShell(h.port, `/ws/v1/qcli/shell?ticket=${t.body.ticket}`);
+        await c.ready;
+        return { app, root, c };
+    };
+
+    const closedWithin = (c: { closed: Promise<{ code: number; reason: string }> }, ms: number) =>
+        Promise.race([c.closed, sleep(ms).then(() => 'still open' as const)]);
+
+    it('removing shell:execute from a group closes its members\' shells', async () => {
+        const { app, root, c } = await setup();
+        await request(app).put(`${V1}/groups/shellers`).set(bearer(root)).send({ permissions: ['commands:execute'] }).expect(200);
+        expect(await closedWithin(c, 2000)).toEqual({ code: 4401, reason: 'session ended' });
+    });
+
+    it('deleting a group closes its members\' shells', async () => {
+        const { app, root, c } = await setup();
+        await request(app).delete(`${V1}/groups/shellers`).set(bearer(root)).expect(204);
+        expect(await closedWithin(c, 2000)).toEqual({ code: 4401, reason: 'session ended' });
+    });
+});
