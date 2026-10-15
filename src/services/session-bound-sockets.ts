@@ -55,9 +55,9 @@ export class SessionBoundSockets {
         }
     }
 
-    /** Tracks `ws` when `ctx` comes from a stored session. */
+    /** Tracks `ws` when `ctx` comes from a stored session or an API token. */
     bind(ws: WebSocket, ctx: CliServerAuthContext | undefined): void {
-        if (ctx?.sessionId) this._bound.set(ws, { ctx });
+        if (ctx?.sessionId || ctx?.tokenId) this._bound.set(ws, { ctx });
     }
 
     unbind(ws: WebSocket): void {

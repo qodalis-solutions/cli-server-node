@@ -311,10 +311,106 @@ The server exposes versioned endpoints:
 | GET | `/api/v1/qcli/commands` | V1 commands (all processors) |
 | POST | `/api/v1/qcli/execute` | V1 execute |
 | POST | `/api/v1/qcli/execute/stream` | V1 SSE streaming execute |
+| POST | `/api/qcli/mcp` | MCP endpoint (when the `mcp` option is on, see [MCP Endpoint](#mcp-endpoint)) |
 | WS | `/ws/qcli/events` | WebSocket events (also `/ws/v1/qcli/events`) |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell session |
 
 `GET /capabilities` reports `shell: true|false` and, when the shell is enabled, `shellAuth: 'users' | 'token' | 'custom' | 'anonymous' | 'locked'`.
+
+## MCP Endpoint
+
+The server can expose **the whole system** to AI clients (Claude Code, Claude Desktop, Cursor, …) over the [Model Context Protocol](https://modelcontextprotocol.io): CLI commands, the filesystem API, the data explorer, jobs and tools contributed by plugins, each with the same permissions as a CLI user. It works with or without the users plugin.
+
+### Enabling
+
+MCP is off by default. Enable it with the `mcp` option:
+
+```typescript
+const { app, mcp } = createCliServer({
+    mcp: true,                         // or an options object:
+    // mcp: {
+    //     tools: ['weather_*', 'echo'],  // allow-list (trailing * = prefix); default: every tool
+    //     exclude: ['fs_delete'],        // deny-list, applied after `tools`
+    //     token: process.env.MCP_TOKEN,  // only WITHOUT an auth provider: required bearer token
+    //     instructions: 'Each tool runs one command of this server.', // returned by initialize
+    //     enabled: true,                 // default true when the object is given
+    // },
+    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
+});
+```
+
+### Route and transport
+
+- `POST /api/qcli/mcp` (`{basePath}/mcp`): MCP *Streamable HTTP*, **stateless** (no `Mcp-Session-Id`) and **JSON responses only** (no SSE). `GET`/`DELETE` → `405` with `Allow: POST`.
+- JSON-RPC 2.0: notifications → `202` with an empty body; malformed JSON → `-32700`, invalid request (including batches) → `-32600`, unknown method → `-32601`, bad params → `-32602` (JSON-RPC errors use HTTP 200).
+- Methods: `initialize` (protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26`; the client's version is echoed when supported, otherwise the newest), `ping`, `tools/list`, `tools/call`.
+- An `Origin` header, when present, must be in `allowedOrigins` or same-origin, otherwise `403` (DNS-rebinding protection; checked before authentication).
+
+### Authentication
+
+| Server | Access |
+|---|---|
+| users plugin mounted (`protectServer`) | a session or an [API token](plugins/users/README.md#api-tokens) (`Authorization: Bearer qcli_pat_…`) holding `commands:execute`; `401`/`403` as plain `{ "error": … }` responses. `tools/list` and `tools/call` only show the tools whose permissions the caller holds. `mcp.token` is ignored. |
+| no auth provider, `mcp.token` set | `Authorization: Bearer <token>` (constant-time compare), else `401` |
+| no auth provider, no token | open, like `/execute` |
+
+### Tools
+
+Tools are collected from **tool providers** on every request, so new registrations, enabled features and the caller's permissions are always current. The `tools`/`exclude` lists apply to every tool.
+
+| Provider | Tools | Permissions | Annotations |
+|---|---|---|---|
+| server | `server_info` (version, capabilities, enabled features, command names) | — | read-only |
+| commands | one tool per command (below) | `commands:execute` + `requiredPermissions` along the chain | — |
+| filesystem (when a file storage provider is configured) | `fs_list {path}`, `fs_stat {path}`, `fs_read {path, maxBytes?=262144}` | `files:read` | read-only |
+| | `fs_write {path, content}`, `fs_mkdir {path}` | `files:write` | — |
+| | `fs_delete {path, recursive?=false}` | `files:write` | destructive |
+| data explorer (when sources are registered) | `data_sources`, `data_schema {source}` | `data:query` | read-only |
+| | `data_query {source, query, parameters?}` | `data:query` | — |
+| jobs (when the jobs plugin is mounted) | `jobs_list`, `jobs_get {id}`, `jobs_history {id, limit?=20}` | `jobs:read` | read-only |
+| | `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` `{id}` | `jobs:manage` | `jobs_stop`/`jobs_cancel` destructive |
+
+Feature tools use the same services as the HTTP routes (the storage provider and its path checks, the data explorer executor with its timeouts and row limits, the job scheduler); their errors become `isError: true` results. `fs_read` returns UTF-8 text (binary files → `isError` `binary file, N bytes`).
+
+**Command tools**: every root command and sub-command that has no sub-commands, declares parameters or takes a value (`valueRequired`) becomes a tool named after its path joined with `_` (`weather`, `weather_current`), lower-cased, other characters than `[a-z0-9_-]` replaced by `-`, at most 64 characters. The input schema has one property per parameter (`string`, `number`, `boolean`, `array` of strings; anything else is a string) plus `value` (the positional input) when the command takes one. A call builds the same command the CLI would send and runs it through the **same executor as `/execute`**; the outputs are rendered as text (tables as `a | b` rows, lists one item per line, JSON pretty-printed, key-value as `key: value`), `isError` is `exitCode != 0`, and a single JSON-object output is also returned as `structuredContent`. Unknown tools and invalid arguments (wrong type, unknown or missing property) are JSON-RPC `-32602` errors.
+
+Name collisions: built-in feature tools win over command tools, command tools over plugin tools, and between plugins the first registered wins (a warning is logged). The interactive shell is never a tool.
+
+### Adding tools (providers)
+
+```typescript
+import { McpToolProvider, mcpObjectSchema } from '@qodalis/cli-server-node';
+
+const provider: McpToolProvider = {
+    name: 'inventory',
+    getTools: () => [
+        {
+            name: 'inventory_count',
+            description: 'Count the items of a warehouse',
+            inputSchema: mcpObjectSchema({ warehouse: { type: 'string' } }, ['warehouse']),
+            requiredPermissions: ['inventory:read'], // checked for list and call (with an auth provider)
+            annotations: { readOnlyHint: true },
+            call: async (args, { auth, signal }) => ({ text: `42 items in ${args.warehouse}`, isError: false }),
+        },
+    ],
+};
+
+const server = createCliServer({ mcp: true });
+server.mcp.addProvider(provider);            // or builder.addMcpToolProvider(provider) in `configure`
+// plugins can also return `mcpProviders: [provider]` from their build result (picked up by mountPlugin)
+```
+
+Arguments are validated against `inputSchema` before `call` runs. Return `structured` to also send `structuredContent`.
+
+### Using the MCP endpoint from an MCP client
+
+With the users plugin, sign in, create an API token (`POST /api/v1/qcli/tokens`, or `token create <name>` in the web CLI) and register the server:
+
+```bash
+claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
+```
+
+Without the users plugin use the `mcp.token` value as `<token>` (or omit the header on an open server).
 
 ## Remote Shell Security
 
@@ -431,6 +527,7 @@ interface CliServerOptions {
     shell?: CliShellOptions;               // Shell access mode, limits, timeouts, env (see Remote Shell Security)
     trustProxy?: boolean | number;         // Trusted proxy hops for X-Forwarded-* (true = 1; default false = none)
     auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
+    mcp?: boolean | CliMcpOptions;         // MCP endpoint at {basePath}/mcp (default off, see MCP Endpoint)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
 ```
@@ -455,6 +552,7 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth
     logSocketManager: CliLogSocketManager;      // WebSocket log manager
     mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes (installs plugin.serverAuth)
     setAuth(auth?: ICliServerAuth): void;       // Install/remove the server auth provider
+    mcp: CliServerMcp;                          // MCP endpoint: { enabled, path, addProvider(provider) }
 }
 ```
 
@@ -745,6 +843,7 @@ Once mounted, every server route and socket requires a users session (login, ver
 |---|---|
 | `GET /commands` | authenticated |
 | `POST /execute`, `/execute/stream` | `commands:execute` + the processor's `requiredPermissions` |
+| `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own permissions) |
 | fs `ls`/`cat`/`stat`/`download` | `files:read` |
 | fs `upload`/`mkdir`/`rm` | `files:write` |
 | data explorer | `data:query` |
@@ -756,7 +855,9 @@ WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws
 
 Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with **4401** `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets authenticated by an external auth adapter have no stored session and are not re-checked.
 
-See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, custom storage and external auth adapters.
+API tokens (`qcli_pat_…`) are long-lived, revocable bearer tokens for MCP clients, CI and scripts; they are accepted wherever a session token is (see [API tokens](plugins/users/README.md#api-tokens)). Sockets opened with a token identity close with 4401 when the token is revoked or expires, or the user is disabled.
+
+See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, API tokens, custom storage and external auth adapters.
 
 ## Built-in Processors
 

@@ -41,6 +41,8 @@ export interface ServerAuthGateOptions {
     cliPrefixes: string[];
     /** Extra public routes as `"METHOD /path"` (e.g. a plugin's own login). */
     publicRoutes: Set<string>;
+    /** MCP endpoint paths (normalized), requiring `commands:execute`. */
+    mcpPaths?: string[];
 }
 
 /** Collects `requiredPermissions` along the resolved processor chain. */
@@ -74,6 +76,9 @@ export function requiredServerPermissions(method: string, path: string, body: an
         if (path === `${prefix}/execute` || path === `${prefix}/execute/stream`) {
             return [P.CommandsExecute, ...processorPermissions(options.registry, body?.command, body?.chainCommands)];
         }
+    }
+    if (options.mcpPaths?.includes(path)) {
+        return [P.CommandsExecute];
     }
     if (path === '/api/qcli/fs' || path.startsWith('/api/qcli/fs/')) {
         const op = path.slice('/api/qcli/fs/'.length);
