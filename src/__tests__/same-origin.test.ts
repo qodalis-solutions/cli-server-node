@@ -62,6 +62,23 @@ describe.each([
         // wss forwarded proto maps to https
         expect(fn('https://cli.example.com', fakeReq({ host: 'cli.example.com', 'x-forwarded-proto': 'wss' }), true)).toBe(true);
     });
+
+    it('takes X-Forwarded-Proto / X-Forwarded-Host from the trusted hop, like X-Forwarded-For', () => {
+        // one hop: the rightmost entry (appended by the proxy); leftmost entries are client-controlled
+        const spoofed = { host: 'internal:8047', 'x-forwarded-proto': 'http, https', 'x-forwarded-host': 'evil.example, cli.example.com' };
+        expect(fn('https://cli.example.com', fakeReq(spoofed), true)).toBe(true);
+        expect(fn('http://evil.example', fakeReq(spoofed), true)).toBe(false);
+        // n hops: entry at count - n
+        const chain = { host: 'internal:8047', 'x-forwarded-proto': 'http, https, http', 'x-forwarded-host': 'a.example, cli.example.com, lb.internal' };
+        expect(fn('https://cli.example.com', fakeReq(chain), 2)).toBe(true);
+        // fewer entries than hops: the leftmost
+        expect(fn('https://cli.example.com', fakeReq({ host: 'internal:8047', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'cli.example.com' }), 3)).toBe(true);
+        // an empty selected entry is ignored (socket scheme / Host header)
+        expect(fn('http://internal:8047', fakeReq({ host: 'internal:8047', 'x-forwarded-proto': 'https, ', 'x-forwarded-host': 'cli.example.com, ' }), true)).toBe(true);
+        // Express `trust proxy` hop count when trustProxy is omitted
+        const app2 = { get: (name: string) => (name === 'trust proxy fn' ? () => true : name === 'trust proxy' ? 2 : undefined) };
+        expect(fn('https://cli.example.com', { ...fakeReq(chain), app: app2 })).toBe(true);
+    });
 });
 
 it('requestOrigin builds scheme://host:port', () => {

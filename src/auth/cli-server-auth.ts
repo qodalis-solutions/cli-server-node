@@ -125,13 +125,13 @@ export function trustedProxyHops(trustProxy: boolean | number | undefined): numb
 }
 
 /**
- * The `X-Forwarded-For` entry identifying the client behind `hops` trusted
- * proxies: index `len - hops` (with one hop, the rightmost entry, appended by
- * the trusted proxy; leftmost entries are client-controlled). The leftmost
- * entry when the list is shorter than `hops`; undefined when the header is
- * absent or the selected entry is empty.
+ * The `X-Forwarded-*` entry behind `hops` trusted proxies (for
+ * `X-Forwarded-For`: the client): index `len - hops` (with one hop, the
+ * rightmost entry, appended by the trusted proxy; leftmost entries are
+ * client-controlled). The leftmost entry when the list is shorter than `hops`;
+ * undefined when the header is absent or the selected entry is empty.
  */
-function forwardedClient(header: string | string[] | undefined, hops: number): string | undefined {
+function forwardedEntry(header: string | string[] | undefined, hops: number): string | undefined {
     if (hops <= 0 || header === undefined) return undefined;
     const entries = (Array.isArray(header) ? header.join(',') : header).split(',').map((e) => e.trim());
     return entries[Math.max(0, entries.length - hops)] || undefined;
@@ -145,7 +145,7 @@ export function clientAddress(
     req: { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } | null },
     trustProxy: boolean | number | undefined,
 ): string {
-    return forwardedClient(req.headers['x-forwarded-for'], trustedProxyHops(trustProxy)) ?? req.socket?.remoteAddress ?? 'unknown';
+    return forwardedEntry(req.headers['x-forwarded-for'], trustedProxyHops(trustProxy)) ?? req.socket?.remoteAddress ?? 'unknown';
 }
 
 /** Minimal request shape for {@link isSameOrigin} (Node `IncomingMessage` or Express `Request`). */
@@ -179,22 +179,31 @@ function normalizeOrigin(scheme: string, hostPort: string): string | undefined {
     }
 }
 
-function proxyTrusted(req: OriginCheckRequest, trustProxy: boolean | number | undefined): boolean {
-    if (trustProxy !== undefined) return trustedProxyHops(trustProxy) > 0;
+/**
+ * Trusted proxy hops for the forwarded headers: from `trustProxy`, or — when it
+ * is omitted and the Express app's `trust proxy` setting trusts the socket — that
+ * setting's hop count (a number), otherwise 1.
+ */
+function proxyHops(req: OriginCheckRequest, trustProxy: boolean | number | undefined): number {
+    if (trustProxy !== undefined) return trustedProxyHops(trustProxy);
     const fn = req.app?.get?.('trust proxy fn');
-    return typeof fn === 'function' ? Boolean((fn as (addr: string | undefined, i: number) => unknown)(req.socket?.remoteAddress, 0)) : false;
+    if (typeof fn !== 'function' || !(fn as (addr: string | undefined, i: number) => unknown)(req.socket?.remoteAddress, 0)) return 0;
+    const setting = req.app?.get?.('trust proxy');
+    return typeof setting === 'number' ? trustedProxyHops(setting) || 1 : 1;
 }
 
 /**
  * The request's own origin (`scheme://host:port`, normalized): the scheme from
  * the socket (TLS or not) and the `Host` header. Behind a trusted proxy
  * (`trustProxy`, or the Express app's `trust proxy` setting when omitted)
- * `X-Forwarded-Proto` / `X-Forwarded-Host` win.
+ * `X-Forwarded-Proto` / `X-Forwarded-Host` win, read like `X-Forwarded-For`:
+ * the entry at index `len - hops` (the rightmost with one hop; the leftmost
+ * when the list is shorter; an empty entry is ignored).
  */
 export function requestOrigin(req: OriginCheckRequest, trustProxy?: boolean | number): string | undefined {
-    const trusted = proxyTrusted(req, trustProxy);
-    const scheme = (trusted && firstHeader(req.headers['x-forwarded-proto'])) || (req.socket?.encrypted ? 'https' : 'http');
-    const host = (trusted && firstHeader(req.headers['x-forwarded-host'])) || firstHeader(req.headers['host']);
+    const hops = proxyHops(req, trustProxy);
+    const scheme = forwardedEntry(req.headers['x-forwarded-proto'], hops) || (req.socket?.encrypted ? 'https' : 'http');
+    const host = forwardedEntry(req.headers['x-forwarded-host'], hops) || firstHeader(req.headers['host']);
     return host ? normalizeOrigin(scheme, host) : undefined;
 }
 

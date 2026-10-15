@@ -435,7 +435,7 @@ interface CliServerOptions {
 
 CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`, and even then it is locked until an access mode applies (see [Remote Shell Security](#remote-shell-security)).
 
-Same-origin requests (e.g. the bundled admin dashboard at `/qcli/admin`) are always allowed by the Origin, CORS and CSRF checks, even when `allowedOrigins` does not list the server's own origin (`X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only with `trustProxy`).
+Same-origin requests (e.g. the bundled admin dashboard at `/qcli/admin`) are always allowed by the Origin, CORS and CSRF checks, even when `allowedOrigins` does not list the server's own origin (`X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only with `trustProxy`, and read like `X-Forwarded-For`: the entry at index `len - hops`, the leftmost when the list is shorter, an empty entry ignored).
 
 `trustProxy` is the number of trusted reverse-proxy hops in front of the server (`true` = 1, `false`/`0`/absent = none). With n hops the client IP (Express `req.ip`, the shell's per-address limits) is the `X-Forwarded-For` entry at index `len - n` of the comma-separated list, i.e. with one hop the rightmost entry, appended by your proxy; the leftmost entries are client-controlled and never used unless the list is shorter than n. Without the header (or when the selected entry is empty) the socket address is used. Set it to the exact number of proxies you run, otherwise clients can spoof their IP.
 
