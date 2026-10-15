@@ -2,7 +2,7 @@ import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthService, AuthContext, UsersSessionEvent } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
-import { HttpError, forbidden, unauthorized } from './errors';
+import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
 import { SessionMetadata } from './models';
 import { hashToken } from './security';
@@ -163,12 +163,16 @@ export class UsersServerAuth {
 
     // ------------------------------------------------------ host app guards
 
-    /** Express middleware for host-app routes: requires a users session (sets `req.qcliAuth`). */
+    /**
+     * Express middleware for host-app routes: requires a users session (sets `req.qcliAuth`).
+     * Auth errors keep their status (401/403); unexpected errors are logged and answered
+     * with 500 `{ error: 'internal server error' }`.
+     */
     requireAuth(): RequestHandler {
         return this.guard([]);
     }
 
-    /** Express middleware for host-app routes: requires all the given permissions. */
+    /** Express middleware for host-app routes: requires all the given permissions (403 otherwise; errors as {@link requireAuth}). */
     requirePermission(...permissions: string[]): RequestHandler {
         return this.guard(permissions);
     }
@@ -185,9 +189,15 @@ export class UsersServerAuth {
                     req.qcliAuth = ctx;
                     next();
                 },
-                (err) => {
-                    const status = err instanceof HttpError ? err.status : 401;
-                    res.status(status).json({ error: err instanceof HttpError ? err.message : unauthorized().message });
+                (err: { status?: number; message?: string }) => {
+                    if (typeof err?.status !== 'number') {
+                        // not an auth error (e.g. a store or adapter failure): log it, never expose its message
+                        console.error('[users] authentication failed unexpectedly:', err);
+                        res.status(500).json({ error: 'internal server error' });
+                        return;
+                    }
+                    const fallback = err.status === 401 ? unauthorized().message : forbidden().message;
+                    res.status(err.status).json({ error: err.message || fallback });
                 },
             );
         };

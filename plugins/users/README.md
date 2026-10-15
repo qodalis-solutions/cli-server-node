@@ -70,7 +70,7 @@ The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the 
 | events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (an open shell is closed with 4401 when its session ends or loses `shell:execute`) |
 | admin dashboard (`setAuthProvider`) | `admin:access` |
 
-WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticket, expiresIn: 30 }`, then `?ticket=<ticket>` on the upgrade URL (bound to the session, 30 s, consumed on first use). Bearer tokens are not accepted in WS query strings. `session-kicked` is sent only to sockets of the affected user. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('deploy:run')`.
+WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticket, expiresIn: 30 }`, then `?ticket=<ticket>` on the upgrade URL (bound to the session, 30 s, consumed on first use). Bearer tokens are not accepted in WS query strings. `session-kicked` is sent only to sockets of the affected user. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('deploy:run')`: 401/403 for auth failures (errors with a numeric `status` keep it and their message), while unexpected errors (e.g. a failing store or adapter) are logged and answered with 500 `{ "error": "internal server error" }`.
 
 While a user has `mustChangePassword`, only `GET/DELETE /sessions/current` and `PUT /users/{self}/password` work; everything else answers `403 { "error": "password change required" }`.
 

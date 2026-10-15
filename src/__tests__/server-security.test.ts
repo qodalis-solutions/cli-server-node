@@ -309,6 +309,44 @@ describe('B1: server auth gate errors', () => {
         expect(res2.status).toBe(403);
         expect(res2.body).toEqual({ error: 'password change required' });
     });
+
+    describe("the users plugin's requireAuth / requirePermission guards", () => {
+        const guarded = (error: unknown) => {
+            const users = new CliUsersBuilder()
+                .setAuthAdapter(() => {
+                    throw error;
+                })
+                .build();
+            const host = express();
+            host.get('/mine', users.serverAuth.requireAuth(), (_req, res) => res.json({ ok: true }));
+            host.get('/deploy', users.serverAuth.requirePermission('deploy:run'), (_req, res) => res.json({ ok: true }));
+            return { host, users };
+        };
+
+        it('answer unexpected errors with a generic 500 and log them', async () => {
+            const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const { host, users } = guarded(new Error('SQLITE_CANTOPEN: /var/secret/users.db'));
+            try {
+                for (const path of ['/mine', '/deploy']) {
+                    const res = await request(host).get(path);
+                    expect(res.status).toBe(500);
+                    expect(res.body).toEqual({ error: 'internal server error' });
+                }
+                expect(spy.mock.calls.some((args) => args.some((a) => String(a instanceof Error ? a.message : a).includes('SQLITE_CANTOPEN')))).toBe(true);
+            } finally {
+                spy.mockRestore();
+                users.dispose();
+            }
+        });
+
+        it('keep the status and message of errors carrying a numeric status', async () => {
+            const { host, users } = guarded(Object.assign(new Error('host session expired'), { status: 401 }));
+            const res = await request(host).get('/mine');
+            expect(res.status).toBe(401);
+            expect(res.body).toEqual({ error: 'host session expired' });
+            users.dispose();
+        });
+    });
 });
 
 // ---------------------------------------------------------------------------
