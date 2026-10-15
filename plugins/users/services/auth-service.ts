@@ -448,7 +448,11 @@ export class AuthService {
         return { ticket, expiresIn: WS_TICKET_TTL_SECONDS };
     }
 
-    /** Consumes a ticket (single use). Returns the live context, or undefined when invalid/expired. */
+    /**
+     * Consumes a ticket (single use). Returns the live context, or undefined when
+     * invalid/expired. Throws 403 `password change required` when the user must
+     * change their password first.
+     */
     async consumeTicket(ticket: string): Promise<AuthContext | undefined> {
         if (typeof ticket !== 'string' || ticket.length === 0) return undefined;
         const key = hashToken(ticket);
@@ -461,13 +465,16 @@ export class AuthService {
         }
         const session = await this.sessionStore.getSessionById(entry.sessionId);
         if (!session || session.userId !== entry.userId) return undefined;
+        let validated: { user: User; permissions: string[] };
         try {
-            const { user, permissions } = await this.validateSession(session);
-            if (user.mustChangePassword) return undefined;
-            return { user, permissions, session, tokenHash: session.tokenHash };
+            validated = await this.validateSession(session);
         } catch {
             return undefined;
         }
+        if (validated.user.mustChangePassword) {
+            throw new HttpError(403, 'password change required');
+        }
+        return { ...validated, session, tokenHash: session.tokenHash };
     }
 
     /**

@@ -78,6 +78,8 @@ interface ShellSession {
     ctx?: CliServerAuthContext;
     startedAt: number;
     lastInput: number;
+    /** Time of the last session re-check (stdin after it counts as session activity). */
+    lastCheck: number;
     lastTouch: number;
     pty?: import('node-pty').IPty;
     idleTimer?: NodeJS.Timeout;
@@ -91,9 +93,6 @@ interface AccessDecision {
     reason?: string;
     ctx?: CliServerAuthContext;
 }
-
-/** Minimum gap between session `touch` calls caused by stdin (ms). */
-const TOUCH_THROTTLE_MS = 30_000;
 
 /**
  * Manages interactive PTY shell sessions over WebSocket connections and
@@ -109,9 +108,17 @@ export class CliShellSessionManager {
     private _nextId = 1;
     private _checkTimer?: NodeJS.Timeout;
 
-    constructor(options: { enabled?: boolean; shell?: CliShellOptions } = {}) {
+    private _trustProxy: boolean;
+
+    constructor(options: { enabled?: boolean; shell?: CliShellOptions; trustProxy?: boolean } = {}) {
         this._enabled = options.enabled ?? false;
         this._options = options.shell ?? {};
+        this._trustProxy = options.trustProxy ?? false;
+    }
+
+    /** Use the first `X-Forwarded-For` entry as the remote address (behind a trusted proxy). */
+    setTrustProxy(trust: boolean): void {
+        this._trustProxy = trust;
     }
 
     get enabled(): boolean {
@@ -189,14 +196,14 @@ export class CliShellSessionManager {
         const rows = clampDim(url.searchParams.get('rows'), 24);
         const command = url.searchParams.get('cmd') || undefined;
         const mode: 'interactive' | 'command' = command ? 'command' : 'interactive';
-        const remoteAddress = request.socket.remoteAddress ?? 'unknown';
+        const remoteAddress = this.remoteAddressOf(request);
         const authMode = resolveShellAuthMode(this._options, !!this._auth);
 
         let decision: AccessDecision;
         try {
             decision = await this.authorize(authMode, request, url, remoteAddress, mode);
         } catch {
-            decision = { ok: false, code: ShellCloseCodes.Forbidden, reason: 'permission denied' };
+            decision = { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
         }
         if (!decision.ok) {
             closeWs(ws, decision.code!, decision.reason!);
@@ -225,7 +232,8 @@ export class CliShellSessionManager {
             ctx: decision.ctx,
             startedAt: now,
             lastInput: now,
-            lastTouch: now,
+            lastCheck: now,
+            lastTouch: 0,
             closed: false,
         };
         this._sessions.add(session);
@@ -243,34 +251,40 @@ export class CliShellSessionManager {
     ): Promise<AccessDecision> {
         const o = this._options;
         if (authMode === 'locked') {
-            return { ok: false, code: ShellCloseCodes.LoginRequired, reason: 'shell access not configured' };
+            return { ok: false, code: ShellCloseCodes.LoginRequired, reason: 'shell access is not configured' };
         }
 
         let ctx: CliServerAuthContext | undefined;
         if (authMode === 'users') {
             const ticket = url.searchParams.get('ticket');
-            ctx = ticket ? await this._auth!.consumeTicket(ticket).catch(() => undefined) : undefined;
+            try {
+                ctx = ticket ? await this._auth!.consumeTicket(ticket) : undefined;
+            } catch (err: any) {
+                if (err?.status === 403) {
+                    return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
+                }
+                ctx = undefined;
+            }
             if (!ctx) {
                 return { ok: false, code: ShellCloseCodes.LoginRequired, reason: 'login required' };
             }
             if (!this._auth!.hasPermission(ctx, CliServerPermissions.ShellExecute)) {
-                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'permission denied' };
+                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
             }
         }
 
-        // Token: the mode itself, or an additional requirement in users mode.
-        if (o.token && (authMode === 'token' || authMode === 'users')) {
+        // Every configured check among token/authorize must pass, whatever the mode.
+        if (o.token) {
             const presented = readBearerToken(request, url);
             if (!presented) {
                 return { ok: false, code: ShellCloseCodes.LoginRequired, reason: 'login required' };
             }
             if (!tokensEqual(presented, o.token)) {
-                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'invalid token' };
+                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
             }
         }
 
-        // Custom check: the mode itself, or an additional requirement in users mode.
-        if (o.authorize && (authMode === 'custom' || authMode === 'users')) {
+        if (o.authorize) {
             let allowed = false;
             try {
                 allowed = (await o.authorize(request, { url, remoteAddress, mode })) === true;
@@ -279,7 +293,7 @@ export class CliShellSessionManager {
                 allowed = false;
             }
             if (!allowed) {
-                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'permission denied' };
+                return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
             }
         }
 
@@ -296,7 +310,7 @@ export class CliShellSessionManager {
         } catch (err: any) {
             logger.error('node-pty unavailable: %s', err.message ?? err);
             this.send(ws, { type: 'error', message: 'shell is not available on this server' });
-            this.end(session, 1011, 'shell unavailable', 'unavailable');
+            this.end(session, 1011, 'shell unavailable', 'error');
             return;
         }
 
@@ -311,7 +325,7 @@ export class CliShellSessionManager {
         } catch (err: any) {
             logger.error('Shell spawn failed: %s', err.message ?? err);
             this.send(ws, { type: 'error', message: 'failed to start shell' });
-            this.end(session, 1011, 'shell failed', 'spawn failed');
+            this.end(session, 1011, 'shell failed', 'error');
             return;
         }
 
@@ -327,7 +341,7 @@ export class CliShellSessionManager {
         session.pty.onExit(({ exitCode }) => {
             if (session.closed) return;
             this.send(ws, { type: 'exit', code: exitCode });
-            this.end(session, 1000, 'exit', 'exit', exitCode);
+            this.end(session, 1000, 'exit', 'exited', exitCode);
         });
 
         ws.on('message', (raw) => {
@@ -342,7 +356,6 @@ export class CliShellSessionManager {
                 if (msg.type === 'stdin' && typeof msg.data === 'string') {
                     session.lastInput = Date.now();
                     session.pty?.write(msg.data);
-                    this.touch(session);
                 } else if (msg.type === 'resize') {
                     session.pty?.resize(clampDim(String(msg.cols), cols), clampDim(String(msg.rows), rows));
                 }
@@ -351,10 +364,10 @@ export class CliShellSessionManager {
             }
         });
 
-        ws.on('close', () => this.end(session, undefined, undefined, 'client closed'));
+        ws.on('close', () => this.end(session, undefined, undefined, 'closed'));
         ws.on('error', (error) => {
             logger.error('Shell socket error: %s', (error as Error).message ?? error);
-            this.end(session, undefined, undefined, 'socket error');
+            this.end(session, undefined, undefined, 'error');
         });
 
         this.armTimers(session);
@@ -368,7 +381,7 @@ export class CliShellSessionManager {
                 if (session.closed) return;
                 const remaining = session.lastInput + idle - Date.now();
                 if (remaining <= 0) {
-                    this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'idle timeout');
+                    this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'shell timed out');
                 } else {
                     session.idleTimer = setTimeout(check, remaining);
                     session.idleTimer.unref?.();
@@ -380,20 +393,11 @@ export class CliShellSessionManager {
         const max = this._options.maxDurationMs;
         if (max && max > 0) {
             session.durationTimer = setTimeout(
-                () => this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'max duration'),
+                () => this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'shell timed out'),
                 max,
             );
             session.durationTimer.unref?.();
         }
-    }
-
-    /** Slides the users session while the shell is in use (throttled). */
-    private touch(session: ShellSession): void {
-        if (!session.ctx || !this._auth?.touch) return;
-        const now = Date.now();
-        if (now - session.lastTouch < TOUCH_THROTTLE_MS) return;
-        session.lastTouch = now;
-        this._auth.touch(session.ctx).catch(() => undefined);
     }
 
     // ----------------------------------------------------- session binding
@@ -402,7 +406,7 @@ export class CliShellSessionManager {
         if (event.type === 'session-ended') {
             for (const s of [...this._sessions]) {
                 if (s.ctx?.sessionId && s.ctx.sessionId === event.sessionId) {
-                    this.end(s, ShellCloseCodes.LoginRequired, 'session ended', event.reason ?? 'session ended');
+                    this.end(s, ShellCloseCodes.LoginRequired, 'session ended', 'session ended');
                 }
             }
         } else {
@@ -414,7 +418,7 @@ export class CliShellSessionManager {
         if (this._checkTimer || !this._auth) return;
         const interval = Math.min(
             Math.max(this._options.sessionCheckIntervalMs ?? SHELL_DEFAULTS.sessionCheckIntervalMs, 10),
-            SHELL_DEFAULTS.sessionCheckIntervalMs,
+            SHELL_DEFAULTS.maxSessionCheckIntervalMs,
         );
         this._checkTimer = setInterval(() => void this.recheck(), interval);
         this._checkTimer.unref?.();
@@ -430,13 +434,22 @@ export class CliShellSessionManager {
     /**
      * Re-validates users-mode shells: session alive, user enabled, still holding
      * `shell:execute`. Otherwise the shell is closed with 4401 `session ended`.
+     * The check itself never extends the session; stdin received since the
+     * previous check touches it first (at most once per 30 s).
      */
     async recheck(userId?: string): Promise<void> {
         const auth = this._auth;
         for (const s of [...this._sessions]) {
             if (s.closed || !s.ctx || (userId && s.ctx.userId !== userId)) continue;
             let fresh: CliServerAuthContext | undefined = s.ctx;
+            const now = Date.now();
+            const typed = s.lastInput > s.lastCheck;
+            s.lastCheck = now;
             try {
+                if (typed && auth?.touch && now - s.lastTouch >= SHELL_DEFAULTS.touchIntervalMs) {
+                    s.lastTouch = now;
+                    await auth.touch(s.ctx);
+                }
                 fresh = auth?.revalidate ? await auth.revalidate(s.ctx) : s.ctx;
             } catch {
                 fresh = undefined;
@@ -461,7 +474,8 @@ export class CliShellSessionManager {
     }
 
     /**
-     * Ends a session once: kills the process tree, closes the socket with the
+     * Ends a session once (`why` is the audit reason: exited | closed | session ended |
+     * permission removed | shell timed out | server shutdown | error): kills the process tree, closes the socket with the
      * given code (when still open) and audits/logs the close.
      */
     private end(session: ShellSession, code: number | undefined, reason: string | undefined, why: string, exitCode?: number): void {
@@ -482,7 +496,7 @@ export class CliShellSessionManager {
         if (!session.pty) return; // never opened
         const durationMs = Date.now() - session.startedAt;
         if (session.authMode === 'users' && session.ctx) {
-            this.audit(session, 'shell_closed', { durationMs, exitCode, reason: why });
+            this.audit(session, 'shell_closed', { durationMs, reason: why, ...(why === 'exited' ? { exitCode } : {}) });
         } else {
             logger.info(
                 'Shell closed (id=%s, auth=%s, mode=%s, remote=%s, reason=%s, durationMs=%d)',
@@ -515,7 +529,7 @@ export class CliShellSessionManager {
     /** Closes every open shell (server shutdown). */
     dispose(): void {
         for (const s of [...this._sessions]) {
-            this.end(s, 1001, 'server shutting down', 'server shutdown');
+            this.end(s, 1001, 'server shutdown', 'server shutdown');
         }
         if (this._checkTimer) clearInterval(this._checkTimer);
         this._checkTimer = undefined;
@@ -524,6 +538,15 @@ export class CliShellSessionManager {
     }
 
     // -------------------------------------------------------------- helpers
+
+    private remoteAddressOf(request: IncomingMessage): string {
+        if (this._trustProxy) {
+            const header = request.headers['x-forwarded-for'];
+            const first = (Array.isArray(header) ? header[0] : header)?.split(',')[0]?.trim();
+            if (first) return first;
+        }
+        return request.socket.remoteAddress ?? 'unknown';
+    }
 
     /** Determines the shell binary and arguments based on options, platform and optional command. */
     private getShellInfo(command?: string): { shell: string; args: string[] } {

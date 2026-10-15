@@ -35,15 +35,20 @@ export interface CliShellOptions {
     /**
      * Shared secret. Clients send `Authorization: Bearer <token>` (header, or the
      * `_header_Authorization` query parameter used by browser clients). Compared in
-     * constant time, never logged. With the users plugin it is required in addition.
+     * constant time, never logged. Always required when set (also with the users
+     * plugin and together with `authorize`).
      */
     token?: string;
     /**
      * Host-defined check (headers, query, remote address). Thrown errors and
-     * rejections deny. With the users plugin it is required in addition.
+     * rejections deny. Always required when set (also with the users plugin and
+     * together with `token`).
      */
     authorize?: (request: IncomingMessage, context: CliShellAuthorizeContext) => boolean | Promise<boolean>;
-    /** Open the shell to anyone who can reach the server (logs a startup WARNING). */
+    /**
+     * Open the shell to anyone who can reach the server (logs a startup WARNING).
+     * Ignored once `token` or `authorize` is set.
+     */
     allowAnonymous?: boolean;
     /** Concurrent shells per user (users mode) or per remote address (other modes). Default 3. */
     maxSessionsPerUser?: number;
@@ -55,7 +60,7 @@ export interface CliShellOptions {
     maxDurationMs?: number;
     /**
      * How often open users-mode shells re-check their session and `shell:execute` (ms).
-     * Default and maximum 60 000.
+     * Default 30 000, maximum 60 000. Session/user/group changes trigger an immediate re-check.
      */
     sessionCheckIntervalMs?: number;
     /** Working directory of the shell. Default: the server user's home directory. */
@@ -70,7 +75,10 @@ export const SHELL_DEFAULTS = {
     maxSessionsPerUser: 3,
     maxSessions: 20,
     idleTimeoutMs: 15 * 60 * 1000,
-    sessionCheckIntervalMs: 60 * 1000,
+    sessionCheckIntervalMs: 30 * 1000,
+    maxSessionCheckIntervalMs: 60 * 1000,
+    /** stdin touches the users session at most this often. */
+    touchIntervalMs: 30 * 1000,
 } as const;
 
 /** WebSocket close codes used by the shell socket (accept, then close). */
@@ -83,9 +91,9 @@ export const ShellCloseCodes = {
 } as const;
 
 /**
- * Resolves the access mode. Precedence: users plugin mounted ⇒ `users` (token /
- * authorize additionally required when configured); otherwise token, then
- * authorize, then allowAnonymous; otherwise `locked`.
+ * Resolves the access mode (`shellAuth`). Users plugin mounted ⇒ `users`; otherwise
+ * `token` before `custom`, then `anonymous`; otherwise `locked`. Every configured
+ * check among token/authorize must pass whatever the reported mode.
  */
 export function resolveShellAuthMode(options: CliShellOptions | undefined, usersMounted: boolean): CliShellAuthMode {
     if (usersMounted) return 'users';

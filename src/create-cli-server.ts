@@ -60,6 +60,11 @@ export interface CliServerOptions {
     /** Remote shell security: access mode, limits, timeouts, cwd, shell binary, environment. */
     shell?: CliShellOptions;
     /**
+     * Behind a reverse proxy: trust `X-Forwarded-For` (Express `trust proxy`, and
+     * the shell's per-address limits). Default false.
+     */
+    trustProxy?: boolean;
+    /**
      * Auth provider protecting the whole server (e.g. `usersPlugin.serverAuth`).
      * Can also be installed later with `setAuth()` or by `mountPlugin(usersPlugin)`.
      */
@@ -99,12 +104,15 @@ export interface CliServerResult {
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
-    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false, shell } = options;
+    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false, shell, trustProxy = false } = options;
     if (shell && !enableShell) {
         logger.warn('shell options are set but enableShell is false: the shell stays disabled');
     }
 
     const app = express();
+    if (trustProxy) {
+        app.set('trust proxy', true);
+    }
 
     if (corsOption === true) {
         app.use(cors());
@@ -149,7 +157,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const executor = new CliCommandExecutorService(registry);
 
-    const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins });
+    const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
     const logSocketManager = new CliLogSocketManager({ allowedOrigins });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;

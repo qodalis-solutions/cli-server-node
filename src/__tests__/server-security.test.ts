@@ -349,7 +349,7 @@ describe('B2: WebSocket tickets, origins, scoping', () => {
         expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4401, reason: 'login required' });
         expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, plain.token)}&cmd=id`)).toEqual({
             code: 4403,
-            reason: 'permission denied',
+            reason: 'forbidden',
         });
         const shell = await connect(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, root.token)}&cmd=sleep%205`);
         expect(shell.ws).toBeDefined();

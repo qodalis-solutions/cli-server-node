@@ -30,6 +30,8 @@ export interface CliEventSocketManagerOptions {
     enableShell?: boolean;
     /** Shell security options (access mode, limits, timeouts, environment). */
     shell?: CliShellOptions;
+    /** Trust `X-Forwarded-For` for the shell's per-address limits and logs. */
+    trustProxy?: boolean;
     /** When set, every upgrade with an `Origin` header must come from one of these. */
     allowedOrigins?: string[];
 }
@@ -55,7 +57,11 @@ export class CliEventSocketManager {
     private _allowedOrigins?: string[];
 
     constructor(options: CliEventSocketManagerOptions = {}) {
-        this._shellManager = new CliShellSessionManager({ enabled: options.enableShell ?? false, shell: options.shell });
+        this._shellManager = new CliShellSessionManager({
+            enabled: options.enableShell ?? false,
+            shell: options.shell,
+            trustProxy: options.trustProxy,
+        });
         this._allowedOrigins = options.allowedOrigins;
     }
 

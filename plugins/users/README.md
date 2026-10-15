@@ -130,7 +130,7 @@ In adapter/cookie mode, state-changing requests without a bearer header must com
 
 Entries carry `userId` / `actorId` when known. `login_failed` entries are capped separately (last 200).
 
-`login`, `login_failed`, `logout`, `user_created`, `user_updated`, `user_deleted`, `user_disabled`, `user_enabled`, `password_changed`, `group_created`, `group_updated`, `group_deleted`, `group_member_added`, `group_member_removed`, `session_revoked`, `audit_cleared`, `shell_opened`, `shell_closed` (written by the CLI server's shell; `metadata: { mode, sessionId, durationMs, exitCode, reason }`, never the command text) — with `actor` set to the acting user. The in-memory store keeps the last 1000 entries.
+`login`, `login_failed`, `logout`, `user_created`, `user_updated`, `user_deleted`, `user_disabled`, `user_enabled`, `password_changed`, `group_created`, `group_updated`, `group_deleted`, `group_member_added`, `group_member_removed`, `session_revoked`, `audit_cleared`, `shell_opened`, `shell_closed` (written by the CLI server's shell; `metadata: { mode, sessionId, durationMs, reason, exitCode? }`, never the command text) — with `actor` set to the acting user. The in-memory store keeps the last 1000 entries.
 
 ## Custom storage
 

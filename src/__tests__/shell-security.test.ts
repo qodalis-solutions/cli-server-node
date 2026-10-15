@@ -13,7 +13,7 @@ import request from 'supertest';
 import { WebSocket } from 'ws';
 import { AddressInfo } from 'net';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliShellOptions, tokensEqual, buildShellEnv } from '../services/cli-shell-options';
+import { CliShellOptions, tokensEqual, buildShellEnv, SHELL_DEFAULTS } from '../services/cli-shell-options';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 
 const V1 = '/api/v1/qcli';
@@ -103,6 +103,20 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
     }
 };
 
+/** Polls the audit store until an entry matches (audit writes are fire-and-forget). */
+async function auditEntry(users: UsersPluginResult, pred: (e: any) => boolean): Promise<any> {
+    let found: any;
+    const start = Date.now();
+    while (!found) {
+        found = (await users.auditStore.getEntries()).find(pred);
+        if (!found) {
+            if (Date.now() - start > 3000) throw new Error('audit entry not found');
+            await new Promise((r) => setTimeout(r, 20));
+        }
+    }
+    return found;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Runs a one-shot command and returns its output once the socket closes normally. */
@@ -168,7 +182,7 @@ describe('C1: enabling and access modes', () => {
             const h = await start({ enableShell: true });
             expect(errors.mock.calls.some((c) => /LOCKED/.test(String(c[0])) && /shell\.token/.test(String(c[0])))).toBe(true);
             expect(await capabilities(h)).toMatchObject({ shell: true, shellAuth: 'locked' });
-            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4401, reason: 'shell access not configured' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4401, reason: 'shell access is not configured' });
             expect(await closeOf(h.port, `/ws/v1/qcli/shell?_header_Authorization=${encodeURIComponent('Bearer x')}`)).toMatchObject({ code: 4401 });
         } finally {
             errors.mockRestore();
@@ -196,7 +210,7 @@ describe('C1: enabling and access modes', () => {
         it('missing token => 4401, wrong token => 4403', async () => {
             const h = await start({ shell: { token: TOKEN } });
             expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id')).toEqual({ code: 4401, reason: 'login required' });
-            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', bearer('nope'))).toEqual({ code: 4403, reason: 'invalid token' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', bearer('nope'))).toEqual({ code: 4403, reason: 'forbidden' });
             expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', bearer(TOKEN + 'x'))).toMatchObject({ code: 4403 });
             expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', { Authorization: TOKEN })).toMatchObject({ code: 4401 });
             const q = encodeURIComponent('Bearer wrong');
@@ -237,12 +251,21 @@ describe('C1: enabling and access modes', () => {
             }
         });
 
-        it('takes precedence over authorize and allowAnonymous', async () => {
-            const authorize = vi.fn(() => true);
+        it('with authorize also set both must pass (shellAuth "token"); allowAnonymous is ignored', async () => {
+            const authorize = vi.fn((req: http.IncomingMessage) => req.headers['x-ok'] === '1');
             const h = await start({ shell: { token: TOKEN, authorize, allowAnonymous: true } });
             expect(await capabilities(h)).toMatchObject({ shellAuth: 'token' });
-            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id')).toMatchObject({ code: 4401 });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id')).toEqual({ code: 4401, reason: 'login required' });
             expect(authorize).not.toHaveBeenCalled();
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', bearer(TOKEN))).toEqual({ code: 4403, reason: 'forbidden' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell?cmd=id', { ...bearer('bad'), 'x-ok': '1' })).toEqual({ code: 4403, reason: 'forbidden' });
+            expect(await run(h.port, 'echo both-pass', { ...bearer(TOKEN), 'x-ok': '1' })).toContain('both-pass');
+        });
+
+        it('allowAnonymous is ignored once authorize is set', async () => {
+            const h = await start({ shell: { authorize: () => false, allowAnonymous: true } });
+            expect(await capabilities(h)).toMatchObject({ shellAuth: 'custom' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'forbidden' });
         });
     });
 
@@ -261,7 +284,7 @@ describe('C1: enabling and access modes', () => {
 
         it('false => 4403', async () => {
             const h = await start({ shell: { authorize: () => false } });
-            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'permission denied' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'forbidden' });
         });
 
         it('async check is awaited', async () => {
@@ -273,9 +296,9 @@ describe('C1: enabling and access modes', () => {
             const warns = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
             try {
                 const h1 = await start({ shell: { authorize: () => { throw new Error('boom'); } } });
-                expect(await closeOf(h1.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'permission denied' });
+                expect(await closeOf(h1.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'forbidden' });
                 const h2 = await start({ shell: { authorize: () => Promise.reject(new Error('nope')) } });
-                expect(await closeOf(h2.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'permission denied' });
+                expect(await closeOf(h2.port, '/ws/v1/qcli/shell')).toEqual({ code: 4403, reason: 'forbidden' });
                 const h3 = await start({ shell: { authorize: (() => 'yes') as any } });
                 expect(await closeOf(h3.port, '/ws/v1/qcli/shell')).toMatchObject({ code: 4403 });
             } finally {
@@ -301,6 +324,29 @@ describe('C1: enabling and access modes', () => {
         it('applies when the users plugin is mounted (even with token/anonymous configured)', async () => {
             await setup({ allowAnonymous: true });
             expect(await capabilities(h)).toMatchObject({ shell: true, shellAuth: 'users' });
+            expect(await closeOf(h.port, '/ws/v1/qcli/shell')).toEqual({ code: 4401, reason: 'login required' });
+        });
+
+        it('applies with protectServer: false too (a ticket is still required)', async () => {
+            const e = await start({ users: true, configureUsers: (b) => b.setProtectServer(false) });
+            expect(await capabilities(e)).toMatchObject({ shell: true, shellAuth: 'users' });
+            expect(await closeOf(e.port, '/ws/v1/qcli/shell?cmd=id')).toEqual({ code: 4401, reason: 'login required' });
+            const r = await login(e.cli.app, 'root', ROOT_PASS);
+            expect(await run(e.port, 'echo unprotected-ok', {}, `&ticket=${await ticket(e.cli.app, r.token)}`)).toContain('unprotected-ok');
+        });
+
+        it('a users-layer 403 (password change required) => 4403', async () => {
+            await setup();
+            await request(app)
+                .post(`${V1}/users`)
+                .set(bearer(root.token))
+                .send({ name: 'ops', email: 'ops@x.io', password: 'opspass1', groups: ['admin'] })
+                .expect(201);
+            const ops = await login(app, 'ops', 'opspass1');
+            const t = await ticket(app, ops.token);
+            // Flag set behind the API (an admin reset would also revoke the session)
+            await h.users!.userStore.updateUser(ops.userId, { mustChangePassword: true });
+            expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${t}`)).toEqual({ code: 4403, reason: 'forbidden' });
         });
 
         it('needs a ticket (4401) and shell:execute (4403); root (*) gets a shell', async () => {
@@ -309,7 +355,7 @@ describe('C1: enabling and access modes', () => {
             expect(await closeOf(h.port, '/ws/v1/qcli/shell?ticket=bogus')).toEqual({ code: 4401, reason: 'login required' });
             expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(app, plain.token)}`)).toEqual({
                 code: 4403,
-                reason: 'permission denied',
+                reason: 'forbidden',
             });
             expect(await run(h.port, 'echo root-ok', {}, `&ticket=${await ticket(app, root.token)}`)).toContain('root-ok');
         });
@@ -404,6 +450,9 @@ describe('C2: session binding', () => {
         const c = await shellFor(ops.token);
         await h.users!.groupStore.updateGroup('shellers', { permissions: ['commands:execute'] });
         expect(await c.closed).toEqual({ code: 4401, reason: 'session ended' });
+        const closedEntry = await auditEntry(h.users!, (e) => e.event === 'shell_closed' && e.userId === ops.userId);
+        expect(closedEntry?.metadata).toMatchObject({ reason: 'permission removed' });
+        expect(closedEntry?.metadata).not.toHaveProperty('exitCode');
         await request(app).delete(`${V1}/users/ops`).set(bearer(root.token)).expect(204);
         await request(app).delete(`${V1}/groups/shellers`).set(bearer(root.token)).expect(204);
     });
@@ -420,6 +469,58 @@ describe('C2: session binding', () => {
         await request(app).delete(`${V1}/users/ops`).set(bearer(root.token)).expect(204);
         expect(await c2.closed).toEqual({ code: 4401, reason: 'session ended' });
         await request(app).delete(`${V1}/groups/shellers`).set(bearer(root.token)).expect(204);
+    });
+
+    it('logout audits reason "session ended"', async () => {
+        const s = await login(app, 'root', ROOT_PASS);
+        const c = await shellFor(s.token);
+        await request(app).delete(`${V1}/sessions/current`).set(bearer(s.token)).expect(204);
+        await c.closed;
+        const entry = await auditEntry(h.users!, (e) => e.event === 'shell_closed' && e.metadata?.sessionId === s.sessionId);
+        expect(entry?.metadata).toMatchObject({ mode: 'interactive', reason: 'session ended' });
+    });
+
+    it('a pending password change while open ends the shell (admin reset, or flag set behind the API)', async () => {
+        const ops = await setupShellUser();
+        const c = await shellFor(ops.token);
+        await request(app).put(`${V1}/users/ops/password`).set(bearer(root.token)).send({ password: 'resetpass1' }).expect(204);
+        expect(await c.closed).toEqual({ code: 4401, reason: 'session ended' });
+
+        const ops2 = await login(app, 'ops', 'resetpass1');
+        await request(app).put(`${V1}/users/ops/password`).set(bearer(ops2.token)).send({ currentPassword: 'resetpass1', password: 'opspass22' }).expect(204);
+        const ops3 = await login(app, 'ops', 'opspass22');
+        const c2 = await shellFor(ops3.token);
+        await h.users!.userStore.updateUser(ops3.userId, { mustChangePassword: true });
+        expect(await c2.closed).toEqual({ code: 4401, reason: 'session ended' });
+        await request(app).delete(`${V1}/users/ops`).set(bearer(root.token)).expect(204);
+        await request(app).delete(`${V1}/groups/shellers`).set(bearer(root.token)).expect(204);
+    });
+
+    it('re-checks do not extend the session; stdin since the last check does', async () => {
+        const e = await start({ users: true, shell: { sessionCheckIntervalMs: 100 }, configureUsers: (b) => b.setSessionTimeout(1000) });
+        const idle = await login(e.cli.app, 'root', ROOT_PASS);
+        const busy = await login(e.cli.app, 'root', ROOT_PASS);
+        const ci = open(e.port, `/ws/v1/qcli/shell?ticket=${await ticket(e.cli.app, idle.token)}`);
+        const cb = open(e.port, `/ws/v1/qcli/shell?ticket=${await ticket(e.cli.app, busy.token)}`);
+        await Promise.all([ci.ready, cb.ready]);
+        await sleep(500);
+        cb.ws.send(JSON.stringify({ type: 'stdin', data: ' ' }));
+        await sleep(800);
+        // ~1.3 s in: the idle shell's session expired despite the re-checks, the busy one was touched
+        expect(await Promise.race([ci.closed, sleep(10).then(() => 'open')])).toEqual({ code: 4401, reason: 'session ended' });
+        expect(cb.ws.readyState).toBe(WebSocket.OPEN);
+        expect(await cb.closed).toEqual({ code: 4401, reason: 'session ended' });
+    });
+
+    it('server shutdown closes with 1001 and audits "server shutdown"', async () => {
+        const e = await start({ users: true });
+        const r = await login(e.cli.app, 'root', ROOT_PASS);
+        const c = open(e.port, `/ws/v1/qcli/shell?ticket=${await ticket(e.cli.app, r.token)}`);
+        await c.ready;
+        e.cli.eventSocketManager.dispose();
+        expect((await c.closed).code).toBe(1001);
+        const entry = await auditEntry(e.users!, (x) => x.event === 'shell_closed');
+        expect(entry?.metadata).toMatchObject({ reason: 'server shutdown' });
     });
 
     it('session expiry closes the shell (checked periodically)', async () => {
@@ -488,7 +589,30 @@ describe('C3: limits', () => {
         expect(await closeOf(g.port, '/ws/v1/qcli/shell')).toEqual({ code: 4429, reason: 'too many shell sessions' });
     });
 
-    it('defaults: 3 per user, 20 total', async () => {
+    it('per-address limits use X-Forwarded-For only with trustProxy', async () => {
+        const plain = await start({ shell: { token: TOKEN, maxSessionsPerUser: 1 } });
+        const a = open(plain.port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.1' });
+        await a.ready;
+        expect((await closeOf(plain.port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.2' })).code).toBe(4429);
+
+        const cli = createCliServer({ enableShell: true, trustProxy: true, shell: { token: TOKEN, maxSessionsPerUser: 1 } });
+        const server = http.createServer(cli.app);
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        cli.eventSocketManager.attach(server);
+        const port = (server.address() as AddressInfo).port;
+        harnesses.push({ cli, server, port });
+        const x = open(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.1, 172.16.0.1' });
+        const y = open(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.2' });
+        await Promise.all([x.ready, y.ready]);
+        expect(await closeOf(port, '/ws/v1/qcli/shell', { ...bearer(TOKEN), 'X-Forwarded-For': '10.0.0.1' })).toEqual({
+            code: 4429,
+            reason: 'too many shell sessions',
+        });
+        expect(cli.eventSocketManager.shellManager.getSessions().map((s) => s.remoteAddress).sort()).toEqual(['10.0.0.1', '10.0.0.2']);
+    });
+
+    it('defaults: 3 per user, 20 total, re-check every 30 s (max 60 s)', async () => {
+        expect(SHELL_DEFAULTS).toMatchObject({ maxSessionsPerUser: 3, maxSessions: 20, idleTimeoutMs: 15 * 60 * 1000, sessionCheckIntervalMs: 30_000, maxSessionCheckIntervalMs: 60_000 });
         const h = await start({ shell: { allowAnonymous: true } });
         const conns = [open(h.port, '/ws/v1/qcli/shell'), open(h.port, '/ws/v1/qcli/shell'), open(h.port, '/ws/v1/qcli/shell')];
         await Promise.all(conns.map((c) => c.ready));
@@ -615,10 +739,11 @@ describe('C4: audit', () => {
             expect(e.metadata.sessionId).toBe(root.sessionId);
         }
         const cmdClosed = shell.find((e) => e.event === 'shell_closed' && e.metadata.mode === 'command');
-        expect(cmdClosed.metadata).toMatchObject({ mode: 'command', exitCode: 3, reason: 'exit' });
+        expect(cmdClosed.metadata).toMatchObject({ mode: 'command', exitCode: 3, reason: 'exited' });
         expect(typeof cmdClosed.metadata.durationMs).toBe('number');
         const interactiveClosed = shell.find((e) => e.event === 'shell_closed' && e.metadata.mode === 'interactive');
-        expect(interactiveClosed.metadata).toMatchObject({ mode: 'interactive', reason: 'client closed' });
+        expect(interactiveClosed.metadata).toMatchObject({ mode: 'interactive', reason: 'closed' });
+        expect(interactiveClosed.metadata).not.toHaveProperty('exitCode');
 
         const text = JSON.stringify(entries);
         expect(text).not.toContain('CMD_MARKER_42');

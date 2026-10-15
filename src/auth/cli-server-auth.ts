@@ -29,7 +29,11 @@ export interface ICliServerAuth {
      * (401 unauthenticated, 403 e.g. password change required / CSRF).
      */
     authenticateRequest(req: Request): Promise<CliServerAuthContext>;
-    /** Consumes a single-use WebSocket ticket; undefined when invalid/expired/used. */
+    /**
+     * Consumes a single-use WebSocket ticket; undefined when invalid/expired/used.
+     * May throw an error with `status: 403` when the identity is valid but not
+     * allowed yet (e.g. password change required).
+     */
     consumeTicket(ticket: string): Promise<CliServerAuthContext | undefined>;
     hasPermission(ctx: CliServerAuthContext, permission: string): boolean;
     /** Called once when installed into a server. */

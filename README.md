@@ -328,7 +328,7 @@ The PTY shell (`/ws/v1/qcli/shell`, `/ws/qcli/shell`) gives OS-level access to t
 | `anonymous` | no users plugin, `shell.allowAnonymous: true` | nothing (a startup WARNING is logged) |
 | `locked` | none of the above | — every connection is closed with 4401 and a startup ERROR explains the options |
 
-Precedence: users plugin ⇒ `users` (a configured `token` and/or `authorize` must pass **as well**); otherwise `token`, then `authorize`, then `allowAnonymous`. Tokens are compared in constant time and never logged; an `authorize` that throws or rejects denies.
+Precedence: users plugin mounted (even with `protectServer: false`) ⇒ `users`; otherwise `token`, then `custom`, then `anonymous`. Whatever the mode, **every configured check among `token` and `authorize` must pass** (so with both set, both are required and `shellAuth` reports `token`); `allowAnonymous` is ignored once either is set. Tokens are compared in constant time (SHA-256 of both, then `timingSafeEqual`) and never logged; an `authorize` that throws or rejects denies.
 
 ### With the users plugin
 
@@ -339,7 +339,7 @@ mountPlugin(new CliUsersBuilder().build((m) => eventSocketManager.broadcastMessa
 //   PUT /api/v1/qcli/groups/ops  { "permissions": ["commands:execute", "shell:execute"] }
 ```
 
-An open shell is bound to the session that opened it: logout, idle/absolute session expiry, admin revoke (kick), user disabled or deleted, or losing `shell:execute` (re-checked on every user/group change and at least every 60 s) closes it with **4401** `session ended` and kills its process tree. Typing in the shell keeps the users session alive. Opens and closes are audited as `shell_opened` / `shell_closed` (`userId`, `actorId`, `metadata: { mode: 'interactive' | 'command', sessionId, durationMs, exitCode, reason }`), never with the command text or stdin.
+An open shell is bound to the session that opened it: logout, idle/absolute session expiry, admin revoke (kick), user disabled or deleted, or losing `shell:execute` (re-checked immediately on session/user/group changes and every `sessionCheckIntervalMs`, default 30 s, max 60 s), or a password change becoming required closes it with **4401** `session ended` and kills its process tree. Re-checks never extend the session by themselves; stdin received since the previous check counts as session activity (at most one touch per 30 s), so an active shell user is not idle-logged-out. Opens and closes are audited as `shell_opened` / `shell_closed` (`userId`, `actorId`, `metadata: { mode: 'interactive' | 'command', sessionId, durationMs, reason, exitCode? }`), never with the command text or stdin. `reason` is one of `exited` (then `exitCode` is set), `closed`, `session ended`, `permission removed`, `shell timed out`, `server shutdown`, `error`.
 
 ### Without the users plugin (token mode)
 
@@ -370,11 +370,11 @@ shell: {
     token?: string;                    // token mode (or extra requirement with the users plugin)
     authorize?: (req, ctx) => boolean | Promise<boolean>;  // custom mode (or extra requirement)
     allowAnonymous?: boolean;          // open to anyone who can reach the server (not recommended)
-    maxSessionsPerUser?: number;       // per user (users mode) or per remote address (default 3)
+    maxSessionsPerUser?: number;       // per user (users mode) or per remote address (default 3; X-Forwarded-For only with trustProxy)
     maxSessions?: number;              // total concurrent shells (default 20)
-    idleTimeoutMs?: number;            // close after no stdin (default 15 min, 0 = off)
+    idleTimeoutMs?: number;            // close after no stdin (resize does not count; default 15 min, 0 = off)
     maxDurationMs?: number;            // absolute limit (default none)
-    sessionCheckIntervalMs?: number;   // users-mode re-check (default and max 60 000)
+    sessionCheckIntervalMs?: number;   // users-mode re-check (default 30 000, max 60 000)
     cwd?: string;                      // working directory (default: home directory)
     shell?: string;                    // shell binary (default: detected)
     env?: { allow?: string[]; set?: Record<string, string> };
@@ -389,11 +389,12 @@ Refusals are sent as *accept, then close* so browsers can read them (a foreign `
 
 | Code | Reason | When |
 |---|---|---|
-| 4401 | `login required` / `session ended` / `shell access not configured` | missing ticket or token, session ended, shell locked |
-| 4403 | `permission denied` / `invalid token` | no `shell:execute`, wrong token, `authorize` false or threw |
+| 4401 | `login required` / `session ended` / `shell access is not configured` | missing ticket or (Bearer) token; session ended (logout, expiry, kick, user disabled/deleted, `shell:execute` removed, password change now required); shell locked |
+| 4403 | `forbidden` | wrong token, `authorize` false or threw, no `shell:execute`, password change required |
 | 4404 | `shell disabled` | `enableShell` is false |
 | 4408 | `shell timed out` | idle timeout or `maxDurationMs` |
 | 4429 | `too many shell sessions` | `maxSessionsPerUser` or `maxSessions` reached |
+| 1001 | `server shutdown` | the server is shutting down |
 
 ## Processor Base Class Reference
 
@@ -420,6 +421,7 @@ interface CliServerOptions {
     allowedOrigins?: string[];             // CORS + WebSocket Origin allow-list ('http://host:*' = any port)
     enableShell?: boolean;                 // Interactive shell WebSocket (default: false)
     shell?: CliShellOptions;               // Shell access mode, limits, timeouts, env (see Remote Shell Security)
+    trustProxy?: boolean;                  // Trust X-Forwarded-For (Express 'trust proxy' + shell per-address limits)
     auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
