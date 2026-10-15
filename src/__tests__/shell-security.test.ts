@@ -682,8 +682,8 @@ describe('C3: environment, cwd, shell', () => {
             .map((l) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l)?.[1])
             .filter(Boolean) as string[];
         const allowed = new Set(['PATH', 'HOME', 'USER', 'LANG', 'TERM', 'COLUMNS', 'LINES', 'SHELL', 'ALLOWED_X', 'FOO_SET',
-            // set by the shell itself
-            'PWD', 'SHLVL', '_', 'OLDPWD']);
+            // set by the shell itself (zsh also sets LOGNAME)
+            'PWD', 'SHLVL', '_', 'OLDPWD', 'LOGNAME']);
         expect(names.filter((n) => !allowed.has(n))).toEqual([]);
     });
 
