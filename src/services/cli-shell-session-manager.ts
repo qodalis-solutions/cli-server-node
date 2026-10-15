@@ -81,8 +81,8 @@ interface ShellSession {
     ctx?: CliServerAuthContext;
     startedAt: number;
     lastInput: number;
-    /** Time of the last session re-check (stdin after it counts as session activity). */
-    lastCheck: number;
+    /** Stdin received since the last session re-check (counts as session activity). */
+    inputSinceCheck: boolean;
     lastTouch: number;
     pty?: import('node-pty').IPty;
     idleTimer?: NodeJS.Timeout;
@@ -235,7 +235,7 @@ export class CliShellSessionManager {
             ctx: decision.ctx,
             startedAt: now,
             lastInput: now,
-            lastCheck: now,
+            inputSinceCheck: false,
             lastTouch: 0,
             closed: false,
         };
@@ -358,6 +358,7 @@ export class CliShellSessionManager {
             try {
                 if (msg.type === 'stdin' && typeof msg.data === 'string') {
                     session.lastInput = Date.now();
+                    session.inputSinceCheck = true;
                     session.pty?.write(msg.data);
                 } else if (msg.type === 'resize') {
                     session.pty?.resize(clampDim(String(msg.cols), cols), clampDim(String(msg.rows), rows));
@@ -454,8 +455,8 @@ export class CliShellSessionManager {
             if (s.closed || !s.ctx || (userId && s.ctx.userId !== userId)) continue;
             let fresh: CliServerAuthContext | undefined = s.ctx;
             const now = Date.now();
-            const typed = s.lastInput > s.lastCheck;
-            s.lastCheck = now;
+            const typed = s.inputSinceCheck;
+            s.inputSinceCheck = false;
             try {
                 if (typed && auth?.touch && now - s.lastTouch >= SHELL_DEFAULTS.touchIntervalMs) {
                     s.lastTouch = now;

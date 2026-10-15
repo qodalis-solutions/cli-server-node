@@ -2,7 +2,7 @@
  * Regression tests for bugs found while reviewing the users plugin / remote
  * shell security branch.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
 import { PassThrough } from 'stream';
 import express from 'express';
@@ -150,5 +150,36 @@ describe('group permission changes re-check open shells immediately', () => {
         const { app, root, c } = await setup();
         await request(app).delete(`${V1}/groups/shellers`).set(bearer(root)).expect(204);
         expect(await closedWithin(c, 2000)).toEqual({ code: 4401, reason: 'session ended' });
+    });
+});
+
+describe('stdin in the same millisecond as a session re-check', () => {
+    it('still counts as session activity at the next re-check', async () => {
+        const h = await start({ users: true, shell: { sessionCheckIntervalMs: 60_000 } });
+        const app = h.cli.app;
+        const root = await login(app, 'root', ROOT_PASS);
+        const t = await request(app).post(`${V1}/sessions/ws-ticket`).set(bearer(root)).expect(201);
+        const c = openShell(h.port, `/ws/v1/qcli/shell?ticket=${t.body.ticket}`);
+        await c.ready;
+        const touch = vi.spyOn(h.users!.serverAuth, 'touch');
+        const manager = h.cli.eventSocketManager.shellManager;
+
+        // A re-check and a keystroke land in the same millisecond, the keystroke after the check
+        const frozen = Date.now() + 5;
+        const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(frozen);
+        try {
+            await manager.recheck();
+            c.ws.send(JSON.stringify({ type: 'stdin', data: ' ' }));
+            await sleep(100);
+        } finally {
+            nowSpy.mockRestore();
+        }
+        expect(touch).not.toHaveBeenCalled();
+
+        await sleep(5);
+        await manager.recheck();
+        expect(touch).toHaveBeenCalledTimes(1);
+        c.ws.close();
+        await c.closed;
     });
 });
