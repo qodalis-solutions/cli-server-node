@@ -442,11 +442,13 @@ describe('B2: WebSocket tickets, origins, scoping', () => {
         const otherPlainWs = await connect(h.port, `/ws/v1/qcli/events?ticket=${await ticket(app, plain.token)}`);
         const rootWs = await connect(h.port, `/ws/v1/qcli/events?ticket=${await ticket(app, root.token)}`);
         let closeCode = 0;
-        victimWs.ws!.on('close', (code) => (closeCode = code));
+        let closeReason = '';
+        victimWs.ws!.on('close', (code, reason) => ((closeCode = code), (closeReason = reason.toString())));
 
         await request(app).delete(`${V1}/sessions/${victim.sessionId}`).set(bearer(root.token)).expect(204);
         await waitFor(() => closeCode !== 0);
         expect(closeCode).toBe(4401);
+        expect(closeReason).toBe('session ended');
 
         const kicked = (m: any[]) => m.filter((x) => x.type === 'session-kicked');
         expect(kicked(victimWs.messages)).toEqual([

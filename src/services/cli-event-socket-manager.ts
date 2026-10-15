@@ -6,6 +6,7 @@ import { CliShellAuthMode, CliShellOptions } from './cli-shell-options';
 import { createLogger } from '../utils/logger';
 import { CliServerAuthContext, CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
 import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
+import { SessionBoundSockets } from './session-bound-sockets';
 
 const logger = createLogger('EventSocket');
 
@@ -47,8 +48,10 @@ const USER_SCOPED_EVENTS = new Set(['session-kicked']);
  * Handles upgrades on `/ws/v1/qcli/events` and (when `enableShell` is set)
  * `/ws/v1/qcli/shell`. With an auth provider that protects the server, event
  * upgrades need a single-use `?ticket=`; `session-kicked` is delivered only to
- * the affected user. Shell access (modes, limits, session binding) is decided by
- * {@link CliShellSessionManager}.
+ * the affected user. Sockets authenticated with a stored session are bound to
+ * it: once it ends they are closed with 4401 `session ended` (after
+ * `session-kicked` for revocations; see {@link SessionBoundSockets}). Shell
+ * access (modes, limits, session binding) is decided by {@link CliShellSessionManager}.
  */
 export class CliEventSocketManager {
     private _wss: WebSocketServer | null = null;
@@ -59,6 +62,7 @@ export class CliEventSocketManager {
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
     private readonly _trustProxy: boolean | number;
+    private readonly _sessionBound = new SessionBoundSockets({ awaitKick: true });
 
     constructor(options: CliEventSocketManagerOptions = {}) {
         this._shellManager = new CliShellSessionManager({
@@ -74,6 +78,7 @@ export class CliEventSocketManager {
     setAuth(auth: ICliServerAuth | undefined): void {
         this._auth = auth;
         this._shellManager.setAuth(auth);
+        this._sessionBound.setAuth(auth);
     }
 
     setAllowedOrigins(origins: string[] | undefined): void {
@@ -175,22 +180,19 @@ export class CliEventSocketManager {
                 remoteAddress: request.socket.remoteAddress ?? 'unknown',
                 auth,
             });
+            this._sessionBound.bind(ws, auth);
             logger.info('Client connected (id=%s)', id);
             ws.send(JSON.stringify({ type: 'connected' }));
 
-            ws.on('close', () => {
+            const disconnected = () => {
                 const meta = this._clientMeta.get(ws);
                 logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
+                this._sessionBound.unbind(ws);
                 this._clients.delete(ws);
                 this._clientMeta.delete(ws);
-            });
-
-            ws.on('error', () => {
-                const meta = this._clientMeta.get(ws);
-                logger.info('Client disconnected (id=%s)', meta?.id ?? 'unknown');
-                this._clients.delete(ws);
-                this._clientMeta.delete(ws);
-            });
+            };
+            ws.on('close', disconnected);
+            ws.on('error', disconnected);
         });
     }
 
@@ -217,6 +219,9 @@ export class CliEventSocketManager {
                 continue;
             }
 
+            // A socket whose session ended only waits for its session-kicked
+            if (this._sessionBound.isEnding(ws)) continue;
+
             if (this._auth?.protectServer) {
                 // Server-wide events need the matching read permission
                 const needed = type === 'log' || type.startsWith('log:')
@@ -231,7 +236,7 @@ export class CliEventSocketManager {
         }
 
         for (const ws of toClose) {
-            ws.close(4401, 'session revoked');
+            this._sessionBound.kicked(ws);
         }
     }
 
@@ -259,6 +264,7 @@ export class CliEventSocketManager {
 
         await Promise.all(promises);
         this._shellManager.dispose();
+        this._sessionBound.dispose();
         this._clients.clear();
         this._clientMeta.clear();
     }
@@ -287,6 +293,7 @@ export class CliEventSocketManager {
     /** Terminates all connections and closes the WebSocket server. */
     dispose(): void {
         this._shellManager.dispose();
+        this._sessionBound.dispose();
         for (const ws of this._clients) {
             ws.terminate();
         }

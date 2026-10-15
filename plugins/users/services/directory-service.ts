@@ -286,20 +286,23 @@ export class DirectoryService {
 
         const updated = await this.userStore.updateUser(target.id, dto);
         const audit = { username: updated.name, userId: updated.id, actor: caller.name, actorId: caller.id };
+        const disabledChanged = disabled !== undefined && disabled !== !!target.disabled;
 
+        // Revoke before any audit: audits make open sockets re-check their session, and
+        // that re-check must not end these sessions before they are kicked.
+        if (disabledChanged && disabled) {
+            await this.authService.revokeUserSessions(target.id, 'user disabled', {
+                actor: caller.name,
+                actorId: caller.id,
+                userName: updated.name,
+            });
+        }
         const otherFields = ['name', 'email', 'groups', 'homeDir', 'data'].filter((f) => (dto as any)[f] !== undefined);
         if (otherFields.length > 0) {
             await this.authService.audit({ event: 'user_updated', ...audit, details: otherFields.join(', ') });
         }
-        if (disabled !== undefined && disabled !== !!target.disabled) {
+        if (disabledChanged) {
             await this.authService.audit({ event: disabled ? 'user_disabled' : 'user_enabled', ...audit });
-            if (disabled) {
-                await this.authService.revokeUserSessions(target.id, 'user disabled', {
-                    actor: caller.name,
-                    actorId: caller.id,
-                    userName: updated.name,
-                });
-            }
         }
         return updated;
     }

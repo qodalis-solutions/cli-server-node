@@ -56,10 +56,12 @@ export interface AuthContext {
 /**
  * Session lifecycle events (consumed by the CLI server to bind open shells to
  * their session): `session-ended` on logout, expiry, revoke, user disabled or
- * deleted; `access-changed` when users, groups or permissions change.
+ * deleted (`revoked` for revocations, which also broadcast `session-kicked`);
+ * `access-changed` when users, groups or permissions change, and after each
+ * expired-session sweep.
  */
 export type UsersSessionEvent =
-    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string }
+    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string; revoked?: boolean }
     | { type: 'access-changed'; userId?: string };
 
 /** Audit events that can change someone's effective permissions or account state. */
@@ -581,6 +583,7 @@ export class AuthService {
         for (const s of sessions) {
             if (this.isExpired(s, now)) {
                 await this.sessionStore.deleteSession(s.tokenHash);
+                this.emitSessionEvent({ type: 'session-ended', sessionId: s.id, userId: s.userId, reason: 'session expired' });
             } else {
                 live.push(s);
             }
@@ -595,7 +598,7 @@ export class AuthService {
     /** Deletes a session, audits `session_revoked` and broadcasts `session-kicked`. */
     async revokeSession(session: Session, reason: string, actor?: string, userName?: string, actorId?: string): Promise<void> {
         await this.sessionStore.deleteSessionById(session.id);
-        this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason });
+        this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason, revoked: true });
         const name = userName ?? (await this.userStore.getUser(session.userId))?.name ?? session.userId;
         await this.audit({
             event: 'session_revoked',
@@ -631,10 +634,16 @@ export class AuthService {
         return sessions.length;
     }
 
+    /**
+     * Expired-session sweep: drops expired sessions (`session-ended` for each one
+     * found), then lets open sockets re-check theirs (`access-changed`) in case
+     * the store dropped some silently.
+     */
     async cleanupExpiredSessions(): Promise<void> {
+        await this.listSessions(); // idle and absolute expiry
         await this.sessionStore.cleanup(this.sessionTimeoutMs);
-        await this.listSessions(); // also drops sessions past the absolute lifetime
         this.sweepTickets();
+        this.emitSessionEvent({ type: 'access-changed' });
     }
 }
 

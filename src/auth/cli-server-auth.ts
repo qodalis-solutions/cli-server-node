@@ -75,10 +75,12 @@ export interface CliServerAuditEntry {
 /**
  * Session lifecycle events emitted by the auth provider:
  * - `session-ended`: logout, expiry, revoke (kick), user disabled/deleted;
- * - `access-changed`: users/groups/permissions changed (re-check permissions).
+ *   `revoked` is true for revocations, which also broadcast `session-kicked`;
+ * - `access-changed`: users/groups/permissions changed, or the expired-session
+ *   sweep ran (re-check open sockets).
  */
 export type CliServerSessionEvent =
-    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string }
+    | { type: 'session-ended'; sessionId: string; userId?: string; reason?: string; revoked?: boolean }
     | { type: 'access-changed'; userId?: string };
 
 /** Server permissions enforced when the users plugin protects the server. */

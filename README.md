@@ -395,7 +395,7 @@ Refusals are sent as *accept, then close* so browsers can read them (a foreign `
 
 | Code | Reason | When |
 |---|---|---|
-| 4401 | `login required` / `session ended` / `shell access is not configured` | missing ticket or (Bearer) token; session ended (logout, expiry, kick, user disabled/deleted, `shell:execute` removed, password change now required); shell locked |
+| 4401 | `login required` / `session ended` / `shell access is not configured` | missing ticket or (Bearer) token; session ended (logout, expiry, kick, user disabled/deleted, `shell:execute` removed, password change now required) — shell, events and logs sockets; shell locked |
 | 4403 | `forbidden` | wrong token, `authorize` false or threw, no `shell:execute`, password change required |
 | 4404 | `shell disabled` | `enableShell` is false |
 | 4408 | `shell timed out` | idle timeout or `maxDurationMs` |
@@ -751,6 +751,8 @@ Once mounted, every server route and socket requires a users session (login, ver
 | admin dashboard | `admin:access` |
 
 WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws-ticket` → `{ ticket, expiresIn: 30 }`, then connect with `?ticket=<ticket>`. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('perm')`. Processors declare `requiredPermissions: ['deploy:run']` to be enforced server-side.
+
+Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with **4401** `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets authenticated by an external auth adapter have no stored session and are not re-checked.
 
 See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, custom storage and external auth adapters.
 
