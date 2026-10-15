@@ -20,6 +20,21 @@ describe('permissionMatches', () => {
         expect(hasPermission(['a:b', 'users:*'], 'users:delete')).toBe(true);
         expect(hasPermission(undefined, 'users:delete')).toBe(false);
     });
+
+    it('a `*` grants everything below only as the last segment; elsewhere it matches exactly one segment', () => {
+        expect(permissionMatches('*:read', 'users:read')).toBe(true);
+        expect(permissionMatches('*:read', 'users:delete')).toBe(false);
+        expect(permissionMatches('*:read', 'users:read:x')).toBe(false);
+        expect(permissionMatches('*:read', 'users')).toBe(false);
+        expect(permissionMatches('*:read', '*')).toBe(false);
+        expect(permissionMatches('users:*:read', 'users:audit:read')).toBe(true);
+        expect(permissionMatches('users:*:read', 'users:audit:delete')).toBe(false);
+        expect(permissionMatches('users:*:read', 'users:audit')).toBe(false);
+        expect(permissionMatches('*:READ', 'Users:read')).toBe(true);
+        expect(permissionMatches('users:*', 'users:read:x')).toBe(true);
+        expect(hasPermission(['*:read'], 'shell:execute')).toBe(false);
+        expect(hasPermission(['*:read'], 'admin:access')).toBe(false);
+    });
 });
 
 describe('Permission matrix', () => {

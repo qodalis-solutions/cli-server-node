@@ -1,14 +1,16 @@
 /**
- * Permission strings are `resource:action`. A `*` segment matches that level
- * and everything below it (`*`, `users:*`). Matching is case-insensitive.
+ * Permission strings are `resource:action`. A `*` as the last segment matches
+ * that level and everything below it (`*`, `users:*`); a `*` in any other
+ * segment matches exactly one segment (`*:read` matches `users:read`, not
+ * `users:delete`). Matching is case-insensitive.
  * Same semantics as `cliPermissionMatches` in `@qodalis/cli-core`.
  */
 export function permissionMatches(granted: string, required: string): boolean {
     const g = granted.trim().toLowerCase().split(':');
     const r = required.trim().toLowerCase().split(':');
     for (let i = 0; i < g.length; i++) {
-        if (g[i] === '*') return true;
-        if (i >= r.length || g[i] !== r[i]) return false;
+        if (g[i] === '*' && i === g.length - 1) return true;
+        if (i >= r.length || (g[i] !== '*' && g[i] !== r[i])) return false;
     }
     return g.length === r.length;
 }
