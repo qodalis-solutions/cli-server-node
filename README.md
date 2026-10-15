@@ -314,6 +314,87 @@ The server exposes versioned endpoints:
 | WS | `/ws/qcli/events` | WebSocket events (also `/ws/v1/qcli/events`) |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell session |
 
+`GET /capabilities` reports `shell: true|false` and, when the shell is enabled, `shellAuth: 'users' | 'token' | 'custom' | 'anonymous' | 'locked'`.
+
+## Remote Shell Security
+
+The PTY shell (`/ws/v1/qcli/shell`, `/ws/qcli/shell`) gives OS-level access to the server. It is **off** unless `enableShell: true`. When enabled, exactly one access mode applies:
+
+| Mode (`shellAuth`) | When | Client must |
+|---|---|---|
+| `users` | the users plugin is mounted | connect with a WS ticket (`?ticket=`) of a session holding `shell:execute` |
+| `token` | no users plugin, `shell.token` set | send `Authorization: Bearer <token>` (header, or the `_header_Authorization` query parameter) |
+| `custom` | no users plugin, `shell.authorize` set | pass the host's `authorize(request, { url, remoteAddress, mode })` check |
+| `anonymous` | no users plugin, `shell.allowAnonymous: true` | nothing (a startup WARNING is logged) |
+| `locked` | none of the above | — every connection is closed with 4401 and a startup ERROR explains the options |
+
+Precedence: users plugin ⇒ `users` (a configured `token` and/or `authorize` must pass **as well**); otherwise `token`, then `authorize`, then `allowAnonymous`. Tokens are compared in constant time and never logged; an `authorize` that throws or rejects denies.
+
+### With the users plugin
+
+```typescript
+const { mountPlugin, eventSocketManager } = createCliServer({ enableShell: true });
+mountPlugin(new CliUsersBuilder().build((m) => eventSocketManager.broadcastMessage(m)));
+// Grant shell:execute to a group (root/admin has '*'):
+//   PUT /api/v1/qcli/groups/ops  { "permissions": ["commands:execute", "shell:execute"] }
+```
+
+An open shell is bound to the session that opened it: logout, idle/absolute session expiry, admin revoke (kick), user disabled or deleted, or losing `shell:execute` (re-checked on every user/group change and at least every 60 s) closes it with **4401** `session ended` and kills its process tree. Typing in the shell keeps the users session alive. Opens and closes are audited as `shell_opened` / `shell_closed` (`userId`, `actorId`, `metadata: { mode: 'interactive' | 'command', sessionId, durationMs, exitCode, reason }`), never with the command text or stdin.
+
+### Without the users plugin (token mode)
+
+```typescript
+createCliServer({
+    enableShell: true,
+    shell: { token: process.env.QCLI_SHELL_TOKEN },   // long random secret
+});
+```
+
+Browser clients cannot set WebSocket headers: configure the server in web-cli with `headers: { Authorization: 'Bearer <token>' }` and the client forwards it as `?_header_Authorization=Bearer%20<token>`. The standalone server (`src/server.ts`) enables token mode when `QCLI_SHELL_TOKEN` is set. Use HTTPS/WSS so the token is not sent in clear text.
+
+For your own scheme (reverse-proxy identity, IP allow-list, …) use `authorize`:
+
+```typescript
+createCliServer({
+    enableShell: true,
+    shell: { authorize: async (req, { remoteAddress }) => remoteAddress === '127.0.0.1' && req.headers['x-ops'] === 'yes' },
+});
+```
+
+Non-users modes log one info line per open/close (remote address, mode, reason) without the command text.
+
+### Options
+
+```typescript
+shell: {
+    token?: string;                    // token mode (or extra requirement with the users plugin)
+    authorize?: (req, ctx) => boolean | Promise<boolean>;  // custom mode (or extra requirement)
+    allowAnonymous?: boolean;          // open to anyone who can reach the server (not recommended)
+    maxSessionsPerUser?: number;       // per user (users mode) or per remote address (default 3)
+    maxSessions?: number;              // total concurrent shells (default 20)
+    idleTimeoutMs?: number;            // close after no stdin (default 15 min, 0 = off)
+    maxDurationMs?: number;            // absolute limit (default none)
+    sessionCheckIntervalMs?: number;   // users-mode re-check (default and max 60 000)
+    cwd?: string;                      // working directory (default: home directory)
+    shell?: string;                    // shell binary (default: detected)
+    env?: { allow?: string[]; set?: Record<string, string> };
+}
+```
+
+The shell does **not** inherit the server environment: it gets only `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `COLUMNS`, `LINES`, `SHELL` (plus the variables Windows needs to start PowerShell), the names in `env.allow`, and `env.set`. Secrets such as database passwords stay out of the shell.
+
+### Close codes
+
+Refusals are sent as *accept, then close* so browsers can read them (a foreign `Origin` is still rejected with HTTP 403):
+
+| Code | Reason | When |
+|---|---|---|
+| 4401 | `login required` / `session ended` / `shell access not configured` | missing ticket or token, session ended, shell locked |
+| 4403 | `permission denied` / `invalid token` | no `shell:execute`, wrong token, `authorize` false or threw |
+| 4404 | `shell disabled` | `enableShell` is false |
+| 4408 | `shell timed out` | idle timeout or `maxDurationMs` |
+| 4429 | `too many shell sessions` | `maxSessionsPerUser` or `maxSessions` reached |
+
 ## Processor Base Class Reference
 
 `CliCommandProcessor` provides these members:
@@ -338,12 +419,13 @@ interface CliServerOptions {
     cors?: boolean | cors.CorsOptions;     // CORS config (default: only allowedOrigins; off when none)
     allowedOrigins?: string[];             // CORS + WebSocket Origin allow-list ('http://host:*' = any port)
     enableShell?: boolean;                 // Interactive shell WebSocket (default: false)
+    shell?: CliShellOptions;               // Shell access mode, limits, timeouts, env (see Remote Shell Security)
     auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
     configure?: (builder: CliBuilder) => void;  // Processor registration
 }
 ```
 
-CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`.
+CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`, and even then it is locked until an access mode applies (see [Remote Shell Security](#remote-shell-security)).
 
 When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth`, every `/api/...` route and every WebSocket requires a users session (see [Users Plugin](#users-plugin)); without it the server behaves as before.
 
@@ -653,7 +735,7 @@ Once mounted, every server route and socket requires a users session (login, ver
 | fs `upload`/`mkdir`/`rm` | `files:write` |
 | data explorer | `data:query` |
 | jobs read / manage | `jobs:read` / `jobs:manage` |
-| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
+| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (see [Remote Shell Security](#remote-shell-security)) |
 | admin dashboard | `admin:access` |
 
 WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws-ticket` → `{ ticket, expiresIn: 30 }`, then connect with `?ticket=<ticket>`. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('perm')`. Processors declare `requiredPermissions: ['deploy:run']` to be enforced server-side.
