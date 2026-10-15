@@ -249,6 +249,17 @@ export class CliShellSessionManager {
         };
         this._sessions.add(session);
         this.ensureCheckTimer();
+        if (session.ctx) {
+            // A logout/revoke/permission change between ticket consumption (or a slow
+            // `authorize`) and the registration above emitted its event before this
+            // shell could hear it: revalidate once now, before anything is spawned.
+            await this.revalidateSession(session);
+            if (session.closed) return;
+            if (ws.readyState !== WebSocket.OPEN) {
+                this.end(session, undefined, undefined, 'closed');
+                return;
+            }
+        }
         this.spawn(session, cols, rows, command);
     }
 
@@ -460,28 +471,34 @@ export class CliShellSessionManager {
      * previous check touches it first (at most once per 30 s).
      */
     async recheck(userId?: string): Promise<void> {
-        const auth = this._auth;
         for (const s of [...this._sessions]) {
             if (s.closed || !s.ctx || (userId && s.ctx.userId !== userId)) continue;
-            let fresh: CliServerAuthContext | undefined = s.ctx;
-            const now = Date.now();
-            const typed = s.inputSinceCheck;
-            s.inputSinceCheck = false;
-            try {
-                if (typed && auth?.touch && now - s.lastTouch >= SHELL_DEFAULTS.touchIntervalMs) {
-                    s.lastTouch = now;
-                    await auth.touch(s.ctx);
-                }
-                fresh = auth?.revalidate ? await auth.revalidate(s.ctx, s.request) : s.ctx;
-            } catch {
-                fresh = undefined;
+            await this.revalidateSession(s);
+        }
+    }
+
+    /** One re-check of a users-mode shell; ends it when the session ended or lost `shell:execute`. */
+    private async revalidateSession(s: ShellSession): Promise<void> {
+        const auth = this._auth;
+        if (s.closed || !s.ctx) return;
+        let fresh: CliServerAuthContext | undefined = s.ctx;
+        const now = Date.now();
+        const typed = s.inputSinceCheck;
+        s.inputSinceCheck = false;
+        try {
+            if (typed && auth?.touch && now - s.lastTouch >= SHELL_DEFAULTS.touchIntervalMs) {
+                s.lastTouch = now;
+                await auth.touch(s.ctx);
             }
-            if (s.closed) continue;
-            if (!fresh || !auth || !auth.hasPermission(fresh, CliServerPermissions.ShellExecute)) {
-                this.end(s, ShellCloseCodes.LoginRequired, 'session ended', fresh ? 'permission removed' : 'session ended');
-            } else {
-                s.ctx = { ...s.ctx, permissions: fresh.permissions };
-            }
+            fresh = auth?.revalidate ? await auth.revalidate(s.ctx, s.request) : s.ctx;
+        } catch {
+            fresh = undefined;
+        }
+        if (s.closed) return;
+        if (!fresh || !auth || !auth.hasPermission(fresh, CliServerPermissions.ShellExecute)) {
+            this.end(s, ShellCloseCodes.LoginRequired, 'session ended', fresh ? 'permission removed' : 'session ended');
+        } else {
+            s.ctx = { ...s.ctx, permissions: fresh.permissions };
         }
     }
 

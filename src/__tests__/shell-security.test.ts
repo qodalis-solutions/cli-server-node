@@ -547,6 +547,55 @@ describe('C2: session binding', () => {
     });
 });
 
+describe('C2: session changes while the shell is being opened', () => {
+    // The periodic re-check is far away: only the open-time revalidation can catch these.
+    const slowCheck = { sessionCheckIntervalMs: 60_000 };
+    const openOrClosed = (c: Conn) => Promise.race([c.closed, sleep(1500).then(() => 'still open' as const)]);
+
+    it('a logout after the ticket was consumed (slow authorize) closes with 4401 "session ended" before spawning', async () => {
+        let token = '';
+        const h = await start({
+            users: true,
+            shell: {
+                ...slowCheck,
+                authorize: async () => {
+                    await request(h.cli.app).delete(`${V1}/sessions/current`).set(bearer(token)).expect(204);
+                    return true;
+                },
+            },
+        });
+        token = (await login(h.cli.app, 'root', ROOT_PASS)).token;
+        const t = await ticket(h.cli.app, token);
+        const c = open(h.port, `/ws/v1/qcli/shell?ticket=${t}`);
+        expect(await openOrClosed(c)).toEqual({ code: 4401, reason: 'session ended' });
+        expect(c.messages.some((m) => m.type === 'ready')).toBe(false);
+    });
+
+    it('losing shell:execute while opening closes with 4401 "session ended"', async () => {
+        const h = await start({
+            users: true,
+            shell: {
+                ...slowCheck,
+                authorize: async () => {
+                    await h.users!.groupStore.updateGroup('shellers', { permissions: ['commands:execute'] });
+                    return true;
+                },
+            },
+        });
+        const root = await login(h.cli.app, 'root', ROOT_PASS);
+        await request(h.cli.app).post(`${V1}/groups`).set(bearer(root.token)).send({ name: 'shellers', permissions: ['shell:execute'] }).expect(201);
+        await request(h.cli.app)
+            .post(`${V1}/users`)
+            .set(bearer(root.token))
+            .send({ name: 'ops', email: 'ops@x.io', password: 'opspass1', groups: ['shellers'] })
+            .expect(201);
+        const ops = await login(h.cli.app, 'ops', 'opspass1');
+        const c = open(h.port, `/ws/v1/qcli/shell?ticket=${await ticket(h.cli.app, ops.token)}`);
+        expect(await openOrClosed(c)).toEqual({ code: 4401, reason: 'session ended' });
+        expect(c.messages.some((m) => m.type === 'ready')).toBe(false);
+    });
+});
+
 describe('C2: adapter-authenticated shells', () => {
     const extUser: User = { id: 'ext-1', name: 'extuser', email: 'ext@host.io', groups: [], createdAt: 0, updatedAt: 0 };
     /** What the host's auth currently says about the `sid=ok` cookie. */
