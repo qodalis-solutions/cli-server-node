@@ -5,6 +5,23 @@ import { McpTool, McpToolAnnotations, McpToolProvider, mcpError, mcpJson, mcpObj
 const errorMessage = (err: unknown) => (err as Error)?.message ?? String(err);
 
 /**
+ * Resolves a job by id, or by a unique name (exact, then case-insensitive).
+ * Returns the id, or an error message (not found / ambiguous name).
+ */
+export function resolveJobId(scheduler: CliJobScheduler, idOrName: string): { id: string } | { error: string } {
+    if (scheduler.get(idOrName)) return { id: idOrName };
+    const jobs = scheduler.getAll();
+    let matches = jobs.filter((j) => j.name === idOrName);
+    if (matches.length === 0) {
+        const lower = idOrName.toLowerCase();
+        matches = jobs.filter((j) => j.name.toLowerCase() === lower);
+    }
+    if (matches.length === 1) return { id: matches[0].id };
+    if (matches.length > 1) return { error: `Job name '${idOrName}' is ambiguous (${matches.length} jobs); use the job id` };
+    return { error: 'Job not found' };
+}
+
+/**
  * Jobs tools over the jobs plugin's scheduler: `jobs_list`, `jobs_get`,
  * `jobs_history` (`jobs:read`) and `jobs_trigger|pause|resume|stop|cancel`
  * (`jobs:manage`).
@@ -16,7 +33,8 @@ export class JobsMcpToolProvider implements McpToolProvider {
 
     getTools(): McpTool[] {
         const s = this.scheduler;
-        const idProp = { id: { type: 'string' as const, description: 'Job id' } };
+        const idProp = { id: { type: 'string' as const, description: 'Job id or unique job name' } };
+        const resolve = (idOrName: unknown) => resolveJobId(s, idOrName as string);
         const action = (
             name: string,
             description: string,
@@ -29,9 +47,11 @@ export class JobsMcpToolProvider implements McpToolProvider {
             requiredPermissions: [P.JobsManage],
             ...(annotations ? { annotations } : {}),
             call: async (args) => {
+                const job = resolve(args.id);
+                if ('error' in job) return mcpError(job.error);
                 try {
-                    await fn(args.id as string);
-                    return mcpJson({ ok: true, id: args.id }, `${name.slice('jobs_'.length)}: ok`);
+                    await fn(job.id);
+                    return mcpJson({ ok: true, id: job.id }, `${name.slice('jobs_'.length)}: ok`);
                 } catch (err) {
                     return mcpError(errorMessage(err));
                 }
@@ -57,8 +77,9 @@ export class JobsMcpToolProvider implements McpToolProvider {
                 requiredPermissions: [P.JobsRead],
                 annotations: { readOnlyHint: true },
                 call: async (args) => {
-                    const job = s.get(args.id as string);
-                    return job ? mcpJson({ ...job }) : mcpError('Job not found');
+                    const job = resolve(args.id);
+                    if ('error' in job) return mcpError(job.error);
+                    return mcpJson({ ...s.get(job.id)! });
                 },
             },
             {
@@ -71,8 +92,9 @@ export class JobsMcpToolProvider implements McpToolProvider {
                 requiredPermissions: [P.JobsRead],
                 annotations: { readOnlyHint: true },
                 call: async (args) => {
-                    const id = args.id as string;
-                    if (!s.getRegistration(id)) return mcpError('Job not found');
+                    const job = resolve(args.id);
+                    if ('error' in job) return mcpError(job.error);
+                    const id = job.id;
                     const limit = Math.min(Math.max((args.limit as number | undefined) ?? 20, 1), 100);
                     try {
                         const result = await s.storage.getExecutions(id, { limit, offset: 0 });

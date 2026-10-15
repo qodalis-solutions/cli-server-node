@@ -9,6 +9,9 @@ import request from 'supertest';
 import { createCliServer, CliServerOptions } from '../create-cli-server';
 import { CliCommandProcessor, CliProcessCommand, ICliCommandProcessor, CliStructuredResponse } from '../abstractions';
 import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
+import { CliHashCommandProcessor } from '../processors/cli-hash-command-processor';
+import { CliBase64CommandProcessor } from '../processors/cli-base64-command-processor';
+import { CliHttpCommandProcessor } from '../processors/cli-http-command-processor';
 import { InMemoryFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import * as nodeFs from 'fs';
 import * as nodeOs from 'os';
@@ -303,6 +306,27 @@ describe('MCP: tools/list', () => {
         expect((await call(app, 'echo', { value: 'x' })).error).toEqual({ code: -32602, message: 'Unknown tool: echo' });
     });
 
+    it('acceptsValue: an optional `value` argument (built-ins that read the positional value)', async () => {
+        const s = server({
+            configure: (b) => {
+                b.addProcessor(new CliHashCommandProcessor()).addProcessor(new CliBase64CommandProcessor()).addProcessor(new CliHttpCommandProcessor());
+                b.addProcessor(new Proc('opt', 'Optional value', { acceptsValue: true }));
+            },
+        });
+        const tools = Object.fromEntries((await listTools(s.app)).map((t) => [t.name, t]));
+        for (const name of ['hash', 'base64_encode', 'base64_decode', 'http_get', 'http_post', 'opt']) {
+            expect(tools[name].inputSchema.properties.value, name).toMatchObject({ type: 'string' });
+            expect(tools[name].inputSchema.required, name).not.toContain('value');
+        }
+        expect(tools.hash.inputSchema.properties.algorithm).toMatchObject({ type: 'string', default: 'sha256' });
+        const hash = await call(s.app, 'hash', { value: 'abc', algorithm: 'md5' });
+        expect(hash.result.content[0].text).toBe('md5: 900150983cd24fb0d6963f7d28e17f72');
+        expect((await call(s.app, 'base64_encode', { value: 'hello' })).result.content[0].text).toBe('aGVsbG8=');
+        expect((await call(s.app, 'base64_decode', { value: 'aGVsbG8=' })).result.content[0].text).toBe('hello');
+        expect(JSON.parse((await call(s.app, 'opt', {})).result.content[0].text)).toEqual({ chain: [], args: {} });
+        expect(JSON.parse((await call(s.app, 'opt', { value: 'v' })).result.content[0].text)).toMatchObject({ value: 'v' });
+    });
+
     it('tools are rebuilt on every request (new registrations show up)', async () => {
         const s = server();
         expect((await listTools(s.app)).map((t) => t.name)).not.toContain('later');
@@ -391,7 +415,7 @@ describe('MCP: tools/call', () => {
 // ------------------------------------------------------------- providers
 
 describe('MCP: tool providers', () => {
-    it('host/plugin providers add tools; built-in and earlier tools win collisions; invalid names skipped', async () => {
+    it('host/plugin providers add tools; collisions: built-in features, then providers in order, then commands; invalid names skipped', async () => {
         const s = server();
         const provider = (name: string, tools: string[]): McpToolProvider => ({
             name,
@@ -412,7 +436,7 @@ describe('MCP: tool providers', () => {
         expect(byName.custom.description).toBe('first:custom');
         expect(byName.custom.annotations).toEqual({ idempotentHint: true });
         expect(byName.other.description).toBe('second:other');
-        expect(byName.echo.description).not.toBe('first:echo'); // command tools come before plugins
+        expect(byName.echo.description).toBe('first:echo'); // provider tools win over command tools
         expect(byName.server_info.description).not.toBe('first:server_info');
         expect(byName['Bad Name']).toBeUndefined();
 
@@ -575,6 +599,31 @@ describe('MCP: tool providers', () => {
         expect(runs).toBe(1);
         const history = await call(s.app, 'jobs_history', { id, limit: 5 });
         expect(history.result.structuredContent.limit).toBe(5);
+        await jobs.scheduler.stop();
+    });
+
+    it('jobs tools accept a job id or a unique job name', async () => {
+        const s = server();
+        const noop = { executeAsync: async () => undefined } as any;
+        const jobs = new CliJobsBuilder()
+            .addJob(noop, { name: 'tick', interval: '1h' })
+            .addJob(noop, { name: 'dup', interval: '1h' })
+            .addJob(noop, { name: 'dup', interval: '2h' })
+            .build();
+        s.mountPlugin(jobs);
+        const byName = await call(s.app, 'jobs_get', { id: 'tick' });
+        expect(byName.result.structuredContent.name).toBe('tick');
+        expect((await call(s.app, 'jobs_get', { id: 'TICK' })).result.structuredContent.name).toBe('tick');
+        const id = byName.result.structuredContent.id;
+        expect((await call(s.app, 'jobs_get', { id })).result.structuredContent.name).toBe('tick');
+        const paused = await call(s.app, 'jobs_pause', { id: 'tick' });
+        expect(paused.result).toMatchObject({ isError: false, structuredContent: { ok: true, id } });
+        expect((await call(s.app, 'jobs_resume', { id: 'tick' })).result.isError).toBe(false);
+        expect((await call(s.app, 'jobs_history', { id: 'tick' })).result.isError).toBe(false);
+        const ambiguous = await call(s.app, 'jobs_get', { id: 'dup' });
+        expect(ambiguous.result.isError).toBe(true);
+        expect(ambiguous.result.content[0].text).toMatch(/ambiguous/);
+        expect((await call(s.app, 'jobs_trigger', { id: 'nope' })).result.content[0].text).toBe('Job not found');
         await jobs.scheduler.stop();
     });
 });

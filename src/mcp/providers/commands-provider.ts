@@ -30,9 +30,9 @@ function propertyType(type: string | undefined): McpPropertySchema {
     }
 }
 
-/** True when the processor takes a positional value. */
+/** True when the processor takes a positional value (`valueRequired` or `acceptsValue`). */
 function takesValue(processor: ICliCommandProcessor): boolean {
-    return !!processor.valueRequired;
+    return !!processor.valueRequired || !!processor.acceptsValue;
 }
 
 /** Input schema of a processor: one property per parameter, plus `value` (positional input) when it takes a value. */

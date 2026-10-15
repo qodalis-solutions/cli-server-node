@@ -6,6 +6,7 @@ import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
 class Base64EncodeProcessor extends CliCommandProcessor {
     command = 'encode';
     description = 'Encodes text to Base64';
+    acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         const text = command.value;
@@ -18,6 +19,7 @@ class Base64EncodeProcessor extends CliCommandProcessor {
 class Base64DecodeProcessor extends CliCommandProcessor {
     command = 'decode';
     description = 'Decodes Base64 to text';
+    acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         const text = command.value;

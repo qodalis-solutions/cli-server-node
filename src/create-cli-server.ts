@@ -59,8 +59,8 @@ export interface CliServerMcp {
     /** The endpoint path (`{basePath}/mcp`). */
     readonly path: string;
     /**
-     * Registers a tool provider. Built-in tools win name collisions; between
-     * providers the first registered wins.
+     * Registers a tool provider. On a name collision built-in feature tools win,
+     * then providers in registration order, then command tools.
      */
     addProvider(provider: McpToolProvider): void;
 }
@@ -233,7 +233,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         return mode ? { shell: true, shellAuth: mode } : { shell: false };
     };
 
-    // MCP tool providers, in priority order: built-in features, commands, then plugins/host
+    // MCP tool providers, in priority order: built-in features, plugins/host (registration order), then commands
     const mcpFeatureProviders: McpToolProvider[] = [];
     const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor);
     const mcpFeatures = new Set<string>(['commands']);
@@ -256,7 +256,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         app.use(
             mcpPath,
             createMcpController({
-                providers: () => [...mcpFeatureProviders, commandsMcpProvider, ...builder.mcpToolProviders],
+                providers: () => [...mcpFeatureProviders, ...builder.mcpToolProviders, commandsMcpProvider],
                 mcp: mcpOptions,
                 getAuth: () => serverAuth,
                 allowedOrigins,

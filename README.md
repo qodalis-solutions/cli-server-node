@@ -319,7 +319,7 @@ The server exposes versioned endpoints:
 
 ## MCP Endpoint
 
-The server can expose **the whole system** to AI clients (Claude Code, Claude Desktop, Cursor, …) over the [Model Context Protocol](https://modelcontextprotocol.io): CLI commands, the filesystem API, the data explorer, jobs and tools contributed by plugins, each with the same permissions as a CLI user. It works with or without the users plugin.
+The server can expose **the whole system** to AI clients such as Claude Code over the [Model Context Protocol](https://modelcontextprotocol.io): CLI commands, the filesystem API, the data explorer, jobs and tools contributed by plugins, each with the same permissions as a CLI user. It works with or without the users plugin.
 
 ### Enabling
 
@@ -370,11 +370,13 @@ Tools are collected from **tool providers** on every request, so new registratio
 | jobs (when the jobs plugin is mounted) | `jobs_list`, `jobs_get {id}`, `jobs_history {id, limit?=20}` | `jobs:read` | read-only |
 | | `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` `{id}` | `jobs:manage` | `jobs_stop`/`jobs_cancel` destructive |
 
+The jobs tools' `id` accepts a job id or a unique job name (exact, then case-insensitive; an ambiguous name is an error).
+
 Feature tools use the same services as the HTTP routes (the storage provider and its path checks, the data explorer executor with its timeouts and row limits, the job scheduler); their errors become `isError: true` results. `fs_read` returns UTF-8 text (binary files → `isError` `binary file, N bytes`). Paths outside the provider's allow-list are rejected exactly as by `/api/qcli/fs` (symlinks are resolved first, so on macOS allow `/private/tmp` rather than `/tmp`).
 
-**Command tools**: every root command and sub-command that has no sub-commands, declares parameters or takes a value (`valueRequired`) becomes a tool named after its path joined with `_` (`weather`, `weather_current`), lower-cased, other characters than `[a-z0-9_-]` replaced by `-`, at most 64 characters. The input schema has one property per parameter (`string`, `number`, `boolean`, `array` of strings; anything else is a string) plus `value` (the positional input) when the command takes one. A call builds the same command the CLI would send and runs it through the **same executor as `/execute`**; the outputs are rendered as text (tables as `a | b` rows, lists one item per line, JSON pretty-printed, key-value as `key: value`), `isError` is `exitCode != 0`, and a single JSON-object output is also returned as `structuredContent`. Unknown tools and invalid arguments (wrong type, unknown or missing property) are JSON-RPC `-32602` errors.
+**Command tools**: every root command and sub-command that has no sub-commands, declares parameters or takes a value (`valueRequired`, or `acceptsValue` for an optional one) becomes a tool named after its path joined with `_` (`weather`, `weather_current`), lower-cased, other characters than `[a-z0-9_-]` replaced by `-`, at most 64 characters. The input schema has one property per parameter (`string`, `number`, `boolean`, `array` of strings; anything else is a string) plus `value` (the positional input) when the command takes one: required with `valueRequired`, optional with `acceptsValue` (set it on processors that read `command.value` without requiring it; the built-in `hash`, `base64 encode|decode`, `http get|post` and the weather commands do). A call builds the same command the CLI would send and runs it through the **same executor as `/execute`**; the outputs are rendered as text (tables as `a | b` rows, lists one item per line, JSON pretty-printed, key-value as `key: value`), `isError` is `exitCode != 0`, and a single JSON-object output is also returned as `structuredContent`. Unknown tools and invalid arguments (wrong type, unknown or missing property) are JSON-RPC `-32602` errors.
 
-Name collisions: built-in feature tools win over command tools, command tools over plugin tools, and between plugins the first registered wins (a warning is logged). The interactive shell is never a tool.
+Name collisions (a warning is logged): built-in feature tools win, then plugin/host provider tools in registration order, then command tools. The interactive shell is never a tool.
 
 ### Adding tools (providers)
 
@@ -404,9 +406,13 @@ Arguments are validated against `inputSchema` before `call` runs. Return `struct
 
 ### Using the MCP endpoint from an MCP client
 
-The steps below use the demo server (`cd demo && npm start`, port 8047, users plugin with `root` / `admin`). Replace the URL and credentials with yours.
+This guide connects [Claude Code](https://docs.claude.com/en/docs/claude-code) to a server. The commands use the demo server (`cd demo && npm start`: port 8047, users plugin, user `root` / password `admin`); replace the URL and credentials with yours.
 
 #### 1. Enable MCP on the server
+
+MCP is enabled with the `mcp` option of `createCliServer` (`mcp: true`, or an options object).
+
+With the users plugin (sessions, permissions, API tokens):
 
 ```typescript
 import { createCliServer, CliEchoCommandProcessor } from '@qodalis/cli-server-node';
@@ -417,7 +423,6 @@ const { app, eventSocketManager, mountPlugin } = createCliServer({
     configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
 });
 
-// Optional: users plugin (sign-in, permissions, API tokens)
 const usersPlugin = new CliUsersBuilder()
     .setDefaultAdminPassword('admin')
     .build((msg) => eventSocketManager.broadcastMessage(msg));
@@ -426,11 +431,21 @@ mountPlugin(usersPlugin);
 app.listen(8047);
 ```
 
-The endpoint is `http://localhost:8047/api/qcli/mcp`.
+Without the users plugin, protect the endpoint with a static bearer token (without `token` it is as open as `/execute`):
 
-#### 2. Get a credential
+```typescript
+const { app } = createCliServer({
+    mcp: { token: process.env.QCLI_MCP_TOKEN },
+    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
+});
+app.listen(8047);
+```
 
-**With the users plugin**: sign in, then create an API token with the session token (the API token is shown only once; tokens cannot be created with another API token):
+The endpoint is `http://localhost:8047/api/qcli/mcp` (`{basePath}/mcp`).
+
+#### 2. Get a token
+
+With the users plugin, sign in and create an API token with the session token (requires `jq`; otherwise copy the `token` field of each response):
 
 ```bash
 SESSION=$(curl -s -X POST http://localhost:8047/api/v1/qcli/sessions \
@@ -440,65 +455,36 @@ SESSION=$(curl -s -X POST http://localhost:8047/api/v1/qcli/sessions \
 TOKEN=$(curl -s -X POST http://localhost:8047/api/v1/qcli/tokens \
   -H "Authorization: Bearer $SESSION" \
   -H "Content-Type: application/json" \
-  -d '{"name":"mcp-client","expiresInDays":30}' | jq -r .token)
+  -d '{"name":"claude","expiresInDays":30}' | jq -r .token)
 
-echo "$TOKEN"   # qcli_pat_…
+echo "$TOKEN"
 ```
 
-Add `"permissions": ["commands:execute"]` to the body to restrict the token to a subset of your permissions. List and revoke tokens with `GET /api/v1/qcli/tokens` and `DELETE /api/v1/qcli/tokens/<id>` (see [API tokens](plugins/users/README.md#api-tokens)). Without `jq`, copy the `token` field of each JSON response by hand.
+The API token (`qcli_pat_…`) is shown only once. In the web CLI connected to the server, `token create claude` does the same. Add `"permissions": ["commands:execute", "files:read"]` to the body to give the token only part of your permissions; tokens are listed with `GET /api/v1/qcli/tokens` and revoked with `DELETE /api/v1/qcli/tokens/<id>` (see [API tokens](plugins/users/README.md#api-tokens)).
 
-**Without the users plugin**: set a static token on the server and use it as `$TOKEN` (without `mcp.token` the endpoint is open, like `/execute`):
+Without the users plugin, the token is the `mcp.token` value.
 
-```typescript
-createCliServer({ mcp: { token: process.env.QCLI_MCP_TOKEN } });
-```
+#### 3. Connect Claude Code
 
-#### 3. Connect a client
-
-**Claude Code**:
+**(a) Directly over HTTP** with the token:
 
 ```bash
 claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
 ```
 
-**Cursor** (`.cursor/mcp.json`) and **Claude Code project config** (`.mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "qcli": {
-      "type": "http",
-      "url": "http://localhost:8047/api/qcli/mcp",
-      "headers": { "Authorization": "Bearer <token>" }
-    }
-  }
-}
-```
-
-**Claude Desktop**: add the server as a custom connector (Settings → Connectors) with the URL above, or bridge it in `claude_desktop_config.json` with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which forwards the header:
-
-```json
-{
-  "mcpServers": {
-    "qcli": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8047/api/qcli/mcp", "--header", "Authorization:${QCLI_AUTH}"],
-      "env": { "QCLI_AUTH": "Bearer <token>" }
-    }
-  }
-}
-```
-
-**MCP Inspector**: run `npx @modelcontextprotocol/inspector`, choose the *Streamable HTTP* transport, enter the URL and add an `Authorization: Bearer <token>` header. Its CLI mode works too:
+**(b) Through the [`@qodalis/mcp-cli`](https://github.com/qodalis-solutions/mcp-cli) bridge**, a local MCP server configured with environment variables:
 
 ```bash
-npx @modelcontextprotocol/inspector --cli http://localhost:8047/api/qcli/mcp \
-  --transport http --header "Authorization: Bearer $TOKEN" --method tools/list
+claude mcp add qcli -e QCLI_URL=http://localhost:8047 -e QCLI_TOKEN=<token> -- npx -y @qodalis/mcp-cli
 ```
 
-#### 4. Raw requests with curl
+Use `QCLI_USER` / `QCLI_PASSWORD` instead of `QCLI_TOKEN` to sign in with a user, and `QCLI_READ_ONLY=true` to expose only read-only tools.
 
-Every request is a `POST` of one JSON-RPC message; the server is stateless, so no session header is needed between calls.
+Check the connection with `claude mcp list` (or `/mcp` inside Claude Code); `qcli` should be listed as connected, with the tools of step 4.
+
+#### 4. Check the endpoint with curl
+
+Every request is one JSON-RPC message sent with `POST`; the server is stateless, so no session header is needed between calls.
 
 ```bash
 # initialize
@@ -523,7 +509,7 @@ curl -s http://localhost:8047/api/qcli/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"value":"hello from MCP"}}}'
 ```
 
-Responses:
+Responses (shortened):
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qodalis-cli-server","version":"1.0.0-beta.7"},"instructions":"…"}}
@@ -537,14 +523,14 @@ A failed command is a normal result with `"isError": true`; an unknown tool or i
 
 | Symptom | Cause and fix |
 |---|---|
-| `401 {"error":"unauthorized"}` / `invalid or expired token` | No `Authorization: Bearer …` header, or the token is wrong, expired or revoked, or its user is disabled or deleted. Create a new token (step 2). Without the users plugin, check `mcp.token`. |
-| `403 {"error":"forbidden: origin not allowed"}` | The request has an `Origin` header that is neither in `allowedOrigins` nor the server's own origin (DNS-rebinding protection). Add the origin to `allowedOrigins`, or call from a client that sends no `Origin`. |
-| `403 {"error":"forbidden: missing permission commands:execute"}` | The user (or the token's scope) lacks `commands:execute`, which the endpoint requires. Add it to one of the user's groups, or create a token whose scope includes it. |
+| `claude mcp list` / `/mcp` shows `qcli` as failed | Run the curl checks of step 4 with the same URL and token to see the HTTP error below. |
+| `401 {"error":"unauthorized"}` or `{"error":"invalid or expired token"}` | No `Authorization: Bearer …` header, or the token is wrong, expired or revoked, or its user is disabled or deleted: create a new token (step 2). Without the users plugin, check `mcp.token`. |
+| `403 {"error":"forbidden: origin not allowed"}` | The request has an `Origin` header that is neither in `allowedOrigins` nor the server's own origin (DNS-rebinding protection). Claude Code sends no `Origin`; for browser-based clients add the origin to `allowedOrigins`. |
+| `403 {"error":"forbidden: missing permission commands:execute"}` | The user, or the token's scope, lacks `commands:execute`, which the endpoint requires. Add it to one of the user's groups, or create a token whose scope includes it. |
 | `403 {"error":"password change required"}` | The user must change their password first. |
-| `404` | MCP is not enabled (`mcp` option), or the URL is not `{basePath}/mcp`. |
-| `405` | The endpoint only accepts `POST` (clients that probe with `GET` for an SSE stream handle this). |
-| A tool is missing from `tools/list` | The caller lacks one of its permissions (`commands:execute` plus the command's `requiredPermissions`, `files:read`/`files:write`, `data:query`, `jobs:read`/`jobs:manage`); a token scope narrows them further. The `mcp.tools`/`mcp.exclude` lists may filter it out, or the feature (filesystem, data explorer, jobs) is not enabled. Commands whose sub-commands carry all the parameters appear as `<command>_<sub>` tools only. |
-| `-32602 Unknown tool: …` on `tools/call` | Same causes as a missing tool (calls see exactly the tools of `tools/list`). |
+| `404` | MCP is not enabled (`mcp` option) or the URL is not `{basePath}/mcp`. |
+| `405` with `Allow: POST` | The endpoint only accepts `POST` (MCP clients that probe with `GET` handle this). |
+| A tool is missing from `tools/list`, or `-32602 Unknown tool` | The user lacks one of the tool's permissions (`commands:execute` plus the command's `requiredPermissions`, `files:read`/`files:write`, `data:query`, `jobs:read`/`jobs:manage`); the token's scope narrows them further; `mcp.tools` / `mcp.exclude` filter it out; or the feature is not enabled on the server (file storage, data explorer sources, jobs plugin). A command whose parameters all live on its sub-commands appears only as `<command>_<sub>` tools. |
 
 ## Remote Shell Security
 
@@ -647,6 +633,7 @@ Refusals are sent as *accept, then close* so browsers can read them (a foreign `
 | `processors` | `ICliCommandProcessor[]` | `undefined` | Sub-commands |
 | `allowUnlistedCommands` | `boolean` | `undefined` | Accept sub-commands not in `processors` |
 | `valueRequired` | `boolean` | `undefined` | Require a positional value |
+| `acceptsValue` | `boolean` | `undefined` | Reads an optional positional value (`command.value`); MCP exposes it as an optional `value` argument |
 | `version` | `string` | `'1.0.0'` | Processor version string |
 | `author` | `ICliCommandAuthor` | default author | Author metadata (name, email) |
 

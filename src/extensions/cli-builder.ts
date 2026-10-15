@@ -87,7 +87,8 @@ export class CliBuilder {
 
     /**
      * Registers an MCP tool provider (used when the server's `mcp` option is on).
-     * Built-in tools win name collisions; between providers the first registered wins.
+     * On a name collision built-in feature tools win, then providers in registration
+     * order, then command tools.
      */
     addMcpToolProvider(provider: McpToolProvider): CliBuilder {
         this._mcpToolProviders.push(provider);
