@@ -8,7 +8,8 @@ import { hasControlChars, uncoveredPermissions } from '../security';
 // ------------------------------------------------------------- validation
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+$/;
+// Email: dot-atom local part (max 64) @ DNS labels ending in a letters-only TLD, or localhost; same rule as web-cli and the other servers.
+export const EMAIL_RE = /^(?=[^@]{1,64}@)[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:localhost|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63})$/;
 const PERMISSION_RE = /^(\*|[a-z0-9_.-]+(:([a-z0-9_.-]+|\*))*)$/i;
 export const MAX_NAME_LENGTH = 64;
 export const MAX_EMAIL_LENGTH = 254;
@@ -34,7 +35,7 @@ function validateName(value: string, field: string): string {
 
 function validateEmail(value: string): string {
     if (value.length > MAX_EMAIL_LENGTH || hasControlChars(value) || !EMAIL_RE.test(value)) {
-        throw badRequest('email must be a valid address (local@domain, at most 254 characters)');
+        throw badRequest('email must be a valid address (name@example.com, at most 254 characters)');
     }
     return value;
 }
