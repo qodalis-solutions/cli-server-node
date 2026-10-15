@@ -429,6 +429,8 @@ interface CliServerOptions {
 
 CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`, and even then it is locked until an access mode applies (see [Remote Shell Security](#remote-shell-security)).
 
+Same-origin requests (e.g. the bundled admin dashboard at `/qcli/admin`) are always allowed by the Origin, CORS and CSRF checks, even when `allowedOrigins` does not list the server's own origin (`X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only with `trustProxy`).
+
 When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth`, every `/api/...` route and every WebSocket requires a users session (see [Users Plugin](#users-plugin)); without it the server behaves as before.
 
 `createCliServer()` returns:

@@ -64,9 +64,11 @@ export class CliLogSocketManager {
     private _nextClientId = 1;
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
+    private readonly _trustProxy: boolean;
 
-    constructor(options: { allowedOrigins?: string[] } = {}) {
+    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean } = {}) {
         this._allowedOrigins = options.allowedOrigins;
+        this._trustProxy = options.trustProxy ?? false;
     }
 
     /** Installs the auth provider; when it protects the server, upgrades need a ticket and `logs:read`. */
@@ -130,6 +132,7 @@ export class CliLogSocketManager {
             authorizeWsUpgrade(request, parsed, {
                 auth: this._auth,
                 allowedOrigins: this._allowedOrigins,
+                trustProxy: this._trustProxy,
                 permission: CliServerPermissions.LogsRead,
             }).then(
                 (result) => {

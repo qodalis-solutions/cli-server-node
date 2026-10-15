@@ -8,7 +8,7 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
-import { ICliServerAuth, isOriginAllowed } from './auth/cli-server-auth';
+import { ICliServerAuth, isOriginAllowed, isSameOrigin } from './auth/cli-server-auth';
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
@@ -119,9 +119,13 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     } else if (corsOption && typeof corsOption === 'object') {
         app.use(cors(corsOption));
     } else if (corsOption === undefined && allowedOrigins && allowedOrigins.length > 0) {
+        // Same-origin requests (e.g. the bundled admin dashboard) are always allowed.
         app.use(
-            cors({
-                origin: (origin, callback) => callback(null, isOriginAllowed(origin, allowedOrigins)),
+            cors((req, callback) => {
+                const origin = req.headers.origin;
+                callback(null, {
+                    origin: isOriginAllowed(origin, allowedOrigins) || isSameOrigin(origin, req as express.Request),
+                });
             }),
         );
     }
@@ -158,7 +162,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const executor = new CliCommandExecutorService(registry);
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
-    const logSocketManager = new CliLogSocketManager({ allowedOrigins });
+    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };

@@ -85,3 +85,71 @@ export class RateLimiter {
         }
     }
 }
+
+/** Minimal request shape for {@link isSameOrigin} (Node `IncomingMessage` or Express `Request`). */
+export interface OriginCheckRequest {
+    headers: Record<string, string | string[] | undefined>;
+    socket?: { encrypted?: boolean; remoteAddress?: string } | null;
+    /** Express app (when present, its `trust proxy` setting is honoured). */
+    app?: { get?: (name: string) => unknown };
+}
+
+const DEFAULT_PORTS: Record<string, string> = { http: '80', https: '443' };
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+    const raw = Array.isArray(value) ? value[0] : value;
+    const first = raw?.split(',')[0]?.trim();
+    return first || undefined;
+}
+
+/** `scheme://host:port`, lower-cased, explicit port (http:80, https:443); `ws`/`wss` map to `http`/`https`. */
+function normalizeOrigin(scheme: string, hostPort: string): string | undefined {
+    let s = scheme.toLowerCase().replace(/:$/, '');
+    if (s === 'ws') s = 'http';
+    if (s === 'wss') s = 'https';
+    if (!DEFAULT_PORTS[s]) return undefined;
+    try {
+        const url = new URL(`${s}://${hostPort}`);
+        if (url.username || url.password || (url.pathname && url.pathname !== '/') || url.search || url.hash) return undefined;
+        return `${s}://${url.hostname.toLowerCase()}:${url.port || DEFAULT_PORTS[s]}`;
+    } catch {
+        return undefined;
+    }
+}
+
+function proxyTrusted(req: OriginCheckRequest, trustProxy: boolean | undefined): boolean {
+    if (trustProxy !== undefined) return trustProxy;
+    const fn = req.app?.get?.('trust proxy fn');
+    return typeof fn === 'function' ? Boolean((fn as (addr: string | undefined, i: number) => unknown)(req.socket?.remoteAddress, 0)) : false;
+}
+
+/**
+ * The request's own origin (`scheme://host:port`, normalized): the scheme from
+ * the socket (TLS or not) and the `Host` header. Behind a trusted proxy
+ * (`trustProxy`, or the Express app's `trust proxy` setting when omitted)
+ * `X-Forwarded-Proto` / `X-Forwarded-Host` win.
+ */
+export function requestOrigin(req: OriginCheckRequest, trustProxy?: boolean): string | undefined {
+    const trusted = proxyTrusted(req, trustProxy);
+    const scheme = (trusted && firstHeader(req.headers['x-forwarded-proto'])) || (req.socket?.encrypted ? 'https' : 'http');
+    const host = (trusted && firstHeader(req.headers['x-forwarded-host'])) || firstHeader(req.headers['host']);
+    return host ? normalizeOrigin(scheme, host) : undefined;
+}
+
+/**
+ * True when `origin` is the request's own origin (e.g. the bundled admin
+ * dashboard served by this server). Same-origin requests are not cross-site
+ * and always pass Origin/CSRF checks. Case-insensitive; default ports normalized.
+ */
+export function isSameOrigin(origin: string | undefined, req: OriginCheckRequest, trustProxy?: boolean): boolean {
+    if (!origin || origin === 'null') return false;
+    let o: string | undefined;
+    try {
+        const url = new URL(origin);
+        o = normalizeOrigin(url.protocol, url.host);
+    } catch {
+        return false;
+    }
+    const own = requestOrigin(req, trustProxy);
+    return !!o && !!own && o === own;
+}

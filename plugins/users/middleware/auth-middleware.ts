@@ -3,7 +3,7 @@ import { AuthAdapter } from '../models';
 import { AuthService, AuthContext } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup } from '../permissions';
-import { isOriginAllowed } from '../security';
+import { isOriginAllowed, isSameOrigin } from '../security';
 
 declare global {
     namespace Express {
@@ -31,7 +31,8 @@ export function getBearerToken(req: Request): string | undefined {
 /**
  * Authenticates requests: bearer token, or the host's auth adapter.
  * Enforces the CSRF rule: a state-changing request without a bearer token
- * (adapter/cookie mode) must come from an allowed `Origin`.
+ * (adapter/cookie mode) must come from an allowed `Origin` or from the
+ * server's own origin (same-origin, e.g. the bundled admin dashboard).
  */
 export class RequestAuthenticator {
     constructor(
@@ -68,7 +69,7 @@ export class RequestAuthenticator {
 
         if (!token && STATE_CHANGING.has(req.method.toUpperCase())) {
             const origin = req.headers.origin;
-            if (!isOriginAllowed(origin, this.getAllowedOrigins())) {
+            if (!isOriginAllowed(origin, this.getAllowedOrigins()) && !isSameOrigin(origin, req)) {
                 throw forbidden('cross-site request rejected: origin not allowed');
             }
         }

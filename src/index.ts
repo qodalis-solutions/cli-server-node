@@ -49,6 +49,8 @@ export {
     ICliServerAuth,
     CliServerPermissions,
     isOriginAllowed,
+    isSameOrigin,
+    requestOrigin,
     createServerAuthGate,
     ServerAuthGateOptions,
     requiredServerPermissions,

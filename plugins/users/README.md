@@ -124,7 +124,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 
 Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte salt, 32-byte key, at most 4 concurrent hashes), stored as `pbkdf2$100000$<saltB64>$<hashB64>` and compared in constant time. After 5 consecutive failures an account is locked for 5 minutes (`429 { "error": "account locked, try again later" }`); attempts are reserved before hashing so concurrent requests cannot exceed the limit, and unknown usernames are tracked and locked the same way (with a dummy hash for equal timing). Session stores only keep `SHA-256(token)`.
 
-In adapter/cookie mode, state-changing requests without a bearer header must come from an `Origin` in `allowedOrigins` (CSRF), otherwise 403.
+In adapter/cookie mode, state-changing requests without a bearer header must come from an `Origin` in `allowedOrigins` or from the server's own origin (same-origin, e.g. the bundled admin dashboard) (CSRF), otherwise 403.
 
 ### Audit events
 

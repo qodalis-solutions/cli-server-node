@@ -6,6 +6,8 @@ export {
     ICliServerAuth,
     CliServerPermissions,
     isOriginAllowed,
+    isSameOrigin,
+    requestOrigin,
 } from './cli-server-auth';
 export {
     createServerAuthGate,

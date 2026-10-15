@@ -1,10 +1,12 @@
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { CliServerAuthContext, ICliServerAuth, isOriginAllowed } from './cli-server-auth';
+import { CliServerAuthContext, ICliServerAuth, isOriginAllowed, isSameOrigin } from './cli-server-auth';
 
 export interface WsUpgradeAuthOptions {
     auth?: ICliServerAuth;
     allowedOrigins?: string[];
+    /** Honour `X-Forwarded-Proto`/`X-Forwarded-Host` when deciding whether the Origin is the server's own. */
+    trustProxy?: boolean;
     /** Permission required on top of authentication (protected mode only). */
     permission?: string;
 }
@@ -15,7 +17,8 @@ export type WsUpgradeAuthResult =
 
 /**
  * Authorizes a WebSocket upgrade:
- * - when `allowedOrigins` is set, a present `Origin` header must be allowed (403);
+ * - when `allowedOrigins` is set, a present `Origin` header must be allowed or
+ *   be the server's own origin (same-origin, e.g. the bundled dashboard) (403);
  * - with a protecting auth provider, a valid single-use `?ticket=` is required
  *   (401) and the optional permission is checked (403);
  * - otherwise a ticket, when present, only attaches an identity.
@@ -27,7 +30,7 @@ export async function authorizeWsUpgrade(
 ): Promise<WsUpgradeAuthResult> {
     const origin = request.headers.origin;
     if (options.allowedOrigins && options.allowedOrigins.length > 0 && origin !== undefined) {
-        if (!isOriginAllowed(origin, options.allowedOrigins)) {
+        if (!isOriginAllowed(origin, options.allowedOrigins) && !isSameOrigin(origin, request, options.trustProxy ?? false)) {
             return { ok: false, status: 403 };
         }
     }

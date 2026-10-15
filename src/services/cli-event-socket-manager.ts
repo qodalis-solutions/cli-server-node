@@ -30,7 +30,7 @@ export interface CliEventSocketManagerOptions {
     enableShell?: boolean;
     /** Shell security options (access mode, limits, timeouts, environment). */
     shell?: CliShellOptions;
-    /** Trust `X-Forwarded-For` for the shell's per-address limits and logs. */
+    /** Trust `X-Forwarded-*` headers (shell per-address limits/logs, same-origin checks). */
     trustProxy?: boolean;
     /** When set, every upgrade with an `Origin` header must come from one of these. */
     allowedOrigins?: string[];
@@ -55,6 +55,7 @@ export class CliEventSocketManager {
     private _nextClientId = 1;
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
+    private readonly _trustProxy: boolean;
 
     constructor(options: CliEventSocketManagerOptions = {}) {
         this._shellManager = new CliShellSessionManager({
@@ -63,6 +64,7 @@ export class CliEventSocketManager {
             trustProxy: options.trustProxy,
         });
         this._allowedOrigins = options.allowedOrigins;
+        this._trustProxy = options.trustProxy ?? false;
     }
 
     /** Installs the auth provider (users plugin) used to authenticate upgrades with tickets. */
@@ -116,7 +118,7 @@ export class CliEventSocketManager {
             const pathname = parsed.pathname;
 
             if (CliEventSocketManager.EVENT_PATHS.has(pathname)) {
-                authorizeWsUpgrade(request, parsed, { auth: this._auth, allowedOrigins: this._allowedOrigins }).then(
+                authorizeWsUpgrade(request, parsed, { auth: this._auth, allowedOrigins: this._allowedOrigins, trustProxy: this._trustProxy }).then(
                     (result) => {
                         if (!result.ok) {
                             rejectUpgrade(socket, result.status);
@@ -134,7 +136,7 @@ export class CliEventSocketManager {
             if (CliEventSocketManager.SHELL_PATHS.has(pathname)) {
                 // Origin rejection stays an HTTP 403; every other refusal is
                 // "accept, then close" with a code the browser can read (C5).
-                authorizeWsUpgrade(request, parsed, { allowedOrigins: this._allowedOrigins }).then((result) => {
+                authorizeWsUpgrade(request, parsed, { allowedOrigins: this._allowedOrigins, trustProxy: this._trustProxy }).then((result) => {
                     if (!result.ok) {
                         rejectUpgrade(socket, result.status);
                         return;
