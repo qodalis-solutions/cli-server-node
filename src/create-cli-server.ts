@@ -12,6 +12,21 @@ import { ICliServerAuth, isOriginAllowed, isSameOrigin, trustedProxyHops } from 
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
+import {
+    CliMcpOptions,
+    CommandsMcpToolProvider,
+    DataExplorerMcpToolProvider,
+    FilesystemMcpToolProvider,
+    JobsMcpToolProvider,
+    McpToolProvider,
+    MCP_SERVER_NAME,
+    MCP_SERVER_VERSION,
+    ServerMcpToolProvider,
+    createMcpController,
+    createMcpPreGate,
+    resolveMcpOptions,
+} from './mcp';
+import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -31,6 +46,23 @@ export interface MountablePlugin {
     serverAuth?: ICliServerAuth;
     /** Routes that stay public under server protection, as `"METHOD /path"` (e.g. a plugin's login). */
     publicRoutes?: string[];
+    /** MCP tool providers contributed by the plugin (used when the `mcp` option is on). */
+    mcpProviders?: McpToolProvider[];
+    /** Job scheduler (the jobs plugin): enables the `jobs_*` MCP tools. */
+    scheduler?: unknown;
+}
+
+/** MCP extension point of a server instance. */
+export interface CliServerMcp {
+    /** True when the MCP endpoint is enabled. */
+    readonly enabled: boolean;
+    /** The endpoint path (`{basePath}/mcp`). */
+    readonly path: string;
+    /**
+     * Registers a tool provider. On a name collision built-in feature tools win,
+     * then providers in registration order, then command tools.
+     */
+    addProvider(provider: McpToolProvider): void;
 }
 
 const logger = createLogger('Server');
@@ -73,6 +105,13 @@ export interface CliServerOptions {
      * Can also be installed later with `setAuth()` or by `mountPlugin(usersPlugin)`.
      */
     auth?: ICliServerAuth;
+    /**
+     * MCP endpoint (`POST {basePath}/mcp`, off by default): AI clients call the
+     * registered commands as MCP tools. `true` enables it with defaults; the object
+     * form sets an allow/deny list of tools, a static bearer `token` (only without
+     * an auth provider) and `instructions` returned by `initialize`.
+     */
+    mcp?: boolean | CliMcpOptions;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -105,6 +144,8 @@ export interface CliServerResult {
     mountPlugin(plugin: MountablePlugin): void;
     /** Installs (or removes) the auth provider protecting server routes and sockets. */
     setAuth(auth: ICliServerAuth | undefined): void;
+    /** MCP endpoint: register tool providers (`mcp.addProvider(p)`). */
+    mcp: CliServerMcp;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
@@ -135,7 +176,25 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         );
     }
 
-    app.use(express.json({ limit: '1mb' }));
+    const mcpOptions = resolveMcpOptions(options.mcp);
+    const mcpPath = `${normalizePath(basePath)}/mcp`;
+    if (mcpOptions?.token && options.auth?.protectServer) {
+        logger.warn('mcp.token is ignored: the auth provider protects the MCP endpoint');
+    }
+    if (mcpOptions) {
+        // DNS-rebinding protection and 405s come first, before authentication
+        app.use(mcpPath, createMcpPreGate({ allowedOrigins, trustProxy }));
+    }
+
+    // The MCP endpoint reads its own body (JSON-RPC parse errors are JSON-RPC responses)
+    const jsonParser = express.json({ limit: '1mb' });
+    app.use((req, res, next) => {
+        if (mcpOptions && normalizePath(req.path) === mcpPath) {
+            next();
+            return;
+        }
+        jsonParser(req, res, next);
+    });
     // Render body-parser failures (malformed JSON, too large) as JSON `{ error }`
     app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
         if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large')) {
@@ -157,6 +216,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             registry,
             cliPrefixes: Array.from(new Set(['/api/v1/qcli', normalizePath(basePath)])),
             publicRoutes,
+            mcpPaths: mcpOptions ? [mcpPath] : [],
         }),
     );
 
@@ -172,6 +232,38 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };
     };
+
+    // MCP tool providers, in priority order: built-in features, plugins/host (registration order), then commands
+    const mcpFeatureProviders: McpToolProvider[] = [];
+    const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor);
+    const mcpFeatures = new Set<string>(['commands']);
+    if (mcpOptions) {
+        mcpFeatures.add('mcp');
+        mcpFeatureProviders.push(
+            new ServerMcpToolProvider({
+                registry,
+                serverName: MCP_SERVER_NAME,
+                version: MCP_SERVER_VERSION,
+                capabilities: () => ({ ...shellCapabilities() }),
+                features: () => {
+                    const features = [...mcpFeatures];
+                    if (eventSocketManager.shellAuthMode) features.push('shell');
+                    if (serverAuth?.protectServer) features.push('users');
+                    return features;
+                },
+            }),
+        );
+        app.use(
+            mcpPath,
+            createMcpController({
+                providers: () => [...mcpFeatureProviders, ...builder.mcpToolProviders, commandsMcpProvider],
+                mcp: mcpOptions,
+                getAuth: () => serverAuth,
+                allowedOrigins,
+                trustProxy,
+            }),
+        );
+    }
 
     // Version discovery endpoint
     app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
@@ -192,6 +284,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     }
     if (fsProvider) {
         app.use('/api/qcli/fs', createFilesystemRouter(fsProvider));
+        mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
+        mcpFeatures.add('filesystem');
     }
 
     // Data Explorer API
@@ -199,6 +293,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     if (deBuilder && deBuilder.registry.size > 0) {
         const deExecutor = new DataExplorerExecutor(deBuilder.registry);
         app.use('/api/qcli/data-explorer', createDataExplorerController(deBuilder.registry, deExecutor));
+        mcpFeatureProviders.push(new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor));
+        mcpFeatures.add('data-explorer');
     }
 
     logger.info('CLI server created with %d processors', registry.processors.length);
@@ -229,7 +325,35 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
             app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
         }
+        if (isJobScheduler(plugin.scheduler) && !mcpFeatures.has('jobs')) {
+            mcpFeatureProviders.push(new JobsMcpToolProvider(plugin.scheduler));
+            mcpFeatures.add('jobs');
+        }
+        for (const provider of plugin.mcpProviders ?? []) {
+            builder.addMcpToolProvider(provider);
+        }
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin, setAuth };
+    const mcp: CliServerMcp = {
+        enabled: !!mcpOptions,
+        path: mcpPath,
+        addProvider: (provider) => {
+            builder.addMcpToolProvider(provider);
+        },
+    };
+
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin, setAuth, mcp };
+}
+
+/** Duck-typed check (the jobs plugin may be a different package copy than the server's). */
+function isJobScheduler(value: unknown): value is CliJobScheduler {
+    const s = value as Partial<Record<keyof CliJobScheduler, unknown>> | undefined;
+    return (
+        !!s &&
+        typeof s.getAll === 'function' &&
+        typeof s.get === 'function' &&
+        typeof s.getRegistration === 'function' &&
+        typeof s.triggerAsync === 'function' &&
+        typeof s.cancelCurrentAsync === 'function'
+    );
 }

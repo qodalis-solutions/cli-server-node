@@ -60,6 +60,12 @@ const { app, registry, builder, executor, eventSocketManager, logSocketManager, 
         // The shell gets a minimal environment; allow-list extra variables here.
         env: { allow: ['NODE_ENV'] },
     },
+    // MCP endpoint (POST /api/qcli/mcp): AI clients call the commands as tools.
+    // Protected by the users plugin: sign in, create an API token
+    // (POST /api/v1/qcli/tokens) and send it as `Authorization: Bearer qcli_pat_…`.
+    mcp: {
+        instructions: 'Qodalis CLI demo server: each tool runs one CLI command.',
+    },
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -322,6 +328,7 @@ const server = app.listen(port, () => {
     console.log(`  Admin API: http://localhost:${port}/api/v1/qcli/status`);
     console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
     console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
+    console.log(`  MCP:       http://localhost:${port}/api/qcli/mcp`);
     console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
     console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
 

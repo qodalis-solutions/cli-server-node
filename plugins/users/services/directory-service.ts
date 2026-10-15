@@ -4,17 +4,17 @@ import { AuthService } from './auth-service';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { ADMIN_GROUP, BUILT_IN_GROUPS, USERS_GROUP, inGroup, mergePermissions, sameName } from '../permissions';
 import { hasControlChars, uncoveredPermissions } from '../security';
+import { validatePermissions } from './permission-validation';
+
+export { MAX_PERMISSION_LENGTH, MAX_PERMISSIONS_PER_GROUP } from './permission-validation';
 
 // ------------------------------------------------------------- validation
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
 // Email: dot-atom local part (max 64) @ DNS labels ending in a letters-only TLD, or localhost; same rule as web-cli and the other servers.
 export const EMAIL_RE = /^(?=[^@]{1,64}@)[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:localhost|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63})$/;
-const PERMISSION_RE = /^(\*|[a-z0-9_.-]+(:([a-z0-9_.-]+|\*))*)$/i;
 export const MAX_NAME_LENGTH = 64;
 export const MAX_EMAIL_LENGTH = 254;
-export const MAX_PERMISSION_LENGTH = 128;
-export const MAX_PERMISSIONS_PER_GROUP = 100;
 export const MAX_DESCRIPTION_LENGTH = 256;
 export const MAX_DATA_BYTES = 16 * 1024;
 export const MAX_HOME_DIR_LENGTH = 1024;
@@ -44,18 +44,6 @@ function validateFreeText(value: string, field: string, max: number): string {
     if (value.length > max) throw badRequest(`${field} must be at most ${max} characters`);
     if (hasControlChars(value)) throw badRequest(`${field} must not contain control characters`);
     return value;
-}
-
-function validatePermissions(values: string[]): string[] {
-    if (values.length > MAX_PERMISSIONS_PER_GROUP) {
-        throw badRequest(`a group may have at most ${MAX_PERMISSIONS_PER_GROUP} permissions`);
-    }
-    for (const p of values) {
-        if (p.length > MAX_PERMISSION_LENGTH || !PERMISSION_RE.test(p)) {
-            throw badRequest(`invalid permission: ${p.slice(0, MAX_PERMISSION_LENGTH).replace(/[\u0000-\u001f\u007f]/g, '')}`);
-        }
-    }
-    return values;
 }
 
 function validateData(value: Record<string, any>): Record<string, any> {
@@ -323,6 +311,9 @@ export class DirectoryService {
             actorId: caller.id,
             userName: target.name,
         });
+        // After the revocations: deleting tokens makes open sockets re-check, which
+        // must not end the sessions above before they are kicked.
+        await this.authService.deleteUserTokens(target.id);
         await this.authService.audit({ event: 'user_deleted', username: target.name, userId: target.id, actor: caller.name, actorId: caller.id });
     }
 

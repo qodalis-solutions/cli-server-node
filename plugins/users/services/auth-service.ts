@@ -1,12 +1,16 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import {
     ICliUserStore,
     ICliSessionStore,
     ICliCredentialStore,
     ICliAuditStore,
     ICliGroupStore,
+    ICliApiTokenStore,
 } from '../stores/interfaces';
+import { InMemoryApiTokenStore } from '../stores/in-memory-api-token-store';
 import {
+    ApiToken,
+    ApiTokenView,
     AuditEntry,
     LoginResult,
     Session,
@@ -16,10 +20,11 @@ import {
     User,
     UsersBroadcastFn,
 } from '../models';
-import { HttpError, badRequest, unauthorized } from '../errors';
+import { HttpError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors';
 import { hashPassword, verifyPasswordHash, dummyVerify } from './password-hasher';
-import { mergePermissions } from '../permissions';
+import { hasPermission, mergePermissions } from '../permissions';
 import { hashToken, sanitize } from '../security';
+import { validatePermissions } from './permission-validation';
 
 export const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_MAX_LOGIN_ATTEMPTS = 5;
@@ -31,6 +36,21 @@ export const WS_TICKET_TTL_SECONDS = 30;
 
 export const LOCKED_MESSAGE = 'account locked, try again later';
 
+/** Prefix of API tokens (`qcli_pat_` + 32 random bytes, base64url without padding). */
+export const API_TOKEN_PREFIX = 'qcli_pat_';
+export const MAX_API_TOKENS_PER_USER = 20;
+export const DEFAULT_API_TOKEN_EXPIRY_DAYS = 90;
+export const MAX_API_TOKEN_EXPIRY_DAYS = 365;
+/** `lastUsedAt` is written at most once per this interval. */
+export const API_TOKEN_LAST_USED_INTERVAL_MS = 60_000;
+const API_TOKEN_NAME_RE = /^[A-Za-z0-9._ -]{1,64}$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** True when the bearer token is an API token (routed to the token store, not the session store). */
+export function isApiToken(token: string): boolean {
+    return token.startsWith(API_TOKEN_PREFIX);
+}
+
 export interface AuthServiceOptions {
     /** Used to compute effective permissions. Without it users have no permissions. */
     groupStore?: ICliGroupStore;
@@ -41,6 +61,10 @@ export interface AuthServiceOptions {
     maxSessionLifetimeMs?: number;
     /** Broadcasts `session-kicked` events over the events socket. */
     broadcast?: UsersBroadcastFn;
+    /** API token storage (default in-memory). */
+    apiTokenStore?: ICliApiTokenStore;
+    /** Allow API tokens that never expire (default false). */
+    allowNonExpiringTokens?: boolean;
 }
 
 /** An authenticated request context: the live user plus, for token auth, the session. */
@@ -49,8 +73,10 @@ export interface AuthContext {
     permissions: string[];
     /** Absent for external-auth (adapter) requests. */
     session?: Session;
-    /** SHA-256 of the bearer token, for token-authenticated requests. */
+    /** SHA-256 of the bearer token, for session-token-authenticated requests. */
     tokenHash?: string;
+    /** The API token, for requests authenticated by an API token (no session). */
+    apiToken?: ApiToken;
 }
 
 /**
@@ -84,6 +110,8 @@ interface TicketEntry {
     expiresAt: number;
     userId: string;
     sessionId?: string;
+    /** Identity from an API token (no session). */
+    apiTokenId?: string;
     /** External-auth (adapter) requests have no stored session: keep the resolved context. */
     adapterContext?: AuthContext;
 }
@@ -98,6 +126,8 @@ export class AuthService {
     readonly lockoutMs: number;
     readonly minPasswordLength: number;
     readonly maxSessionLifetimeMs: number;
+    readonly allowNonExpiringTokens: boolean;
+    readonly apiTokenStore: ICliApiTokenStore;
     private readonly groupStore?: ICliGroupStore;
     private broadcast?: UsersBroadcastFn;
     private readonly lockouts = new Map<string, LockoutState>();
@@ -118,6 +148,8 @@ export class AuthService {
         this.minPasswordLength = options.minPasswordLength ?? DEFAULT_MIN_PASSWORD_LENGTH;
         this.maxSessionLifetimeMs = options.maxSessionLifetimeMs ?? DEFAULT_MAX_SESSION_LIFETIME_MS;
         this.broadcast = options.broadcast;
+        this.apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
+        this.allowNonExpiringTokens = options.allowNonExpiringTokens ?? false;
     }
 
     setBroadcast(fn: UsersBroadcastFn | undefined): void {
@@ -451,6 +483,9 @@ export class AuthService {
      * `lastActivity`.
      */
     async authenticateToken(token: string): Promise<AuthContext> {
+        if (isApiToken(token)) {
+            return this.authenticateApiToken(token);
+        }
         const tokenHash = hashToken(token);
         const session = await this.sessionStore.getSession(tokenHash);
         if (!session) {
@@ -463,6 +498,185 @@ export class AuthService {
         return { user, permissions, session, tokenHash };
     }
 
+    // ----------------------------------------------------------- api tokens
+
+    /** Effective permissions of a token: the user's, narrowed to the scope entries the user still holds. */
+    static scopePermissions(userPermissions: string[], scope: string[] | undefined): string[] {
+        if (!scope) return userPermissions;
+        return scope.filter((p) => hasPermission(userPermissions, p));
+    }
+
+    private static isTokenExpired(token: ApiToken, now = Date.now()): boolean {
+        return token.expiresAt !== null && token.expiresAt !== undefined && now >= token.expiresAt;
+    }
+
+    /** Validates a stored token: not expired, live user enabled (401 otherwise). */
+    private async validateApiToken(token: ApiToken): Promise<AuthContext> {
+        if (AuthService.isTokenExpired(token)) {
+            throw unauthorized('invalid or expired token');
+        }
+        const user = await this.userStore.getUser(token.userId);
+        if (!user || user.id !== token.userId || user.disabled) {
+            throw unauthorized('invalid or expired token');
+        }
+        const permissions = AuthService.scopePermissions(await this.getEffectivePermissions(user), token.permissions);
+        return { user, permissions, apiToken: token };
+    }
+
+    /** Resolves an API bearer token (missing/expired/user unavailable → 401) and records its use. */
+    async authenticateApiToken(token: string): Promise<AuthContext> {
+        const stored = await this.apiTokenStore.getTokenByHash(hashToken(token));
+        if (!stored) {
+            throw unauthorized('invalid or expired token');
+        }
+        const ctx = await this.validateApiToken(stored);
+        const now = Date.now();
+        if (stored.lastUsedAt === undefined || stored.lastUsedAt === null || now - stored.lastUsedAt >= API_TOKEN_LAST_USED_INTERVAL_MS) {
+            await this.apiTokenStore.updateLastUsed(stored.id, now);
+            stored.lastUsedAt = now;
+        }
+        return ctx;
+    }
+
+    /** Re-validates a token identity (long-lived sockets); undefined when revoked, expired or the user is unavailable. */
+    async revalidateApiToken(userId: string, apiTokenId: string): Promise<AuthContext | undefined> {
+        const token = await this.apiTokenStore.getToken(apiTokenId);
+        if (!token || token.userId !== userId) return undefined;
+        try {
+            return await this.validateApiToken(token);
+        } catch {
+            return undefined;
+        }
+    }
+
+    toApiTokenView(token: ApiToken, userName: string): ApiTokenView {
+        const view: ApiTokenView = {
+            id: token.id,
+            name: token.name,
+            userId: token.userId,
+            userName,
+            createdAt: token.createdAt,
+            expiresAt: token.expiresAt ?? null,
+            lastUsedAt: token.lastUsedAt ?? null,
+        };
+        if (token.permissions) view.permissions = [...token.permissions];
+        return view;
+    }
+
+    /** Tokens of `userId`, or every token when omitted, oldest first. */
+    async listApiTokens(userId?: string): Promise<ApiToken[]> {
+        const tokens = await this.apiTokenStore.getTokens(userId);
+        return tokens.sort((a, b) => a.createdAt - b.createdAt);
+    }
+
+    /**
+     * Creates an API token for the caller (session only). Validates the name
+     * (400, duplicate 409), the expiry (1-365 days, default 90; `null` only with
+     * `allowNonExpiringTokens`), the 20-token limit (400) and the scope (each entry
+     * valid, 400, and covered by the caller's permissions, 403).
+     */
+    async createApiToken(ctx: AuthContext, body: Record<string, unknown>): Promise<{ token: string; apiToken: ApiToken }> {
+        if (ctx.apiToken) {
+            throw forbidden('forbidden: API tokens cannot create tokens');
+        }
+        if (!ctx.session) {
+            throw new HttpError(501, 'Authentication is managed by the host application');
+        }
+        const name = body.name;
+        if (typeof name !== 'string' || !API_TOKEN_NAME_RE.test(name)) {
+            throw badRequest('name must be 1-64 characters of [A-Za-z0-9._ -]');
+        }
+
+        let expiresAt: number | null;
+        const now = Date.now();
+        const days = body.expiresInDays;
+        if (days === undefined) {
+            expiresAt = now + DEFAULT_API_TOKEN_EXPIRY_DAYS * DAY_MS;
+        } else if (days === null) {
+            if (!this.allowNonExpiringTokens) {
+                throw badRequest('non-expiring tokens are not allowed');
+            }
+            expiresAt = null;
+        } else if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > MAX_API_TOKEN_EXPIRY_DAYS) {
+            throw badRequest(`expiresInDays must be an integer between 1 and ${MAX_API_TOKEN_EXPIRY_DAYS}`);
+        } else {
+            expiresAt = now + days * DAY_MS;
+        }
+
+        let permissions: string[] | undefined;
+        if (body.permissions !== undefined && body.permissions !== null) {
+            const value = body.permissions;
+            if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || v.length === 0)) {
+                throw badRequest('permissions must be an array of strings');
+            }
+            permissions = mergePermissions(validatePermissions(value as string[]));
+            for (const p of permissions) {
+                if (!hasPermission(ctx.permissions, p)) {
+                    throw forbidden(`forbidden: cannot grant ${p}`);
+                }
+            }
+        }
+
+        const existing = await this.apiTokenStore.getTokens(ctx.user.id);
+        if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+            throw conflict(`token '${name}' already exists`);
+        }
+        if (existing.filter((t) => !AuthService.isTokenExpired(t, now)).length >= MAX_API_TOKENS_PER_USER) {
+            throw badRequest(`a user may have at most ${MAX_API_TOKENS_PER_USER} tokens`);
+        }
+
+        const token = API_TOKEN_PREFIX + randomBytes(32).toString('base64url');
+        const apiToken = await this.apiTokenStore.createToken({
+            id: randomUUID(),
+            userId: ctx.user.id,
+            name,
+            tokenHash: hashToken(token),
+            createdAt: now,
+            expiresAt,
+            ...(permissions ? { permissions } : {}),
+        });
+        await this.audit({
+            event: 'token_created',
+            username: ctx.user.name,
+            userId: ctx.user.id,
+            actor: ctx.user.name,
+            actorId: ctx.user.id,
+            details: `${apiToken.name} (${apiToken.id})`,
+            metadata: { tokenId: apiToken.id, tokenName: apiToken.name },
+        });
+        return { token, apiToken };
+    }
+
+    /**
+     * Revokes a token: the owner, or a caller holding `tokens:revoke`. Unknown
+     * tokens and other users' tokens without the permission → 404.
+     */
+    async revokeApiToken(ctx: AuthContext, id: string, canRevokeAny: boolean): Promise<void> {
+        const token = await this.apiTokenStore.getToken(id);
+        if (!token || (token.userId !== ctx.user.id && !canRevokeAny)) {
+            throw notFound('token not found');
+        }
+        await this.apiTokenStore.deleteToken(token.id);
+        const ownerName = token.userId === ctx.user.id ? ctx.user.name : (await this.userStore.getUser(token.userId))?.name ?? token.userId;
+        await this.audit({
+            event: 'token_revoked',
+            username: ownerName,
+            userId: token.userId,
+            actor: ctx.user.name,
+            actorId: ctx.user.id,
+            details: `${token.name} (${token.id})`,
+            metadata: { tokenId: token.id, tokenName: token.name },
+        });
+        // Sockets opened with this token re-check their identity and close.
+        this.emitSessionEvent({ type: 'access-changed', userId: token.userId });
+    }
+
+    /** Deletes every token of a user (user deletion). */
+    async deleteUserTokens(userId: string): Promise<void> {
+        await this.apiTokenStore.deleteUserTokens(userId);
+        this.emitSessionEvent({ type: 'access-changed', userId });
+    }
+
     // --------------------------------------------------------- ws tickets
 
     /** Issues a single-use WebSocket ticket bound to the caller's session (30 s). */
@@ -473,7 +687,8 @@ export class AuthService {
             expiresAt: Date.now() + WS_TICKET_TTL_SECONDS * 1000,
             userId: ctx.user.id,
             sessionId: ctx.session?.id,
-            adapterContext: ctx.session ? undefined : ctx,
+            apiTokenId: ctx.apiToken?.id,
+            adapterContext: ctx.session || ctx.apiToken ? undefined : ctx,
         });
         return { ticket, expiresIn: WS_TICKET_TTL_SECONDS };
     }
@@ -490,6 +705,14 @@ export class AuthService {
         this.tickets.delete(key);
         if (!entry || Date.now() > entry.expiresAt) return undefined;
 
+        if (entry.apiTokenId) {
+            const fresh = await this.revalidateApiToken(entry.userId, entry.apiTokenId);
+            if (!fresh) return undefined;
+            if (fresh.user.mustChangePassword) {
+                throw new HttpError(403, 'password change required');
+            }
+            return fresh;
+        }
         if (!entry.sessionId) {
             return entry.adapterContext;
         }
@@ -513,7 +736,11 @@ export class AuthService {
      * the user exists, is enabled and has no pending password change. Adapter
      * identities (no session) only re-check the user. Undefined when ended.
      */
-    async revalidate(userId: string, sessionId?: string): Promise<AuthContext | undefined> {
+    async revalidate(userId: string, sessionId?: string, apiTokenId?: string): Promise<AuthContext | undefined> {
+        if (apiTokenId) {
+            const fresh = await this.revalidateApiToken(userId, apiTokenId);
+            return fresh && !fresh.user.mustChangePassword ? fresh : undefined;
+        }
         if (sessionId) {
             const session = await this.sessionStore.getSessionById(sessionId);
             if (!session || session.userId !== userId) return undefined;

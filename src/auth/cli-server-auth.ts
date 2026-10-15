@@ -7,6 +7,8 @@ export interface CliServerAuthContext {
     userName: string;
     /** Absent for host-authenticated (adapter) callers. */
     sessionId?: string;
+    /** Set when the caller authenticated with an API token (no session). */
+    tokenId?: string;
     /** Effective permissions (`resource:action`, `*` wildcards). */
     permissions: string[];
 }
