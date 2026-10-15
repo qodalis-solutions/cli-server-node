@@ -383,6 +383,12 @@ shell: {
 
 The shell does **not** inherit the server environment: it gets only `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `COLUMNS`, `LINES`, `SHELL` (plus the variables Windows needs to start PowerShell), the names in `env.allow`, and `env.set`. Secrets such as database passwords stay out of the shell.
 
+### Process cleanup
+
+Whenever a shell ends (exit, client close, session ended or permission removed, timeout, server shutdown), the server first collects everything the shell started — its process group, its descendants by parent PID (including background jobs that interactive shells move to their own process groups, and `setsid`/`nohup` children), and on Linux every process of its session — and then sends SIGHUP, SIGTERM and, after a 1 s grace period, SIGKILL to all of them. Linux reads `/proc`; macOS and other Unixes run `ps -A -o pid=,ppid=,pgid=`. On Windows only the shell process is killed.
+
+Limitation: a process that double-forks (or otherwise gets re-parented to init) *and* leaves the shell's process group and session (e.g. `setsid` daemons) before the shell closes can no longer be traced back to the shell and survives. On macOS, where session membership is not visible, the same applies to background jobs left behind by a shell that already exited on its own (`exit`), since they are re-parented at that moment. Run the server in a container or under a service manager (cgroup) if every process must be contained.
+
 ### Close codes
 
 Refusals are sent as *accept, then close* so browsers can read them (a foreign `Origin` is still rejected with HTTP 403):

@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { format } from 'util';
 import express from 'express';
 import request from 'supertest';
@@ -544,6 +545,69 @@ describe('C2: session binding', () => {
         expect((await c.closed).code).toBe(4401);
         await waitFor(() => processDead(child));
     });
+});
+
+describe('C2: the whole process tree dies with the shell', () => {
+    // Unique `sleep` durations identify the processes this suite starts.
+    const base = 70_000 + Math.floor(Math.random() * 20_000);
+    const durations = [base, base + 1, base + 2, base + 3];
+
+    /** PIDs of live (non-zombie) `sleep <seconds>` processes, by their exact command line. */
+    const sleepPids = (seconds: number): number[] =>
+        execFileSync('ps', ['-A', '-o', 'pid=,stat=,args='], { encoding: 'utf8' })
+            .split('\n')
+            .map((l) => /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l))
+            .filter((m): m is RegExpExecArray => !!m && !m[2].startsWith('Z') && new RegExp(`(^|/)sleep ${seconds}$`).test(m[3].trim()))
+            .map((m) => Number(m[1]));
+
+    /** A way to start a process in a new session (`setsid`, or perl's POSIX::setsid on macOS). */
+    const setsidPrefix = (): string | undefined => {
+        for (const p of ['/usr/bin/setsid', '/bin/setsid']) if (fs.existsSync(p)) return p;
+        if (fs.existsSync('/usr/bin/perl')) return `/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV'`;
+        return undefined;
+    };
+
+    const interactiveShell = ['/bin/bash', '/bin/sh'].find((p) => fs.existsSync(p))!;
+
+    afterAll(() => {
+        // never leave test sleepers behind, whatever the outcome
+        for (const d of durations) for (const pid of sleepPids(d)) {
+            try {
+                process.kill(pid, 'SIGKILL');
+            } catch {
+                // gone
+            }
+        }
+    });
+
+    it('background jobs of an interactive shell (own process group) die when the socket closes', async () => {
+        if (os.platform() === 'win32') return;
+        const h = await start({ shell: { allowAnonymous: true, shell: interactiveShell } });
+        const c = open(h.port, '/ws/v1/qcli/shell');
+        await c.ready;
+        c.ws.send(JSON.stringify({ type: 'stdin', data: `sleep ${durations[0]} &\n` }));
+        await waitFor(() => sleepPids(durations[0]).length === 1);
+        c.ws.close();
+        await c.closed;
+        await waitFor(() => sleepPids(durations[0]).length === 0, 8000);
+    }, 20_000);
+
+    it('setsid/nohup children of a command die when the session ends', async () => {
+        if (os.platform() === 'win32') return;
+        const prefix = setsidPrefix();
+        const h = await start({ shell: { allowAnonymous: true, shell: '/bin/sh' } });
+        const cmd = [
+            `nohup sleep ${durations[1]} >/dev/null 2>&1 &`,
+            prefix ? `${prefix} sleep ${durations[2]} &` : '',
+            'echo STARTED; wait',
+        ].join(' ');
+        const c = open(h.port, `/ws/v1/qcli/shell?cmd=${encodeURIComponent(cmd)}`);
+        await waitFor(() => /STARTED/.test(c.output()));
+        await waitFor(() => sleepPids(durations[1]).length === 1 && (!prefix || sleepPids(durations[2]).length === 1));
+        h.cli.eventSocketManager.dispose();
+        expect((await c.closed).code).toBe(1001);
+        await waitFor(() => sleepPids(durations[1]).length === 0 && sleepPids(durations[2]).length === 0, 8000);
+    }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

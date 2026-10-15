@@ -21,6 +21,7 @@ import {
     resolveShellAuthMode,
     tokensEqual,
 } from './cli-shell-options';
+import { terminateProcessTree } from './process-tree';
 
 const logger = createLogger('ShellSession');
 
@@ -607,14 +608,15 @@ function closeWs(ws: WebSocket, code: number, reason: string): void {
     }
 }
 
-/** Kills the shell and its process group (the PTY child is a session leader). */
+/**
+ * Kills the shell and everything it started. Unix: the descendant tree is
+ * collected before signalling (background jobs in their own process groups,
+ * `setsid`/`nohup` children), then HUP → TERM → (grace) → KILL.
+ */
 function killTree(pty: import('node-pty').IPty): void {
     if (os.platform() !== 'win32') {
-        try {
-            process.kill(-pty.pid, 'SIGKILL');
-        } catch {
-            // group already gone
-        }
+        terminateProcessTree(pty.pid);
+        return;
     }
     try {
         pty.kill();
