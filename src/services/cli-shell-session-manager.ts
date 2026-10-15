@@ -23,6 +23,9 @@ import {
 
 const logger = createLogger('ShellSession');
 
+/** Longest delay `setTimeout` supports (~24.8 days); longer ones fire immediately. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 /**
  * Lazy-loads node-pty to avoid import failures when the native add-on is unavailable.
  * @throws {Error} If node-pty cannot be loaded.
@@ -383,19 +386,27 @@ export class CliShellSessionManager {
                 if (remaining <= 0) {
                     this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'shell timed out');
                 } else {
-                    session.idleTimer = setTimeout(check, remaining);
+                    session.idleTimer = setTimeout(check, Math.min(remaining, MAX_TIMEOUT_MS));
                     session.idleTimer.unref?.();
                 }
             };
-            session.idleTimer = setTimeout(check, idle);
+            session.idleTimer = setTimeout(check, Math.min(idle, MAX_TIMEOUT_MS));
             session.idleTimer.unref?.();
         }
         const max = this._options.maxDurationMs;
         if (max && max > 0) {
-            session.durationTimer = setTimeout(
-                () => this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'shell timed out'),
-                max,
-            );
+            const deadline = Date.now() + max;
+            const expire = () => {
+                if (session.closed) return;
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) {
+                    this.end(session, ShellCloseCodes.TimedOut, 'shell timed out', 'shell timed out');
+                } else {
+                    session.durationTimer = setTimeout(expire, Math.min(remaining, MAX_TIMEOUT_MS));
+                    session.durationTimer.unref?.();
+                }
+            };
+            session.durationTimer = setTimeout(expire, Math.min(max, MAX_TIMEOUT_MS));
             session.durationTimer.unref?.();
         }
     }

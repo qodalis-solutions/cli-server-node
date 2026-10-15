@@ -106,6 +106,19 @@ describe('POST /execute with a malformed command', () => {
     });
 });
 
+describe('shell timers longer than the setTimeout limit (~24.8 days)', () => {
+    it('a long maxDurationMs / idleTimeoutMs does not close the shell immediately', async () => {
+        const day = 24 * 60 * 60 * 1000;
+        const h = await start({ shell: { allowAnonymous: true, maxDurationMs: 30 * day, idleTimeoutMs: 30 * day } });
+        const c = openShell(h.port, '/ws/v1/qcli/shell');
+        await c.ready;
+        await sleep(300);
+        expect(c.ws.readyState).toBe(WebSocket.OPEN);
+        c.ws.close();
+        await c.closed;
+    });
+});
+
 describe('group permission changes re-check open shells immediately', () => {
     const setup = async () => {
         const h = await start({ users: true, shell: { sessionCheckIntervalMs: 60_000 } });
