@@ -71,7 +71,12 @@ interface LockoutState {
     /** Failed + in-flight attempts (reserved before verification). */
     failures: number;
     lockedUntil: number;
+    /** Time of the latest attempt; an unlocked count older than the lockout window expires. */
+    lastAttempt: number;
 }
+
+/** Lockout map size above which a new entry first sweeps expired ones. */
+const LOCKOUT_SWEEP_THRESHOLD = 1000;
 
 interface TicketEntry {
     expiresAt: number;
@@ -215,11 +220,28 @@ export class AuthService {
     private isKeyLocked(key: string): boolean {
         const state = this.lockouts.get(key);
         if (!state) return false;
-        if (state.lockedUntil !== 0 && Date.now() >= state.lockedUntil) {
+        if (this.isLockoutExpired(state, Date.now())) {
             this.lockouts.delete(key);
             return false;
         }
         return state.lockedUntil !== 0;
+    }
+
+    /**
+     * A lock is over once `lockedUntil` passed; an unlocked failure count expires
+     * once its latest attempt is older than the lockout window (failures only add
+     * up while each one follows the previous within the window).
+     */
+    private isLockoutExpired(state: LockoutState, now: number): boolean {
+        return state.lockedUntil !== 0 ? now >= state.lockedUntil : now - state.lastAttempt >= this.lockoutMs;
+    }
+
+    /** Drops expired lockout entries (run periodically and when the map grows large). */
+    sweepLockouts(): void {
+        const now = Date.now();
+        for (const [key, state] of this.lockouts) {
+            if (this.isLockoutExpired(state, now)) this.lockouts.delete(key);
+        }
     }
 
     /** Clears the lockout of a user (admin password reset, deletion). */
@@ -235,24 +257,28 @@ export class AuthService {
     private reserveAttempt(key: string): void {
         const now = Date.now();
         let state = this.lockouts.get(key);
-        if (state && state.lockedUntil !== 0 && now >= state.lockedUntil) {
+        if (state && this.isLockoutExpired(state, now)) {
             this.lockouts.delete(key);
             state = undefined;
         }
         if (!state) {
-            state = { failures: 0, lockedUntil: 0 };
+            if (this.lockouts.size >= LOCKOUT_SWEEP_THRESHOLD) this.sweepLockouts();
+            state = { failures: 0, lockedUntil: 0, lastAttempt: now };
             this.lockouts.set(key, state);
         }
         if (state.lockedUntil > now || state.failures >= this.maxLoginAttempts) {
             throw new HttpError(429, LOCKED_MESSAGE);
         }
         state.failures += 1;
+        state.lastAttempt = now;
     }
 
     private attemptFailed(key: string): void {
-        const state = this.lockouts.get(key) ?? { failures: 1, lockedUntil: 0 };
+        const now = Date.now();
+        const state = this.lockouts.get(key) ?? { failures: 1, lockedUntil: 0, lastAttempt: now };
+        state.lastAttempt = now;
         if (state.failures >= this.maxLoginAttempts && state.lockedUntil === 0) {
-            state.lockedUntil = Date.now() + this.lockoutMs;
+            state.lockedUntil = now + this.lockoutMs;
         }
         this.lockouts.set(key, state);
     }

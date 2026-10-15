@@ -43,8 +43,8 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` | in-memory | Custom storage |
 | `setAuthAdapter(fn)` | — | Delegate authentication to the host app (see below) |
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
-| `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout |
-| `setLockoutDuration(ms)` | 5 min | Lockout duration |
+| `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout (each within the lockout duration of the previous one; an older count resets) |
+| `setLockoutDuration(ms)` | 5 min | Lockout duration, and how long a failure count below the threshold is remembered |
 | `setMinPasswordLength(n)` | 8 | Password policy (max length is always 1024) |
 | `setMaxSessionLifetime(ms)` | 12 h | Absolute session lifetime; `expiresAt` = min(idle, absolute) |
 | `setProtectServer(bool)` | `true` | Protect every server route and socket when mounted |

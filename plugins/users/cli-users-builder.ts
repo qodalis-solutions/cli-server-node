@@ -122,13 +122,16 @@ export class CliUsersBuilder {
         return this;
     }
 
-    /** Consecutive failed logins before lockout (default 5). */
+    /**
+     * Consecutive failed logins before lockout (default 5). A failure count whose
+     * latest attempt is older than the lockout duration expires (resets).
+     */
     setMaxLoginAttempts(attempts: number): this {
         this.options.maxLoginAttempts = attempts;
         return this;
     }
 
-    /** Lockout duration in milliseconds (default 5 minutes). */
+    /** Lockout duration in milliseconds (default 5 minutes); also the window failures are counted in. */
     setLockoutDuration(ms: number): this {
         this.options.lockoutMs = ms;
         return this;
@@ -247,6 +250,7 @@ export class CliUsersBuilder {
 
         const cleanupInterval = setInterval(() => {
             ipLimiter.sweep();
+            authService.sweepLockouts();
             authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
         }, options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS);
         cleanupInterval.unref?.();

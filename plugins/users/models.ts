@@ -170,9 +170,9 @@ export interface UsersModuleOptions {
     sessionTimeoutMs?: number;
     /** Password of the seeded `root` user (default `root`). */
     defaultAdminPassword?: string;
-    /** Consecutive failures before lockout (default 5). */
+    /** Consecutive failures before lockout (default 5); a count older than `lockoutMs` resets. */
     maxLoginAttempts?: number;
-    /** Lockout duration in ms (default 5 minutes). */
+    /** Lockout duration in ms (default 5 minutes); also the window failures are counted in. */
     lockoutMs?: number;
     /** Minimum password length (default 8; maximum length is always 1024). */
     minPasswordLength?: number;

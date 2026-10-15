@@ -7,7 +7,16 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import express, { Request } from 'express';
 import request from 'supertest';
 import { createHash } from 'crypto';
-import { CliUsersBuilder, User, AuthAdapter } from '../../plugins/users/index';
+import {
+    CliUsersBuilder,
+    User,
+    AuthAdapter,
+    AuthService,
+    InMemoryUserStore,
+    InMemorySessionStore,
+    InMemoryCredentialStore,
+    InMemoryAuditStore,
+} from '../../plugins/users/index';
 import { BASE, ROOT_PASS, TestServer, auth, createTestServer, createUser, createGroup, login } from './users-test-helpers';
 
 // ---------------------------------------------------------------------------
@@ -206,6 +215,53 @@ describe('B5: brute force and DoS', () => {
         expect(audit.body.filter((e: any) => e.details === 'Wrong password')).toHaveLength(5);
         // even the right password is refused while locked
         expect((await request(s.app).post(`${BASE}/sessions`).send({ username: 'vic', password: 'vicpass1' })).status).toBe(429);
+    });
+
+    describe('failure counts expire after the lockout window', () => {
+        const WINDOW = 60_000;
+        let now = 1_000_000;
+        let svc: AuthService;
+        const fail = (name: string) => svc.verifyPasswordWithLockout(undefined, 'x', { attemptedName: name });
+        const entries = () => (svc as unknown as { lockouts: Map<string, unknown> }).lockouts;
+
+        beforeEach(() => {
+            vi.spyOn(Date, 'now').mockImplementation(() => now);
+            svc = new AuthService(new InMemoryUserStore(), new InMemorySessionStore(), new InMemoryCredentialStore(), new InMemoryAuditStore(), {
+                maxLoginAttempts: 3,
+                lockoutMs: WINDOW,
+            });
+        });
+        afterEach(() => vi.restoreAllMocks());
+
+        it('a count older than the window resets on the next attempt', async () => {
+            await fail('ghost');
+            await fail('ghost');
+            now += WINDOW + 1;
+            expect(await fail('ghost')).toBe(false);
+            expect(await fail('ghost')).toBe(false); // would be the 4th failure without the reset
+        });
+
+        it('consecutive failures within the window still lock', async () => {
+            await fail('ghost');
+            now += WINDOW / 2;
+            await fail('ghost');
+            now += WINDOW / 2;
+            await fail('ghost'); // each failure is within the window of the previous one
+            await expect(fail('ghost')).rejects.toMatchObject({ status: 429 });
+        });
+
+        it('expired entries are swept (periodically, and on insert when the map is large)', async () => {
+            for (let i = 0; i < 5; i++) await fail(`ghost${i}`);
+            expect(entries().size).toBe(5);
+            now += WINDOW + 1;
+            svc.sweepLockouts();
+            expect(entries().size).toBe(0);
+
+            for (let i = 0; i < 1000; i++) entries().set(`name:stale${i}`, { failures: 1, lockedUntil: 0, lastAttempt: now });
+            now += WINDOW + 1;
+            await fail('fresh');
+            expect(entries().size).toBe(1);
+        });
     });
 
     it('unknown usernames are locked exactly like known ones', async () => {
