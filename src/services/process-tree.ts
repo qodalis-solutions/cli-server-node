@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 
@@ -12,6 +13,85 @@ interface ProcessEntry {
 
 /** Delay between SIGHUP/SIGTERM and the final SIGKILL. */
 export const PROCESS_TREE_KILL_GRACE_MS = 1000;
+
+/**
+ * Environment variable that tags every process a shell starts. Children inherit
+ * it, so processes that escaped the tree (re-parented to init, new session) are
+ * still found on cleanup unless they deliberately unset it.
+ */
+export const SHELL_ID_ENV = 'QCLI_SHELL_ID';
+
+/** A fresh, unguessable shell marker value (128-bit hex). */
+export function newShellId(): string {
+    return randomBytes(16).toString('hex');
+}
+
+const SHELL_ID_RE = /^[0-9a-f]{32}$/;
+
+/** Linux: does a NUL-separated `/proc/<pid>/environ` contain exactly `QCLI_SHELL_ID=<id>`? */
+export function environHasShellId(environ: string, shellId: string): boolean {
+    const wanted = `${SHELL_ID_ENV}=${shellId}`;
+    return environ.split('\0').some((entry) => entry === wanted);
+}
+
+/**
+ * macOS / BSD: does a `ps -E -o command=` line (command line followed by the
+ * environment, space separated) contain `QCLI_SHELL_ID=<id>` as a whole token?
+ */
+export function psLineHasShellId(line: string, shellId: string): boolean {
+    const wanted = ` ${SHELL_ID_ENV}=${shellId}`;
+    let from = 0;
+    for (;;) {
+        const at = line.indexOf(wanted, from);
+        if (at < 0) return false;
+        const end = at + wanted.length;
+        if (end === line.length || /\s/.test(line[end])) return true;
+        from = at + 1;
+    }
+}
+
+/** Linux: PIDs whose `/proc/<pid>/environ` carries the marker (unreadable entries are skipped). */
+function markedFromProc(shellId: string): number[] {
+    const found: number[] = [];
+    for (const name of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(name)) continue;
+        try {
+            if (environHasShellId(fs.readFileSync(`/proc/${name}/environ`, 'latin1'), shellId)) found.push(Number(name));
+        } catch {
+            // exited, or another user's process
+        }
+    }
+    return found;
+}
+
+/** macOS / BSD: `ps -A -E -ww -o pid=,command=` shows the environment of the same user's processes. */
+function markedFromPs(shellId: string): number[] {
+    const out = execFileSync('ps', ['-A', '-E', '-ww', '-o', 'pid=,command='], {
+        encoding: 'utf8',
+        timeout: 5000,
+        maxBuffer: 64 * 1024 * 1024,
+    });
+    const found: number[] = [];
+    for (const line of out.split('\n')) {
+        const m = /^\s*(\d+)\s/.exec(line);
+        if (m && psLineHasShellId(line, shellId)) found.push(Number(m[1]));
+    }
+    return found;
+}
+
+/** PIDs of every process whose environment carries `QCLI_SHELL_ID=<shellId>`. */
+export function findMarkedProcesses(shellId: string): number[] {
+    if (!SHELL_ID_RE.test(shellId)) return [];
+    try {
+        return isProcLinux() ? markedFromProc(shellId) : markedFromPs(shellId);
+    } catch {
+        return [];
+    }
+}
+
+function isProcLinux(): boolean {
+    return os.platform() === 'linux' && fs.existsSync('/proc/self/stat');
+}
 
 /** Linux: `/proc/<pid>/stat` (no `ps` needed, works in slim containers). */
 function readProcTable(): ProcessEntry[] {
@@ -43,7 +123,7 @@ function readPsTable(): ProcessEntry[] {
 
 function readProcessTable(): ProcessEntry[] {
     try {
-        return os.platform() === 'linux' && fs.existsSync('/proc/self/stat') ? readProcTable() : readPsTable();
+        return isProcLinux() ? readProcTable() : readPsTable();
     } catch {
         return [];
     }
@@ -70,6 +150,8 @@ function descendants(table: ProcessEntry[], rootPid: number, seeds: number[]): S
         }
     }
     found.delete(process.pid);
+    const ownPgid = table.find((p) => p.pid === process.pid)?.pgid;
+    if (ownPgid !== undefined) for (const p of table) if (p.pgid === ownPgid) found.delete(p.pid);
     return found;
 }
 
@@ -83,14 +165,19 @@ function treeSeeds(table: ProcessEntry[], rootPid: number): number[] {
 
 /**
  * PIDs of everything a shell started: its process group, (Linux) its session,
- * and every descendant of those — including background jobs that interactive
- * shells move to their own process groups and `setsid`/`nohup` children.
- * Processes already re-parented to init (double fork before the shell closed)
- * cannot be found this way. Does not include `rootPid` itself.
+ * every descendant of those — including background jobs that interactive
+ * shells move to their own process groups and `setsid`/`nohup` children — and,
+ * when `shellId` is given, every process carrying the shell's
+ * `QCLI_SHELL_ID` marker (and their descendants), which also catches processes
+ * re-parented to init in a new session. Never includes `rootPid` itself, the
+ * server process or the server's process group.
  */
-export function collectProcessTree(rootPid: number): number[] {
+export function collectProcessTree(rootPid: number, shellId?: string, extraSeeds: number[] = []): number[] {
     const table = readProcessTable();
-    return [...descendants(table, rootPid, treeSeeds(table, rootPid))];
+    const marked = shellId ? findMarkedProcesses(shellId) : [];
+    const alive = new Set(table.map((p) => p.pid));
+    const seeds = [...treeSeeds(table, rootPid), ...marked, ...extraSeeds.filter((pid) => alive.has(pid))];
+    return [...descendants(table, rootPid, seeds)];
 }
 
 function signal(pid: number, sig: NodeJS.Signals): void {
@@ -102,25 +189,22 @@ function signal(pid: number, sig: NodeJS.Signals): void {
 }
 
 /**
- * Terminates a shell and everything it started (Unix): collects the tree first
- * (the shell's death re-parents its children), then sends SIGHUP and SIGTERM to
- * the shell's process group, the shell and every collected process, and SIGKILL
- * after `graceMs`. The final pass re-collects so that children forked meanwhile
- * by the collected processes die too.
+ * Terminates a shell and everything it started (Unix): collects the targets
+ * first (the shell's death re-parents its children), then sends SIGHUP and
+ * SIGTERM to the shell's process group, the shell and every collected process,
+ * and SIGKILL after `graceMs`. The final pass re-collects so that children
+ * forked meanwhile by the collected processes die too.
  */
-export function terminateProcessTree(rootPid: number, graceMs = PROCESS_TREE_KILL_GRACE_MS): void {
-    const pids = collectProcessTree(rootPid);
+export function terminateProcessTree(rootPid: number, graceMs = PROCESS_TREE_KILL_GRACE_MS, shellId?: string): void {
+    const pids = collectProcessTree(rootPid, shellId);
     const send = (targets: Iterable<number>, sig: NodeJS.Signals) => {
-        signal(-rootPid, sig);
-        signal(rootPid, sig);
+        if (rootPid !== process.pid) {
+            signal(-rootPid, sig);
+            signal(rootPid, sig);
+        }
         for (const pid of targets) signal(pid, sig);
     };
     send(pids, 'SIGHUP');
     send(pids, 'SIGTERM');
-    setTimeout(() => {
-        const table = readProcessTable();
-        const alive = new Set(table.map((p) => p.pid));
-        const seeds = [...treeSeeds(table, rootPid), ...pids.filter((pid) => alive.has(pid))];
-        send(descendants(table, rootPid, seeds), 'SIGKILL');
-    }, graceMs);
+    setTimeout(() => send(collectProcessTree(rootPid, shellId, pids), 'SIGKILL'), graceMs);
 }

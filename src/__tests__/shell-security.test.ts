@@ -658,7 +658,7 @@ describe('C2: adapter-authenticated shells', () => {
 describe('C2: the whole process tree dies with the shell', () => {
     // Unique `sleep` durations identify the processes this suite starts.
     const base = 70_000 + Math.floor(Math.random() * 20_000);
-    const durations = [base, base + 1, base + 2, base + 3];
+    const durations = [base, base + 1, base + 2, base + 3, base + 4];
 
     /** PIDs of live (non-zombie) `sleep <seconds>` processes, by their exact command line. */
     const sleepPids = (seconds: number): number[] =>
@@ -675,11 +675,38 @@ describe('C2: the whole process tree dies with the shell', () => {
         return undefined;
     };
 
+    /** PIDs of live node processes started by this suite with `qcli-escape-<n>` as their last argument. */
+    const escapePids = (n: number): number[] =>
+        execFileSync('ps', ['-A', '-o', 'pid=,stat=,args='], { encoding: 'utf8' })
+            .split('\n')
+            .map((l) => /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l))
+            .filter((m): m is RegExpExecArray => !!m && !m[2].startsWith('Z') && m[3].trim().endsWith(` qcli-escape-${n}`))
+            .map((m) => Number(m[1]));
+
+    /**
+     * A command that, like util-linux `setsid` run as an `&` job of an interactive
+     * shell (a process-group leader), forks first and lets the parent exit, so the
+     * real process is re-parented to init in a new session. Linux: `setsid sleep N`.
+     * macOS: perl fork + POSIX::setsid exec'ing node — macOS hides the environment
+     * of Apple platform binaries (`sleep`) from `ps -E`, so the marker could not be
+     * seen there. Returns the command and a way to list the escaped process.
+     */
+    const escapingJob = (n: number): { cmd: string; pids: () => number[] } | undefined => {
+        for (const p of ['/usr/bin/setsid', '/bin/setsid']) {
+            if (fs.existsSync(p)) return { cmd: `${p} sleep ${n}`, pids: () => sleepPids(n) };
+        }
+        if (fs.existsSync('/usr/bin/perl')) {
+            const perl = `/usr/bin/perl -MPOSIX -e 'if (getpgrp() == $$) { exit 0 if fork() } POSIX::setsid(); exec @ARGV'`;
+            return { cmd: `${perl} '${process.execPath}' -e 'setInterval(() => {}, 1e9)' qcli-escape-${n}`, pids: () => escapePids(n) };
+        }
+        return undefined;
+    };
+
     const interactiveShell = ['/bin/bash', '/bin/sh'].find((p) => fs.existsSync(p))!;
 
     afterAll(() => {
         // never leave test sleepers behind, whatever the outcome
-        for (const d of durations) for (const pid of sleepPids(d)) {
+        for (const d of durations) for (const pid of [...sleepPids(d), ...escapePids(d)]) {
             try {
                 process.kill(pid, 'SIGKILL');
             } catch {
@@ -698,6 +725,20 @@ describe('C2: the whole process tree dies with the shell', () => {
         c.ws.close();
         await c.closed;
         await waitFor(() => sleepPids(durations[0]).length === 0, 8000);
+    }, 20_000);
+
+    it('a `setsid` job of an interactive shell (re-parented to init, new session) dies via the QCLI_SHELL_ID marker', async () => {
+        if (os.platform() === 'win32') return;
+        const job = escapingJob(durations[4]);
+        if (!job) return;
+        const h = await start({ shell: { allowAnonymous: true, shell: interactiveShell } });
+        const c = open(h.port, '/ws/v1/qcli/shell');
+        await c.ready;
+        c.ws.send(JSON.stringify({ type: 'stdin', data: `${job.cmd} &\n` }));
+        await waitFor(() => job.pids().length === 1);
+        c.ws.close();
+        await c.closed;
+        await waitFor(() => job.pids().length === 0, 8000);
     }, 20_000);
 
     it('setsid/nohup children of a command die when the session ends', async () => {
@@ -835,7 +876,7 @@ describe('C3: timeouts', () => {
 describe('C3: environment, cwd, shell', () => {
     const saved = { ...process.env };
     afterAll(() => {
-        for (const k of ['SECRET_X', 'ALLOWED_X']) {
+        for (const k of ['SECRET_X', 'ALLOWED_X', 'QCLI_SHELL_ID']) {
             if (saved[k] === undefined) delete process.env[k];
             else process.env[k] = saved[k];
         }
@@ -844,8 +885,20 @@ describe('C3: environment, cwd, shell', () => {
     it('the shell gets a minimal environment: server secrets do not leak', async () => {
         process.env.SECRET_X = 'super-secret-value';
         process.env.ALLOWED_X = 'allowed-value';
-        const h = await start({ shell: { allowAnonymous: true, env: { allow: ['ALLOWED_X'], set: { FOO_SET: 'bar' } } } });
+        process.env.QCLI_SHELL_ID = 'from-server-env';
+        const h = await start({
+            shell: {
+                allowAnonymous: true,
+                env: { allow: ['ALLOWED_X', 'QCLI_SHELL_ID'], set: { FOO_SET: 'bar', QCLI_SHELL_ID: 'from-config' } },
+            },
+        });
         const out = await run(h.port, 'env');
+        // the cleanup marker is always the server's own, unique per shell
+        const marker = /^QCLI_SHELL_ID=(.*?)\r?$/m.exec(out)?.[1];
+        expect(marker).toMatch(/^[0-9a-f]{32}$/);
+        expect(out).not.toContain('from-server-env');
+        expect(out).not.toContain('from-config');
+        expect(/^QCLI_SHELL_ID=(.*?)\r?$/m.exec(await run(h.port, 'env'))?.[1]).not.toBe(marker);
         expect(out).not.toContain('SECRET_X');
         expect(out).not.toContain('super-secret-value');
         expect(out).toContain('ALLOWED_X=allowed-value');
@@ -858,7 +911,7 @@ describe('C3: environment, cwd, shell', () => {
             .split(/\r?\n/)
             .map((l) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l)?.[1])
             .filter(Boolean) as string[];
-        const allowed = new Set(['PATH', 'HOME', 'USER', 'LANG', 'TERM', 'COLUMNS', 'LINES', 'SHELL', 'ALLOWED_X', 'FOO_SET',
+        const allowed = new Set(['PATH', 'HOME', 'USER', 'LANG', 'TERM', 'COLUMNS', 'LINES', 'SHELL', 'ALLOWED_X', 'FOO_SET', 'QCLI_SHELL_ID',
             // set by the shell itself (zsh also sets LOGNAME)
             'PWD', 'SHLVL', '_', 'OLDPWD', 'LOGNAME']);
         expect(names.filter((n) => !allowed.has(n))).toEqual([]);

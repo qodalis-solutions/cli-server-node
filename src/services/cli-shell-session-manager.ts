@@ -21,7 +21,7 @@ import {
     resolveShellAuthMode,
     tokensEqual,
 } from './cli-shell-options';
-import { terminateProcessTree } from './process-tree';
+import { newShellId, SHELL_ID_ENV, terminateProcessTree } from './process-tree';
 
 const logger = createLogger('ShellSession');
 
@@ -89,6 +89,8 @@ interface ShellSession {
     inputSinceCheck: boolean;
     lastTouch: number;
     pty?: import('node-pty').IPty;
+    /** `QCLI_SHELL_ID` marker in the shell's environment (finds escaped processes on cleanup). */
+    shellId?: string;
     idleTimer?: NodeJS.Timeout;
     durationTimer?: NodeJS.Timeout;
     closed: boolean;
@@ -336,13 +338,15 @@ export class CliShellSessionManager {
             return;
         }
 
+        // Set after the allow/set filtering: configuration can neither override nor drop it.
+        session.shellId = newShellId();
         try {
             session.pty = nodePty.spawn(shell, args, {
                 name: 'xterm-256color',
                 cols,
                 rows,
                 cwd: this._options.cwd ?? os.homedir(),
-                env: buildShellEnv(this._options.env, { shell, cols, rows }),
+                env: { ...buildShellEnv(this._options.env, { shell, cols, rows }), [SHELL_ID_ENV]: session.shellId },
             });
         } catch (err: any) {
             logger.error('Shell spawn failed: %s', err.message ?? err);
@@ -526,7 +530,7 @@ export class CliShellSessionManager {
         this.stopCheckTimerIfIdle();
 
         if (session.pty) {
-            killTree(session.pty);
+            killTree(session.pty, session.shellId);
         }
         if (code !== undefined) {
             closeWs(session.ws, code, reason ?? '');
@@ -631,13 +635,14 @@ function closeWs(ws: WebSocket, code: number, reason: string): void {
 }
 
 /**
- * Kills the shell and everything it started. Unix: the descendant tree is
- * collected before signalling (background jobs in their own process groups,
- * `setsid`/`nohup` children), then HUP → TERM → (grace) → KILL.
+ * Kills the shell and everything it started. Unix: the descendant tree and every
+ * process carrying the shell's `QCLI_SHELL_ID` marker are collected before
+ * signalling (background jobs in their own process groups, `setsid`/`nohup`
+ * children, re-parented daemons), then HUP → TERM → (grace) → KILL.
  */
-function killTree(pty: import('node-pty').IPty): void {
+function killTree(pty: import('node-pty').IPty, shellId?: string): void {
     if (os.platform() !== 'win32') {
-        terminateProcessTree(pty.pid);
+        terminateProcessTree(pty.pid, undefined, shellId);
         return;
     }
     try {
