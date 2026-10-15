@@ -90,3 +90,18 @@ describe('WebSocket upgrade with a malformed request URL', () => {
         socket.destroy();
     });
 });
+
+describe('POST /execute with a malformed command', () => {
+    it.each([
+        ['missing command', {}],
+        ['non-string command', { command: 42 }],
+    ])('answers 400 instead of an unhandled rejection (%s)', async (_name, body) => {
+        const cli = createCliServer({
+            configure: (b) =>
+                b.addProcessor({ command: 'echo', description: 'echo', author: DefaultLibraryAuthor, version: '1.0.0', handleAsync: async () => 'ok' }),
+        });
+        const res = await request(cli.app).post(`${V1}/execute`).send(body).timeout(2000);
+        expect(res.status).toBe(400);
+        expect(res.body).toHaveProperty('error');
+    });
+});

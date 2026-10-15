@@ -54,6 +54,10 @@ export function createCliController(
 
     router.post('/execute', async (req, res) => {
         const command = req.body;
+        if (typeof command?.command !== 'string') {
+            res.status(400).json({ error: 'command is required' });
+            return;
+        }
         logger.debug('Executing command: %s', command.command);
 
         const abortController = new AbortController();
