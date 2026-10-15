@@ -17,8 +17,15 @@ const port = process.env.PORT ?? 8047;
 // CORS / WebSocket origins, e.g. QCLI_ALLOWED_ORIGINS=http://localhost:4200,http://localhost:4300
 const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean);
 
+// Remote shell (no users plugin here): set QCLI_SHELL_TOKEN to enable it in
+// token mode. Clients send `Authorization: Bearer <token>` (browser clients:
+// the server's configured `headers`, forwarded as `_header_Authorization`).
+const shellToken = process.env.QCLI_SHELL_TOKEN?.trim() || undefined;
+
 const { app, eventSocketManager } = createCliServer({
     allowedOrigins,
+    enableShell: !!shellToken,
+    shell: shellToken ? { token: shellToken } : undefined,
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
@@ -37,6 +44,9 @@ const server = app.listen(port, () => {
     logger.info(`  Execute:      http://localhost:${port}/api/v1/qcli/execute`);
     logger.info(`  Capabilities: http://localhost:${port}/api/v1/qcli/capabilities`);
     logger.info(`  Events:       ws://localhost:${port}/ws/v1/qcli/events`);
+    if (shellToken) {
+        logger.info(`  Shell:        ws://localhost:${port}/ws/v1/qcli/shell (token mode)`);
+    }
 });
 
 eventSocketManager.attach(server);

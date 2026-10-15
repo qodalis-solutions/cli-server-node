@@ -49,8 +49,17 @@ const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
 
 const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
     allowedOrigins,
-    // The demo exposes the interactive shell; it requires the shell:execute permission.
+    // The demo exposes the interactive shell. The users plugin is mounted below, so
+    // the shell runs in "users" mode: a WS ticket from a session holding
+    // shell:execute (root has '*'). Without the users plugin, set shell.token
+    // (or shell.authorize) instead; with no mode at all the shell stays locked.
     enableShell: true,
+    shell: {
+        maxSessionsPerUser: 3,
+        idleTimeoutMs: 15 * 60 * 1000,
+        // The shell gets a minimal environment; allow-list extra variables here.
+        env: { allow: ['NODE_ENV'] },
+    },
     configure: (builder) => {
         builder
             .addProcessor(new CliEchoCommandProcessor())
