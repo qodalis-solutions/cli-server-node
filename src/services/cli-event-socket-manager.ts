@@ -114,7 +114,12 @@ export class CliEventSocketManager {
         this._shellManager.logStartupState();
 
         server.on('upgrade', (request, socket, head) => {
-            const parsed = new URL(request.url ?? '', 'http://localhost');
+            let parsed: URL;
+            try {
+                parsed = new URL(request.url ?? '', 'http://localhost');
+            } catch {
+                return; // malformed request target: not one of our paths
+            }
             const pathname = parsed.pathname;
 
             if (CliEventSocketManager.EVENT_PATHS.has(pathname)) {

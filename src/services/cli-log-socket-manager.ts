@@ -124,7 +124,12 @@ export class CliLogSocketManager {
         this._wss = new WebSocketServer({ noServer: true });
 
         server.on('upgrade', (request, socket, head) => {
-            const parsed = new URL(request.url ?? '', 'http://localhost');
+            let parsed: URL;
+            try {
+                parsed = new URL(request.url ?? '', 'http://localhost');
+            } catch {
+                return; // malformed request target: not one of our paths
+            }
             const pathname = parsed.pathname;
 
             if (!CliLogSocketManager.LOG_PATHS.has(pathname)) return;
