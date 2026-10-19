@@ -1,4 +1,4 @@
-import { CliCommandProcessor, CliProcessCommand, joinShellWords } from '@qodalis/cli-server-node';
+import { CliCommandProcessor, CliProcessCommand, getPositionalText } from '@qodalis/cli-server-node';
 
 export class CliEchoCommandProcessor extends CliCommandProcessor {
     command = 'echo';
@@ -7,6 +7,6 @@ export class CliEchoCommandProcessor extends CliCommandProcessor {
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         // `echo "a" "b"` prints a b, as the browser's echo does
-        return joinShellWords(command.value ?? '');
+        return getPositionalText(command);
     }
 }

@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -82,7 +83,7 @@ class DynamoDbDescribeProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const tableName = command.value?.trim();
+        const tableName = getPositionalText(command);
         if (!tableName) {
             return buildErrorResponse('Table name is required. Usage: dynamodb describe <table-name>');
         }
@@ -140,7 +141,7 @@ class DynamoDbScanProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const tableName = command.value?.trim();
+        const tableName = getPositionalText(command);
         if (!tableName) {
             return buildErrorResponse('Table name is required. Usage: dynamodb scan <table-name>');
         }
@@ -189,7 +190,7 @@ class DynamoDbQueryProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const tableName = command.value?.trim();
+        const tableName = getPositionalText(command);
         if (!tableName) {
             return buildErrorResponse('Table name is required. Usage: dynamodb query <table-name> --key <expression>');
         }

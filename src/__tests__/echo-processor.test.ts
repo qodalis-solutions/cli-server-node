@@ -36,4 +36,14 @@ describe('CliEchoCommandProcessor', () => {
         expect(joinShellWords('"')).toBe('"');
         expect(joinShellWords('""')).toBe('');
     });
+
+    it('prints the positionals the browser sends, joined by one space', async () => {
+        const command: CliProcessCommand = { command: 'echo', chainCommands: [], rawCommand: 'echo "a  b" c', value: '"a  b" c', positionals: ['a  b', 'c'], args: {} };
+        expect(await new CliEchoCommandProcessor().handleAsync(command)).toBe('a  b c');
+    });
+
+    it('applies backslash escapes when splitting value', async () => {
+        expect(await echo('my\\ file')).toBe('my file');
+        expect(await echo('"say \\"hi\\""')).toBe('say "hi"');
+    });
 });

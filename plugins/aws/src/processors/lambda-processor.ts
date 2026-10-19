@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -91,7 +92,7 @@ class LambdaInvokeProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const functionName = command.value?.trim();
+        const functionName = getPositionalText(command);
         if (!functionName) {
             return buildErrorResponse('Function name is required. Usage: lambda invoke <function-name>');
         }
@@ -162,7 +163,7 @@ class LambdaLogsProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const functionName = command.value?.trim();
+        const functionName = getPositionalText(command);
         if (!functionName) {
             return buildErrorResponse('Function name is required. Usage: lambda logs <function-name>');
         }

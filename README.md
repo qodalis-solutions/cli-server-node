@@ -294,11 +294,14 @@ Every processor receives a `CliProcessCommand` with the parsed command input:
 | Property | Type | Description |
 |----------|------|-------------|
 | `command` | `string` | Command name (e.g., `"time"`) |
-| `value` | `string \| undefined` | Positional argument (e.g., `"hello"` in `echo hello`) |
+| `value` | `string \| undefined` | Positional text as typed, quotes included (e.g., `"hello"` in `echo hello`) |
+| `positionals` | `string[] \| undefined` | Positional arguments split like a shell: quotes removed, backslash escapes applied (`base64 encode "a b"` -> `["a b"]`). Sent by newer browsers |
 | `args` | `Record<string, any>` | Named parameters (e.g., `--format "HH:mm"`) |
 | `chainCommands` | `string[]` | Sub-command chain (e.g., `["add"]` in `math add`) |
 | `rawCommand` | `string` | Original unprocessed input |
 | `data` | `any` | Arbitrary data payload from the client |
+
+Read positional input with `getPositionals(command)` (a `string[]`) or `getPositionalText(command)` (joined by one space). Both use `positionals` when the browser sends it and otherwise split `value` with the same rules (`splitShellWords`), so quotes never leak into what a processor reads.
 
 ## API Endpoints
 

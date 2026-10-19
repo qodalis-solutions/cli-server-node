@@ -1,5 +1,6 @@
 export { ICliCommandAuthor, CliCommandAuthor, DefaultLibraryAuthor } from './cli-command-author';
 export { CliProcessCommand } from './cli-process-command';
+export { splitShellWords, joinShellWords, getPositionals, getPositionalText, quoteShellWord } from './shell-words';
 export { ICliCommandParameterDescriptor, CliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
 export { ICliCommandProcessor, CliCommandProcessor } from './cli-command-processor';
 export { ICliModule, CliModule } from './cli-module';

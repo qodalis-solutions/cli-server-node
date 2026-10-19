@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -84,7 +85,7 @@ class SnsPublishProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const topicArn = command.value?.trim();
+        const topicArn = getPositionalText(command);
         if (!topicArn) {
             return buildErrorResponse('Topic ARN is required. Usage: sns publish <topic-arn> --message <message>');
         }
@@ -134,7 +135,7 @@ class SnsSubscriptionsProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const topicArn = command.value?.trim();
+        const topicArn = getPositionalText(command);
 
         const client = this.credentialManager.getClient(SNSClient, {
             region: command.args?.region ? String(command.args.region) : undefined,
