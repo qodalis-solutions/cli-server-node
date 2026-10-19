@@ -53,6 +53,20 @@ jobs:
             local name
             name=$(node -p "require('./$dir/package.json').name")
             echo "::group::Publishing $name from $dir"
+            # file: dependencies only resolve in this repo: publish them as the
+            # version the linked package has
+            (cd "$dir" && node -e '
+              const fs = require("fs"), path = require("path");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+                for (const [dep, spec] of Object.entries(pkg[field] ?? {})) {
+                  if (!spec.startsWith("file:")) continue;
+                  const linked = require(path.resolve(spec.slice(5), "package.json"));
+                  pkg[field][dep] = "^" + linked.version;
+                }
+              }
+              fs.writeFileSync("package.json", JSON.stringify(pkg, null, 4) + "\n");
+            ')
             local output
             if output=$(cd "$dir" && npm publish --access public 2>&1); then
               echo "$output"
