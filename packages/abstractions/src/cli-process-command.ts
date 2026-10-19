@@ -10,6 +10,13 @@ export interface CliProcessCommand {
     rawCommand: string;
     /** Positional value argument (the first non-flag token after the command). */
     value?: string;
+    /**
+     * The positional arguments after the command and sub-command words, split
+     * like a shell: quotes removed, backslash escapes applied, flags excluded.
+     * Sent by newer browsers; `value` stays as typed. Read it with `getPositionals`,
+     * which falls back to splitting `value` when it is missing.
+     */
+    positionals?: string[];
     /** Named arguments parsed from flags (e.g. { algorithm: "sha256" }). */
     args: Record<string, any>;
 }

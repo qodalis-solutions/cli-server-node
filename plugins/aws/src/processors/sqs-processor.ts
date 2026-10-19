@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -84,7 +85,7 @@ class SqsSendProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const queueUrl = command.value?.trim();
+        const queueUrl = getPositionalText(command);
         if (!queueUrl) {
             return buildErrorResponse('Queue URL is required. Usage: sqs send <queue-url> --message <body>');
         }
@@ -134,7 +135,7 @@ class SqsReceiveProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const queueUrl = command.value?.trim();
+        const queueUrl = getPositionalText(command);
         if (!queueUrl) {
             return buildErrorResponse('Queue URL is required. Usage: sqs receive <queue-url>');
         }
@@ -187,7 +188,7 @@ class SqsPurgeProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const queueUrl = command.value?.trim();
+        const queueUrl = getPositionalText(command);
         if (!queueUrl) {
             return buildErrorResponse('Queue URL is required. Usage: sqs purge <queue-url>');
         }

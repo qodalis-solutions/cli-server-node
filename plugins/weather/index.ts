@@ -3,6 +3,7 @@ import {
     CliCommandParameterDescriptor,
     CliModule,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     ICliCommandParameterDescriptor,
 } from '@qodalis/cli-server-abstractions';
@@ -10,7 +11,8 @@ import {
 /** Extract the location from a command's args or value, defaulting to 'London'. */
 function getLocation(command: CliProcessCommand): string {
     if (command.args?.location) return String(command.args.location);
-    if (command.value) return command.value;
+    const location = getPositionalText(command);
+    if (location) return location;
     return 'London';
 }
 
