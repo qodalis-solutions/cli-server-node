@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { CliCommandProcessor } from '../abstractions/cli-command-processor';
 import { CliCommandParameterDescriptor } from '../abstractions/cli-command-parameter-descriptor';
 import { CliProcessCommand } from '../abstractions/cli-process-command';
+import { getPositionalText } from '../abstractions';
 
 const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
 
@@ -22,7 +23,7 @@ export class CliHashCommandProcessor extends CliCommandProcessor {
     ];
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const text = command.value;
+        const text = getPositionalText(command);
         if (!text) return 'Usage: hash <text> [--algorithm sha256]';
 
         const algo = ((command.args?.algorithm as string) ?? 'sha256').toLowerCase();

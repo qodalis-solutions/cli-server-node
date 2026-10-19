@@ -2,7 +2,7 @@ import { CliCommandProcessor } from '../abstractions/cli-command-processor';
 import { CliCommandParameterDescriptor } from '../abstractions/cli-command-parameter-descriptor';
 import { CliProcessCommand } from '../abstractions/cli-process-command';
 import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
-import { ICliStreamCommandProcessor, CliStructuredOutput } from '../abstractions';
+import { ICliStreamCommandProcessor, CliStructuredOutput, getPositionals } from '../abstractions';
 
 /** Sub-processor that performs HTTP GET requests. */
 class HttpGetProcessor extends CliCommandProcessor implements ICliStreamCommandProcessor {
@@ -14,7 +14,7 @@ class HttpGetProcessor extends CliCommandProcessor implements ICliStreamCommandP
     ];
 
     async handleAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<string> {
-        const url = command.value;
+        const url = getPositionals(command)[0];
         if (!url) return 'Usage: http get <url>';
         return doRequest(url, 'GET', undefined, 'headers' in (command.args ?? {}), signal);
     }
@@ -24,7 +24,7 @@ class HttpGetProcessor extends CliCommandProcessor implements ICliStreamCommandP
         emit: (output: CliStructuredOutput) => void,
         signal?: AbortSignal,
     ): Promise<number> {
-        const url = command.value;
+        const url = getPositionals(command)[0];
         if (!url) {
             emit({ type: 'text', value: 'Usage: http get <url>' });
             return 1;
@@ -44,7 +44,7 @@ class HttpPostProcessor extends CliCommandProcessor implements ICliStreamCommand
     ];
 
     async handleAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<string> {
-        const url = command.value;
+        const url = getPositionals(command)[0];
         if (!url) return "Usage: http post <url> --body '{\"key\":\"value\"}'";
         const body = command.args?.body as string | undefined;
         return doRequest(url, 'POST', body, 'headers' in (command.args ?? {}), signal);
@@ -55,7 +55,7 @@ class HttpPostProcessor extends CliCommandProcessor implements ICliStreamCommand
         emit: (output: CliStructuredOutput) => void,
         signal?: AbortSignal,
     ): Promise<number> {
-        const url = command.value;
+        const url = getPositionals(command)[0];
         if (!url) {
             emit({ type: 'text', value: "Usage: http post <url> --body '{\"key\":\"value\"}'" });
             return 1;

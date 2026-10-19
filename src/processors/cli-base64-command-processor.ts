@@ -1,6 +1,7 @@
 import { CliCommandProcessor } from '../abstractions/cli-command-processor';
 import { CliProcessCommand } from '../abstractions/cli-process-command';
 import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
+import { getPositionalText } from '../abstractions';
 
 /** Sub-processor that encodes text to Base64. */
 class Base64EncodeProcessor extends CliCommandProcessor {
@@ -9,7 +10,7 @@ class Base64EncodeProcessor extends CliCommandProcessor {
     acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const text = command.value;
+        const text = getPositionalText(command);
         if (!text) return 'Usage: base64 encode <text>';
         return Buffer.from(text, 'utf8').toString('base64');
     }
@@ -22,7 +23,7 @@ class Base64DecodeProcessor extends CliCommandProcessor {
     acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const text = command.value;
+        const text = getPositionalText(command);
         if (!text) return 'Usage: base64 decode <base64string>';
         try {
             return Buffer.from(text, 'base64').toString('utf8');

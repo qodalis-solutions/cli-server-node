@@ -4,6 +4,10 @@ export {
     CliCommandAuthor,
     DefaultLibraryAuthor,
     CliProcessCommand,
+    splitShellWords,
+    getPositionals,
+    getPositionalText,
+    quoteShellWord,
     ICliCommandParameterDescriptor,
     CliCommandParameterDescriptor,
     ICliCommandProcessor,
@@ -141,7 +145,7 @@ export { SqliteFileStorageProvider, SqliteProviderOptions } from '@qodalis/cli-s
 export { S3FileStorageProvider, S3ProviderOptions } from '@qodalis/cli-server-plugin-filesystem-s3';
 
 // Processors
-export { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
+export { CliEchoCommandProcessor, joinShellWords } from './processors/cli-echo-command-processor';
 export { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
 export { CliSystemCommandProcessor } from './processors/cli-system-command-processor';
 export { CliHttpCommandProcessor } from './processors/cli-http-command-processor';
