@@ -1,4 +1,4 @@
-import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand } from '@qodalis/cli-server-node';
+import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand, getPositionalText } from '@qodalis/cli-server-node';
 
 export class CliHelloCommandProcessor extends CliCommandProcessor {
     command = 'hello';
@@ -10,7 +10,7 @@ export class CliHelloCommandProcessor extends CliCommandProcessor {
     ];
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const name = command.args?.name?.toString() ?? command.value ?? 'World';
+        const name = command.args?.name?.toString() ?? (getPositionalText(command) || 'World');
         return `Hello, ${name}!`;
     }
 }

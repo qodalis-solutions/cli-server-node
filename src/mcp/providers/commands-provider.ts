@@ -1,4 +1,4 @@
-import { CliProcessCommand, ICliCommandProcessor } from '../../abstractions';
+import { CliProcessCommand, ICliCommandProcessor, quoteShellWord as quote } from '../../abstractions';
 import { CliServerPermissions as P } from '../../auth/cli-server-auth';
 import { ICliCommandRegistry } from '../../services/cli-command-registry';
 import { ICliCommandExecutorService } from '../../services/cli-command-executor-service';
@@ -54,11 +54,11 @@ export function commandInputSchema(processor: ICliCommandProcessor): McpInputSch
     return mcpObjectSchema(properties, required);
 }
 
-function quote(value: string): string {
-    return /^[^\s"'=]+$/.test(value) ? value : JSON.stringify(value);
-}
-
-/** The command the CLI would send (`value` becomes the positional input when the command takes one). */
+/**
+ * The command the CLI would send (`value` becomes the positional input when the
+ * command takes one). `rawCommand` is quoted so the browser's parser reads it
+ * back; `positionals` comes straight from the tool arguments, not re-parsed.
+ */
 export function buildCliCommand(path: string[], positional: boolean, args: Record<string, unknown>): CliProcessCommand {
     const params: Record<string, any> = {};
     for (const [key, v] of Object.entries(args)) {
@@ -83,6 +83,7 @@ export function buildCliCommand(path: string[], positional: boolean, args: Recor
         chainCommands: path.slice(1),
         rawCommand: parts.join(' '),
         ...(value !== undefined ? { value } : {}),
+        positionals: value !== undefined ? [value] : [],
         args: params,
     };
 }

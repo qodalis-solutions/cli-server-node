@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -91,7 +92,7 @@ class CloudWatchLogsProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const logGroupName = command.value?.trim();
+        const logGroupName = getPositionalText(command);
         if (!logGroupName) {
             return buildErrorResponse('Log group name is required. Usage: cloudwatch logs <log-group>');
         }
@@ -152,7 +153,7 @@ class CloudWatchMetricsProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const namespace = command.value?.trim();
+        const namespace = getPositionalText(command);
         if (!namespace) {
             return buildErrorResponse('Namespace is required. Usage: cloudwatch metrics <namespace>');
         }

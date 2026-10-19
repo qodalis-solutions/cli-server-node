@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -96,7 +97,7 @@ class EcsServicesProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const cluster = command.value?.trim();
+        const cluster = getPositionalText(command);
         if (!cluster) {
             return buildErrorResponse('Cluster name or ARN is required. Usage: ecs services <cluster>');
         }
@@ -156,7 +157,7 @@ class EcsTasksProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const cluster = command.value?.trim();
+        const cluster = getPositionalText(command);
         if (!cluster) {
             return buildErrorResponse('Cluster name or ARN is required. Usage: ecs tasks <cluster>');
         }

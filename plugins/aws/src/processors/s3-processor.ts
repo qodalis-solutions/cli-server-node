@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -77,7 +78,7 @@ class S3LsProcessor extends CliCommandProcessor {
             region: command.args?.region ? String(command.args.region) : undefined,
         });
 
-        const value = command.value?.trim();
+        const value = getPositionalText(command);
 
         if (!value) {
             try {
@@ -155,7 +156,7 @@ class S3CpProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const source = command.value?.trim();
+        const source = getPositionalText(command);
         const dest = command.args?.dest as string | undefined;
 
         if (!source) {
@@ -217,7 +218,7 @@ class S3RmProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const value = command.value?.trim();
+        const value = getPositionalText(command);
         if (!value) {
             return buildErrorResponse('S3 URI is required. Usage: s3 rm <s3://bucket/key>');
         }
@@ -272,7 +273,7 @@ class S3MbProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const bucketName = command.value?.trim();
+        const bucketName = getPositionalText(command);
         if (!bucketName) {
             return buildErrorResponse('Bucket name is required. Usage: s3 mb <bucket-name>');
         }
@@ -311,7 +312,7 @@ class S3RbProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const bucketName = command.value?.trim();
+        const bucketName = getPositionalText(command);
         if (!bucketName) {
             return buildErrorResponse('Bucket name is required. Usage: s3 rb <bucket-name>');
         }
@@ -356,7 +357,7 @@ class S3PresignProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const value = command.value?.trim();
+        const value = getPositionalText(command);
         if (!value) {
             return buildErrorResponse('S3 URI is required. Usage: s3 presign <s3://bucket/key>');
         }

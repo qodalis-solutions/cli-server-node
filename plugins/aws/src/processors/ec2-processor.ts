@@ -2,6 +2,7 @@ import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
     CliProcessCommand,
+    getPositionalText,
     ICliCommandProcessor,
     CliStructuredResponse,
 } from '@qodalis/cli-server-abstractions';
@@ -98,7 +99,7 @@ class Ec2DescribeProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const instanceId = command.value?.trim();
+        const instanceId = getPositionalText(command);
         if (!instanceId) {
             return buildErrorResponse('Instance ID is required. Usage: ec2 describe <instance-id>');
         }
@@ -162,7 +163,7 @@ class Ec2StartProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const instanceId = command.value?.trim();
+        const instanceId = getPositionalText(command);
         if (!instanceId) {
             return buildErrorResponse('Instance ID is required. Usage: ec2 start <instance-id>');
         }
@@ -201,7 +202,7 @@ class Ec2StopProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const instanceId = command.value?.trim();
+        const instanceId = getPositionalText(command);
         if (!instanceId) {
             return buildErrorResponse('Instance ID is required. Usage: ec2 stop <instance-id>');
         }
@@ -246,7 +247,7 @@ class Ec2RebootProcessor extends CliCommandProcessor {
 
     /** @inheritdoc */
     async handleStructuredAsync(command: CliProcessCommand): Promise<CliStructuredResponse> {
-        const instanceId = command.value?.trim();
+        const instanceId = getPositionalText(command);
         if (!instanceId) {
             return buildErrorResponse('Instance ID is required. Usage: ec2 reboot <instance-id>');
         }
