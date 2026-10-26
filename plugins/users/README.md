@@ -31,7 +31,7 @@ usersPlugin.dispose();
 
 Mounting the plugin protects the **whole** CLI server by default (`protectServer`): every `/api/...` route and WebSocket then requires a users session — see *Server protection* below.
 
-`build()` is synchronous; seeding runs in the background and is exposed as `ready`. Seeding creates the built-in groups `admin` (`["*"]`) and `users` (`["commands:execute"]`) when missing and, unless an auth adapter is configured, a `root` user (`root@localhost`, group `admin`) when the user store is empty. Without `setDefaultAdminPassword` a random 16-character password is generated, logged once with a warning, and root must change it at first login (`mustChangePassword`). An explicit well-known password (`root`, `admin`, `password`) logs a warning.
+`build()` is synchronous; seeding runs in the background and is exposed as `ready`. Seeding creates the built-in groups `admin` (`["*"]`) and `users` (`["commands:execute"]`) when missing and, unless an auth adapter is configured, a `root` user (`root@localhost`, group `admin`) when the user store is empty. Without `setDefaultAdminPassword` a random 16-character password is generated and printed once to the process's stderr (written directly, not through `console`, so it never reaches the admin plugin's log buffer or the log/event sockets), and root must change it at first login (`mustChangePassword`). An explicit well-known password (`root`, `admin`, `password`) logs a warning.
 
 `buildUsersPlugin(options, broadcastFn)` is still exported as a **deprecated** async wrapper around the builder.
 

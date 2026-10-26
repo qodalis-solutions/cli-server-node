@@ -99,11 +99,11 @@ describe('B3: privilege escalation', () => {
 
 describe('B4: default credentials and password policy', () => {
     it('generates a random root password, logs it once, and forces a change', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
         const plugin = new CliUsersBuilder().build();
         await plugin.ready;
-        const messages = warn.mock.calls.map((c) => String(c[0]));
-        warn.mockRestore();
+        const messages = stderr.mock.calls.map((c) => String(c[0]));
+        stderr.mockRestore();
         const line = messages.find((m) => m.includes('Generated password'));
         expect(line).toBeDefined();
         const password = /root": (\S{16}) /.exec(line!)![1];
