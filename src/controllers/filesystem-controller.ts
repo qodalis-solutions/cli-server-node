@@ -37,21 +37,30 @@ function handleError(err: unknown, res: Response): void {
  * fields), instead of reaching the default error handler as a `500`.
  */
 function createUploadParser(maxUploadBytes: number): RequestHandler {
+    // One byte of headroom: busboy may flag a file of exactly `fileSize` bytes as
+    // truncated depending on chunk boundaries; the exact limit is checked below.
     const single = multer({
         storage: multer.memoryStorage(),
-        limits: { fileSize: maxUploadBytes, files: 1 },
+        limits: { fileSize: maxUploadBytes + 1, files: 1 },
     }).single('file');
+    const tooLarge = (res: Response) => {
+        logger.warn('Upload refused: file larger than %d bytes', maxUploadBytes);
+        res.status(413).json({ error: `File too large: the upload limit is ${maxUploadBytes} bytes` });
+    };
 
     return (req: Request, res: Response, next: NextFunction) => {
         single(req, res, (err?: unknown) => {
             if (!err) {
+                if (req.file && req.file.size > maxUploadBytes) {
+                    tooLarge(res);
+                    return;
+                }
                 next();
                 return;
             }
             if (err instanceof multer.MulterError) {
                 if (err.code === 'LIMIT_FILE_SIZE') {
-                    logger.warn('Upload refused: file larger than %d bytes', maxUploadBytes);
-                    res.status(413).json({ error: `File too large: the upload limit is ${maxUploadBytes} bytes` });
+                    tooLarge(res);
                 } else if (err.code === 'LIMIT_FILE_COUNT') {
                     res.status(400).json({ error: 'Only one file can be uploaded per request' });
                 } else {
