@@ -95,6 +95,8 @@ When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth
 |---|---|---|
 | GET | `/logs` | Query log entries with optional `level`, `search`, `limit`, `offset` params |
 
+The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a value written after a `password`, `passwd`, `secret` or `token` label (`password: x`, `token=x`, `password for user "root": x`) is replaced with `[REDACTED]` before the entry is stored or broadcast.
+
 ### WebSocket Clients
 
 | Method | Endpoint | Description |
