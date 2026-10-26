@@ -117,7 +117,7 @@ export {
 } from '@qodalis/cli-server-plugin-jobs';
 
 // Filesystem (legacy)
-export { FileSystemOptions, FileSystemPathValidator } from './filesystem';
+export { FileSystemOptions, FileSystemApiOptions, DEFAULT_MAX_UPLOAD_BYTES, FileSystemPathValidator } from './filesystem';
 
 // Filesystem plugin
 export {

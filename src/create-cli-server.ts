@@ -283,7 +283,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
     }
     if (fsProvider) {
-        app.use('/api/qcli/fs', createFilesystemRouter(fsProvider));
+        app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
         mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
         mcpFeatures.add('filesystem');
     }

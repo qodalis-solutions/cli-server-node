@@ -739,6 +739,16 @@ The server includes a pluggable file storage system exposed at `/api/qcli/fs/*`.
 | POST | `/api/qcli/fs/mkdir` | Create directory |
 | DELETE | `/api/qcli/fs/rm?path=/file.txt` | Delete file or directory |
 
+Uploads are held in memory and limited to **one file of at most `maxUploadBytes`** (default 100 MiB = `104857600`). A larger file is refused with `413 {"error":"File too large: the upload limit is <n> bytes"}`; more than one file or an unexpected file field is a `400`. Set the limit with the provider (or with `addFileSystem({ allowedPaths, maxUploadBytes })`):
+
+```typescript
+builder.setFileStorageProvider(new OsFileStorageProvider({ allowedPaths: ['/srv/share'] }), {
+    maxUploadBytes: 500 * 1024 * 1024, // 500 MiB
+});
+```
+
+When mounting the router yourself: `createFilesystemRouter(provider, { maxUploadBytes })`.
+
 ### Storage Providers
 
 ```typescript

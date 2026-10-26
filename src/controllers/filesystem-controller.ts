@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
 import multer from 'multer';
 import {
     IFileStorageProvider,
@@ -9,6 +9,7 @@ import {
     FileExistsError,
 } from '@qodalis/cli-server-plugin-filesystem';
 import { createLogger } from '../utils/logger';
+import { DEFAULT_MAX_UPLOAD_BYTES, FileSystemApiOptions } from '../filesystem/filesystem-options';
 
 const logger = createLogger('FileSystem');
 
@@ -30,13 +31,51 @@ function handleError(err: unknown, res: Response): void {
 }
 
 /**
+ * Multipart parser for `POST /upload`: one file of at most `maxUploadBytes`
+ * (held in memory). Limit violations are answered as JSON: `413` for a file
+ * that is too large, `400` for other malformed uploads (extra files, unexpected
+ * fields), instead of reaching the default error handler as a `500`.
+ */
+function createUploadParser(maxUploadBytes: number): RequestHandler {
+    const single = multer({
+        storage: multer.memoryStorage(),
+        limits: { fileSize: maxUploadBytes, files: 1 },
+    }).single('file');
+
+    return (req: Request, res: Response, next: NextFunction) => {
+        single(req, res, (err?: unknown) => {
+            if (!err) {
+                next();
+                return;
+            }
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') {
+                    logger.warn('Upload refused: file larger than %d bytes', maxUploadBytes);
+                    res.status(413).json({ error: `File too large: the upload limit is ${maxUploadBytes} bytes` });
+                } else if (err.code === 'LIMIT_FILE_COUNT') {
+                    res.status(400).json({ error: 'Only one file can be uploaded per request' });
+                } else {
+                    res.status(400).json({ error: `Invalid upload: ${err.message}` });
+                }
+                return;
+            }
+            next(err);
+        });
+    };
+}
+
+/**
  * Creates an Express router that exposes filesystem operations backed by
  * a pluggable `IFileStorageProvider`.
  */
-export function createFilesystemRouter(provider: IFileStorageProvider): Router {
+export function createFilesystemRouter(provider: IFileStorageProvider, options: FileSystemApiOptions = {}): Router {
     const router = Router();
 
-    const upload = multer({ storage: multer.memoryStorage() });
+    const maxUploadBytes = options.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+    if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
+        throw new Error(`maxUploadBytes must be a positive number of bytes (got ${maxUploadBytes})`);
+    }
+    const upload = createUploadParser(maxUploadBytes);
 
     router.get('/ls', async (req: Request, res: Response) => {
         try {
@@ -127,7 +166,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider): Router {
         }
     });
 
-    router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
+    router.post('/upload', upload, async (req: Request, res: Response) => {
         try {
             const targetPath = req.body?.path as string | undefined;
             logger.debug('upload path=%s', targetPath);
