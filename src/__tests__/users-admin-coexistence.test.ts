@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express, { Express } from 'express';
 import request from 'supertest';
 import { CliAdminBuilder, CliAdminPluginResult } from '../../plugins/admin';
-import { buildUsersPlugin, UsersPluginResult } from '../../plugins/users/index';
+import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 import { CliCommandRegistry } from '../services/cli-command-registry';
 import { CliEventSocketManager } from '../services/cli-event-socket-manager';
 import { CliBuilder } from '../extensions/cli-builder';
@@ -29,7 +29,8 @@ beforeAll(async () => {
         .setCredentials(ADMIN_USER, ADMIN_PASS)
         .setJwtSecret('coexistence-test-secret')
         .build({ registry, eventSocketManager, builder, broadcastFn: () => {} });
-    usersPlugin = await buildUsersPlugin({ defaultAdminPassword: USERS_ROOT_PASS });
+    usersPlugin = new CliUsersBuilder().setDefaultAdminPassword(USERS_ROOT_PASS).build();
+    await usersPlugin.ready;
 
     app = express();
     app.use(express.json());
