@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import express, { Request } from 'express';
 import request from 'supertest';
-import { buildUsersPlugin, CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
+import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 import { User, AuthAdapter } from '../../plugins/users/models';
 import { BASE, ROOT_PASS, TestServer, auth, createTestServer, createUser, createGroup, login } from './users-test-helpers';
 
@@ -35,12 +35,6 @@ describe('CliUsersBuilder', () => {
         app.use(plugin.prefix, plugin.router);
         const res = await request(app).post(`${BASE}/sessions`).send({ username: 'root', password: 'early' });
         expect(res.status).toBe(201);
-        plugin.dispose();
-    });
-
-    it('keeps buildUsersPlugin as a deprecated async wrapper', async () => {
-        const plugin = await buildUsersPlugin({ defaultAdminPassword: 'legacy' });
-        expect(await plugin.userStore.getUser('root')).toBeDefined();
         plugin.dispose();
     });
 

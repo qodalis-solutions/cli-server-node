@@ -78,7 +78,7 @@ export interface UsersPluginResult {
 export class CliUsersBuilder {
     private options: UsersModuleOptions = {};
 
-    /** Merge raw options (the same shape `buildUsersPlugin` accepts). */
+    /** Merge raw options (`UsersModuleOptions`). */
     setOptions(options: UsersModuleOptions): this {
         this.options = { ...this.options, ...options };
         return this;

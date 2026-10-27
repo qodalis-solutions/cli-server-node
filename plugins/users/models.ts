@@ -29,8 +29,6 @@ export interface User {
 export interface CreateUserDto {
     name: string;
     email: string;
-    /** @deprecated Passwords are set through the auth service, never stored on the user. */
-    password?: string;
     groups?: string[];
     disabled?: boolean;
     mustChangePassword?: boolean;

@@ -1,6 +1,3 @@
-import { UsersModuleOptions, UsersBroadcastFn } from './models';
-import { CliUsersBuilder, UsersPluginResult } from './cli-users-builder';
-
 export { CliUsersBuilder, generatePassword } from './cli-users-builder';
 export { UsersServerAuth } from './server-auth';
 export type { UsersServerAuthContext } from './server-auth';
@@ -42,16 +39,3 @@ export { DirectoryService } from './services/directory-service';
 export { hashPassword, verifyPasswordHash, PBKDF2_ITERATIONS } from './services/password-hasher';
 export { permissionMatches, hasPermission, mergePermissions, UsersPermissions } from './permissions';
 export { HttpError } from './errors';
-
-/**
- * @deprecated Use `new CliUsersBuilder().setOptions(options).build(broadcastEvent)`
- * and await `ready`.
- */
-export async function buildUsersPlugin(
-    options: UsersModuleOptions = {},
-    broadcastEvent?: UsersBroadcastFn,
-): Promise<UsersPluginResult> {
-    const plugin = new CliUsersBuilder().setOptions(options).build(broadcastEvent);
-    await plugin.ready;
-    return plugin;
-}
