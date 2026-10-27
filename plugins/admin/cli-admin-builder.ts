@@ -11,8 +11,8 @@ import { createWsClientsController, WsClientsDeps } from './controllers/ws-clien
 import { ModuleRegistry, IRegistryLike, IBuilderLike } from './services/module-registry';
 import { LogRingBuffer } from './services/log-ring-buffer';
 import { AdminConfig } from './services/admin-config';
-import { existsSync, readFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { resolveDashboardDir } from './services/dashboard-dir';
+import { join } from 'path';
 import * as crypto from 'crypto';
 
 /** Executor-like interface — the admin plugin only needs to register filters. */
@@ -203,7 +203,7 @@ export class CliAdminBuilder {
 
         // Dashboard SPA static file serving
         const dashboardRouter = Router();
-        const dashboardDistDir = this._resolveDashboardDir();
+        const dashboardDistDir = resolveDashboardDir(this._dashboardDir);
 
         if (dashboardDistDir) {
             dashboardRouter.use(expressStatic(dashboardDistDir));
@@ -244,41 +244,5 @@ export class CliAdminBuilder {
     setDashboardDir(dir: string): CliAdminBuilder {
         this._dashboardDir = dir;
         return this;
-    }
-
-    /**
-     * Resolve the dashboard dist directory. Looks for:
-     * 1. Explicitly set path
-     * 2. @qodalis/cli-server-dashboard/dist (npm package)
-     * 3. Relative paths from this file and cwd (development)
-     */
-    private _resolveDashboardDir(): string | null {
-        // Explicit override
-        if (this._dashboardDir && existsSync(this._dashboardDir)) {
-            return resolve(this._dashboardDir);
-        }
-
-        // Try bundled dashboard directory (embedded in this package)
-        const bundledPath = resolve(__dirname, '..', 'dashboard');
-        if (existsSync(bundledPath)) return bundledPath;
-
-        // Try resolving from node_modules (published package — legacy fallback)
-        try {
-            const pkgDir = require.resolve('@qodalis/cli-server-dashboard/package.json');
-            const distDir = join(pkgDir, '..', 'dist');
-            if (existsSync(distDir)) return resolve(distDir);
-        } catch {
-            // Package not installed
-        }
-
-        // Try relative path from this file (development)
-        const devPath = resolve(__dirname, '../../../../cli-server-dashboard/dist');
-        if (existsSync(devPath)) return devPath;
-
-        // Try relative path from cwd (workspace root)
-        const cwdPath = resolve(process.cwd(), '../cli-server-dashboard/dist');
-        if (existsSync(cwdPath)) return cwdPath;
-
-        return null;
     }
 }
