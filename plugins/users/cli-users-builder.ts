@@ -78,7 +78,7 @@ export interface UsersPluginResult {
 export class CliUsersBuilder {
     private options: UsersModuleOptions = {};
 
-    /** Merge raw options (the same shape `buildUsersPlugin` accepts). */
+    /** Merge raw options (`UsersModuleOptions`). */
     setOptions(options: UsersModuleOptions): this {
         this.options = { ...this.options, ...options };
         return this;
@@ -347,9 +347,11 @@ async function seed(
         });
         await authService.setPassword(root.id, password);
         if (generated) {
-            console.warn(
+            // Written straight to stderr, never through `console`: console output can be
+            // captured (the admin plugin's log buffer) and broadcast to log/event sockets.
+            process.stderr.write(
                 '[users] WARNING: no defaultAdminPassword configured. Generated password for user "root": ' +
-                    `${password} — it must be changed at first login.`,
+                    `${password} — it must be changed at first login.\n`,
             );
         } else if (WEAK_PASSWORDS.has(password.toLowerCase())) {
             console.warn(`[users] WARNING: the "root" user uses a well-known default password. Change it before exposing this server.`);

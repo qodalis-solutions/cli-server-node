@@ -1,5 +1,5 @@
 import { ICliCommandProcessor, ICliModule, IDataExplorerProvider, DataExplorerProviderOptions } from '../abstractions';
-import { FileSystemOptions } from '../filesystem';
+import { FileSystemApiOptions, FileSystemOptions } from '../filesystem';
 import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
 import { CliCommandRegistry } from '../services';
@@ -14,6 +14,7 @@ export class CliBuilder {
     private readonly _modules: ICliModule[] = [];
     private _fileSystemOptions?: FileSystemOptions;
     private _fileStorageProvider?: IFileStorageProvider;
+    private _fileSystemApiOptions: FileSystemApiOptions = {};
     private _dataExplorerBuilder?: DataExplorerBuilder;
     private readonly _mcpToolProviders: McpToolProvider[] = [];
 
@@ -41,9 +42,10 @@ export class CliBuilder {
         return this._modules;
     }
 
-    /** Configures the filesystem API with path-based access control. */
+    /** Configures the filesystem API with path-based access control (and `maxUploadBytes`). */
     addFileSystem(options: FileSystemOptions): CliBuilder {
         this._fileSystemOptions = options;
+        this._fileSystemApiOptions = { maxUploadBytes: options.maxUploadBytes };
         return this;
     }
 
@@ -52,10 +54,21 @@ export class CliBuilder {
         return this._registry;
     }
 
-    /** Sets a custom file storage provider for the filesystem API. */
-    setFileStorageProvider(provider: IFileStorageProvider): CliBuilder {
+    /**
+     * Sets a custom file storage provider for the filesystem API. `options`
+     * configures the HTTP API (e.g. `maxUploadBytes`, default 100 MiB).
+     */
+    setFileStorageProvider(provider: IFileStorageProvider, options?: FileSystemApiOptions): CliBuilder {
         this._fileStorageProvider = provider;
+        if (options) {
+            this._fileSystemApiOptions = { ...options };
+        }
         return this;
+    }
+
+    /** Options of the filesystem HTTP API (`maxUploadBytes`). */
+    get fileSystemApiOptions(): FileSystemApiOptions {
+        return this._fileSystemApiOptions;
     }
 
     /** Returns the configured filesystem options, if any. */

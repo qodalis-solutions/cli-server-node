@@ -72,6 +72,29 @@ export class OsFileStorageProvider implements IFileStorageProvider {
         }
     }
 
+    /** Real paths of the allowed roots (symlinks resolved; the resolved path when a root does not exist). */
+    private async allowedRoots(): Promise<Set<string>> {
+        const roots = new Set<string>(this.allowedPaths);
+        for (const ap of this.allowedPaths) {
+            try {
+                roots.add(await fs.realpath(ap));
+            } catch {
+                // a missing root: its resolved path is enough
+            }
+        }
+        return roots;
+    }
+
+    /**
+     * Refuses an operation that would delete or move an allowed root itself
+     * (e.g. `rm` of the shared directory): only entries inside a root can be.
+     */
+    private async assertNotAllowedRoot(resolved: string, requestedPath: string): Promise<void> {
+        if ((await this.allowedRoots()).has(resolved)) {
+            throw new PermissionDeniedError(requestedPath);
+        }
+    }
+
     async list(path: string): Promise<FileEntry[]> {
         const resolved = await this.validate(path);
 
@@ -180,6 +203,7 @@ export class OsFileStorageProvider implements IFileStorageProvider {
 
     async remove(path: string, recursive: boolean = false): Promise<void> {
         const resolved = await this.validate(path);
+        await this.assertNotAllowedRoot(resolved, path);
 
         let stat;
         try {
@@ -211,6 +235,8 @@ export class OsFileStorageProvider implements IFileStorageProvider {
     async move(src: string, dest: string): Promise<void> {
         const resolvedSrc = await this.validate(src);
         const resolvedDest = await this.validate(dest);
+        await this.assertNotAllowedRoot(resolvedSrc, src);
+        await this.assertNotAllowedRoot(resolvedDest, dest);
 
         try {
             await fs.access(resolvedSrc);
