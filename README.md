@@ -1,60 +1,49 @@
 # Qodalis CLI Server (Node.js)
 
-[![npm @qodalis/cli-server-node](https://img.shields.io/npm/v/@qodalis/cli-server-node?label=%40qodalis%2Fcli-server-node)](https://www.npmjs.com/package/@qodalis/cli-server-node)
-[![npm @qodalis/cli-server-abstractions](https://img.shields.io/npm/v/@qodalis/cli-server-abstractions?label=%40qodalis%2Fcli-server-abstractions)](https://www.npmjs.com/package/@qodalis/cli-server-abstractions)
+Express server that runs server-side commands, files, data sources, jobs and a remote shell for the Qodalis web terminal.
 
-A Node.js CLI server framework for the [Qodalis CLI](https://github.com/qodalis-solutions/web-cli) ecosystem. Build custom server-side commands that integrate with the Qodalis web terminal.
+[![npm](https://img.shields.io/npm/v/@qodalis/cli-server-node)](https://www.npmjs.com/package/@qodalis/cli-server-node)
+[![npm abstractions](https://img.shields.io/npm/v/@qodalis/cli-server-abstractions?label=abstractions)](https://www.npmjs.com/package/@qodalis/cli-server-abstractions)
+[![Build & Test](https://github.com/qodalis-solutions/cli-server-node/actions/workflows/build.yml/badge.svg)](https://github.com/qodalis-solutions/cli-server-node/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Installation
+`@qodalis/cli-server-node` is the Node.js backend of the [Qodalis CLI](https://cli.qodalis.com/docs). You register command processors (classes with a name, parameters and a handler); the browser terminal discovers them over REST and runs them as if they were local commands. Use it as a library inside an existing Express app or run it standalone.
+
+| Part of the ecosystem | Repository |
+|---|---|
+| Web terminal (engine, Angular/React/Vue wrappers, plugins) | [qodalis-solutions/web-cli](https://github.com/qodalis-solutions/web-cli) |
+| Node.js server (this repo) | [qodalis-solutions/cli-server-node](https://github.com/qodalis-solutions/cli-server-node) |
+| .NET server (same API) | [qodalis-solutions/cli-server-dotnet](https://github.com/qodalis-solutions/cli-server-dotnet) |
+| Python server (same API) | [qodalis-solutions/cli-server-python](https://github.com/qodalis-solutions/cli-server-python) |
+| Admin dashboard served by the admin plugin | [qodalis-solutions/cli-server-dashboard](https://github.com/qodalis-solutions/cli-server-dashboard) |
+| MCP bridge for Claude Code | [qodalis-solutions/mcp-cli](https://github.com/qodalis-solutions/mcp-cli) |
+
+## Quick start
 
 ```bash
 npm install @qodalis/cli-server-node
 ```
 
-The package exports all types, interfaces, base classes, and built-in processors. TypeScript declarations are included.
-
-### Plugin Authors
-
-If you're building a command processor plugin and don't need the server runtime (Express, WebSocket), install the abstractions package instead:
-
-```bash
-npm install @qodalis/cli-server-abstractions
-```
-
-This gives you `CliCommandProcessor`, `CliProcessCommand`, `CliCommandParameterDescriptor`, and all other base types with **zero dependencies**. See [`@qodalis/cli-server-abstractions`](https://www.npmjs.com/package/@qodalis/cli-server-abstractions) for details.
-
-## Quick Start
-
-### As a Library
-
 ```typescript
-import {
-    createCliServer,
-    CliCommandProcessor,
-    CliProcessCommand,
-} from '@qodalis/cli-server-node';
+import { createCliServer, CliCommandProcessor, CliProcessCommand } from '@qodalis/cli-server-node';
 
 class GreetProcessor extends CliCommandProcessor {
     command = 'greet';
     description = 'Says hello';
+    acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const name = command.value ?? 'World';
-        return `Hello, ${name}!`;
+        return `Hello, ${command.value ?? 'World'}!`;
     }
 }
 
 const { app, eventSocketManager } = createCliServer({
-    configure: (builder) => {
-        builder.addProcessor(new GreetProcessor());
-    },
+    allowedOrigins: ['http://localhost:4200'], // the web app hosting the terminal
+    configure: (builder) => builder.addProcessor(new GreetProcessor()),
 });
 
-const server = app.listen(8047, () => {
-    console.log('CLI server listening on http://localhost:8047');
-});
-
-eventSocketManager.attach(server);
+const server = app.listen(8047, () => console.log('CLI server on http://localhost:8047'));
+eventSocketManager.attach(server); // WebSockets: events, logs, shell
 
 process.on('SIGINT', async () => {
     await eventSocketManager.broadcastDisconnect();
@@ -63,948 +52,341 @@ process.on('SIGINT', async () => {
 });
 ```
 
-### As a Standalone Server
+Point the web terminal at `http://localhost:8047` and type `greet Alice`.
+
+Run the standalone server instead (built-in processors plus the weather module):
 
 ```bash
-npx qodalis-cli-server
+npx -p @qodalis/cli-server-node qodalis-cli-server
 ```
 
-Or with environment variables:
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8047` | Listening port |
+| `QCLI_ALLOWED_ORIGINS` | none | Comma-separated origins allowed for CORS and WebSockets |
+| `QCLI_SHELL_TOKEN` | none | Enables the remote shell in token mode |
 
-```bash
-PORT=9000 npx qodalis-cli-server
-```
+Plugin authors who only need the base types can depend on [`@qodalis/cli-server-abstractions`](packages/abstractions/README.md) (zero dependencies).
 
-## Creating Custom Command Processors
+## Features
 
-### Simple Command
+- Command processors with typed parameters, aliases, defaults, sub-commands and modules
+- Plain-text or structured output (tables, lists, JSON, key-value) and SSE streaming execution
+- Versioned REST API compatible with the .NET and Python servers
+- File storage API with pluggable backends (memory, OS, JSON, SQLite, S3)
+- Data explorer over SQL, PostgreSQL, MySQL, SQL Server, MongoDB, Redis and Elasticsearch
+- Background jobs, admin dashboard, users, groups, permissions and API tokens as plugins
+- Remote PTY shell with explicit access modes, limits and process-tree cleanup
+- MCP endpoint that exposes commands, files, data and jobs as tools to AI clients
+- Origin checks, CORS allow-list and trusted-proxy handling
 
-Extend `CliCommandProcessor` and implement `command`, `description`, and `handleAsync`:
+## Writing commands
+
+### Processors and parameters
 
 ```typescript
-import { CliCommandProcessor, CliProcessCommand } from '@qodalis/cli-server-node';
-
-class EchoProcessor extends CliCommandProcessor {
-    command = 'echo';
-    description = 'Echoes input text back';
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return command.value ?? 'Usage: echo <text>';
-    }
-}
-```
-
-Register it during server creation:
-
-```typescript
-const { app, eventSocketManager } = createCliServer({
-    configure: (builder) => {
-        builder
-            .addProcessor(new EchoProcessor())
-            .addProcessor(new AnotherProcessor()); // fluent chaining
-    },
-});
-```
-
-### Command with Parameters
-
-Declare parameters with names, types, aliases, and defaults. The CLI client uses this metadata for autocompletion and validation.
-
-```typescript
-import {
-    CliCommandProcessor,
-    CliCommandParameterDescriptor,
-    CliProcessCommand,
-} from '@qodalis/cli-server-node';
+import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand } from '@qodalis/cli-server-node';
 
 class TimeProcessor extends CliCommandProcessor {
     command = 'time';
     description = 'Shows the current server time';
-
     parameters = [
-        new CliCommandParameterDescriptor(
-            'utc',           // name
-            'Show UTC time', // description
-            false,           // required
-            'boolean',       // type
-        ),
-        new CliCommandParameterDescriptor(
-            'format',                  // name
-            'Date/time format string', // description
-            false,                     // required
-            'string',                  // type
-            ['-f'],                    // aliases
-            'ISO',                     // defaultValue
-        ),
+        //                               name     description       required type       aliases
+        new CliCommandParameterDescriptor('utc', 'Show UTC time', false, 'boolean'),
+        new CliCommandParameterDescriptor('format', 'Output format', false, 'string', ['-f'], 'ISO'),
     ];
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        const useUtc = 'utc' in (command.args ?? {});
         const now = new Date();
-        return useUtc ? `UTC: ${now.toISOString()}` : `Local: ${now.toLocaleString()}`;
+        return command.args?.utc ? now.toISOString() : now.toLocaleString();
     }
 }
 ```
 
-Parameter types: `'string'`, `'number'`, `'boolean'`.
+Nest processors with `processors = [new AddProcessor(), new MultiplyProcessor()]` to get `math add --a 1 --b 2`. Implement `handleStructuredAsync` instead of `handleAsync` to return typed outputs.
 
-### Sub-commands
+| Member | Default | Description |
+|---|---|---|
+| `command`, `description` | required | Name and help text |
+| `handleAsync(command, signal?)` | required | Execution logic, returns text |
+| `handleStructuredAsync(command, signal?)` | none | Returns `{ exitCode, outputs }`; takes precedence over `handleAsync` |
+| `parameters` | none | `CliCommandParameterDescriptor[]` (`string`, `number`, `boolean`, ...) |
+| `processors` | none | Sub-commands |
+| `allowUnlistedCommands` | none | Accept sub-commands not listed in `processors` |
+| `valueRequired` / `acceptsValue` | none | Positional value is required / optional (MCP exposes it as `value`) |
+| `requiredPermissions` | none | Enforced server-side when the users plugin is mounted |
+| `version`, `author` | `'1.0.0'`, library author | Metadata |
 
-Nest processors to create command hierarchies like `math add --a 5 --b 3`:
+### Command input
 
-```typescript
-import {
-    CliCommandProcessor,
-    CliCommandParameterDescriptor,
-    CliProcessCommand,
-} from '@qodalis/cli-server-node';
+| Property | Description |
+|---|---|
+| `command` | Command name |
+| `value` | Positional text as typed (quotes included) |
+| `positionals` | Positional arguments split like a shell (sent by newer clients) |
+| `args` | Named parameters (`--format "HH:mm"`) |
+| `chainCommands` | Sub-command chain (`["add"]` in `math add`) |
+| `rawCommand` | Original input |
+| `data` | Arbitrary payload from the client |
 
-class MathAddProcessor extends CliCommandProcessor {
-    command = 'add';
-    description = 'Adds two numbers';
+Read positional input with `getPositionals(command)` or `getPositionalText(command)`; both fall back to splitting `value` with `splitShellWords`, so quotes never leak into what a processor reads.
 
-    parameters = [
-        new CliCommandParameterDescriptor('a', 'First number', true, 'number'),
-        new CliCommandParameterDescriptor('b', 'Second number', true, 'number'),
-    ];
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        const a = Number(command.args?.a);
-        const b = Number(command.args?.b);
-        return `${a} + ${b} = ${a + b}`;
-    }
-}
-
-class MathMultiplyProcessor extends CliCommandProcessor {
-    command = 'multiply';
-    description = 'Multiplies two numbers';
-
-    parameters = [
-        new CliCommandParameterDescriptor('a', 'First number', true, 'number'),
-        new CliCommandParameterDescriptor('b', 'Second number', true, 'number'),
-    ];
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        const a = Number(command.args?.a);
-        const b = Number(command.args?.b);
-        return `${a} * ${b} = ${a * b}`;
-    }
-}
-
-class MathProcessor extends CliCommandProcessor {
-    command = 'math';
-    description = 'Performs basic math operations';
-    allowUnlistedCommands = false;
-
-    processors = [
-        new MathAddProcessor(),
-        new MathMultiplyProcessor(),
-    ];
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return 'Usage: math add|multiply --a <number> --b <number>';
-    }
-}
-```
-
-## Modules
-
-Modules group related command processors into a reusable unit. Implement `ICliModule` (or extend the `CliModule` base class) to bundle processors under a single name and version.
-
-### Defining a Module
+### Modules
 
 ```typescript
-import { CliModule, CliCommandProcessor, CliProcessCommand, ICliCommandProcessor } from '@qodalis/cli-server-node';
-
-class WeatherCurrentProcessor extends CliCommandProcessor {
-    command = 'current';
-    description = 'Shows current weather conditions';
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return `Weather: Sunny, 22°C`;
-    }
-}
-
-class WeatherForecastProcessor extends CliCommandProcessor {
-    command = 'forecast';
-    description = 'Shows a 3-day weather forecast';
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return `Forecast: Sunny for 3 days`;
-    }
-}
-
-class CliWeatherCommandProcessor extends CliCommandProcessor {
-    command = 'weather';
-    description = 'Shows weather information for a location';
-    processors: ICliCommandProcessor[] = [
-        new WeatherCurrentProcessor(),
-        new WeatherForecastProcessor(),
-    ];
-
-    async handleAsync(command: CliProcessCommand): Promise<string> {
-        return `Weather: Sunny, 22°C`;
-    }
-}
+import { CliModule, ICliCommandProcessor } from '@qodalis/cli-server-node';
 
 export class WeatherModule extends CliModule {
     name = 'weather';
     version = '1.0.0';
-    description = 'Provides weather information commands';
-    processors: ICliCommandProcessor[] = [new CliWeatherCommandProcessor()];
+    description = 'Weather commands';
+    processors: ICliCommandProcessor[] = [new WeatherProcessor()];
 }
+
+createCliServer({ configure: (builder) => builder.addModule(new WeatherModule()) });
 ```
 
-### Registering a Module
+`plugins/weather/` is a complete reference module (`weather`, `weather current`, `weather forecast`).
 
-```typescript
-const { app, eventSocketManager } = createCliServer({
-    configure: (builder) => {
-        builder.addModule(new WeatherModule());
-    },
-});
-```
+## Configuration
 
-`addModule()` iterates over the module's `processors` and registers each one, just like calling `addProcessor()` for each individually.
+`createCliServer(options)`:
 
-### ICliModule Interface
+| Option | Default | Description |
+|---|---|---|
+| `basePath` | `'/api/qcli'` | Extra mount point for the CLI routes; also sets the MCP path (`{basePath}/mcp`) |
+| `allowedOrigins` | none | CORS and WebSocket `Origin` allow-list (`http://host:*` matches any port) |
+| `cors` | from `allowedOrigins` | `true` (any origin), `false`, or a `cors` options object |
+| `trustProxy` | `false` | Number of trusted reverse-proxy hops for `X-Forwarded-*` (`true` = 1) |
+| `enableShell` | `false` | Accept remote shell sessions (see [Remote shell](#remote-shell)) |
+| `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
+| `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
+| `mcp` | off | `true` or `{ tools, exclude, token, instructions, enabled }` (see [MCP](#mcp-endpoint)) |
+| `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 
-| Member | Type | Description |
-|--------|------|-------------|
-| `name` | `string` | Unique module identifier |
-| `version` | `string` | Module version |
-| `description` | `string` | Short description |
-| `author` | `ICliCommandAuthor` | Author metadata (defaults to library author) |
-| `processors` | `ICliCommandProcessor[]` | Command processors provided by the module |
+`configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider` (all chainable).
 
-### Example: Weather Module
+`createCliServer` returns:
 
-The repository includes a weather module under `plugins/weather/` as a reference implementation. It registers a `weather` command with `current` and `forecast` sub-commands, using the [wttr.in](https://wttr.in) API:
+| Field | Description |
+|---|---|
+| `app` | The Express app |
+| `registry`, `builder`, `executor` | Processor registry, registration builder, command executor |
+| `eventSocketManager` | `attach(server)` for the WebSockets, `broadcastMessage`, `broadcastDisconnect` |
+| `logSocketManager` | Server log stream socket |
+| `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth) |
+| `setAuth(auth)` | Installs or removes the server auth provider |
+| `mcp` | `{ enabled, path, addProvider(provider) }` |
 
-```
-weather                    # Shows current weather (default: London)
-weather current London     # Current conditions for London
-weather forecast --location Paris  # 3-day forecast for Paris
-```
+Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass the Origin, CORS and CSRF checks. With `trustProxy` set to n hops, the client IP is the `X-Forwarded-For` entry at index `len - n`; set it to the exact number of proxies you run, otherwise clients can spoof their address.
 
-## Command Input
-
-Every processor receives a `CliProcessCommand` with the parsed command input:
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `command` | `string` | Command name (e.g., `"time"`) |
-| `value` | `string \| undefined` | Positional text as typed, quotes included (e.g., `"hello"` in `echo hello`) |
-| `positionals` | `string[] \| undefined` | Positional arguments split like a shell: quotes removed, backslash escapes applied (`base64 encode "a b"` -> `["a b"]`). Sent by newer browsers |
-| `args` | `Record<string, any>` | Named parameters (e.g., `--format "HH:mm"`) |
-| `chainCommands` | `string[]` | Sub-command chain (e.g., `["add"]` in `math add`) |
-| `rawCommand` | `string` | Original unprocessed input |
-| `data` | `any` | Arbitrary data payload from the client |
-
-Read positional input with `getPositionals(command)` (a `string[]`) or `getPositionalText(command)` (joined by one space). Both use `positionals` when the browser sends it and otherwise split `value` with the same rules (`splitShellWords`), so quotes never leak into what a processor reads.
-
-## API Endpoints
-
-The server exposes versioned endpoints:
+## API
 
 | Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/qcli/versions` | Version discovery (supported versions, preferred version) |
-| GET | `/api/v1/qcli/version` | V1 server version |
-| GET | `/api/v1/qcli/commands` | V1 commands (all processors) |
-| POST | `/api/v1/qcli/execute` | V1 execute |
-| POST | `/api/v1/qcli/execute/stream` | V1 SSE streaming execute |
-| POST | `/api/qcli/mcp` | MCP endpoint (when the `mcp` option is on, see [MCP Endpoint](#mcp-endpoint)) |
-| WS | `/ws/qcli/events` | WebSocket events (also `/ws/v1/qcli/events`) |
-| WS | `/ws/v1/qcli/shell` | Interactive PTY shell session |
+|---|---|---|
+| GET | `/api/qcli/versions` | Supported API versions and the preferred one |
+| GET | `/api/v1/qcli/version` | Server version |
+| GET | `/api/v1/qcli/capabilities` | OS, shell availability (`shell`, `shellAuth`), streaming, version |
+| GET | `/api/v1/qcli/commands` | Registered processors |
+| POST | `/api/v1/qcli/execute` | Execute a command |
+| POST | `/api/v1/qcli/execute/stream` | Execute with Server-Sent Events output |
+| GET | `/api/qcli/fs/ls`, `cat`, `stat`, `download` | File storage (when a provider is configured) |
+| POST | `/api/qcli/fs/upload`, `mkdir` | Upload (multipart) / create directory |
+| DELETE | `/api/qcli/fs/rm` | Delete file or directory |
+| GET | `/api/qcli/data-explorer/sources`, `schema` | Data sources and their schema (when sources are registered) |
+| POST | `/api/qcli/data-explorer/execute` | Run a query against a source |
+| POST | `/api/qcli/mcp` | MCP endpoint (when `mcp` is enabled) |
+| WS | `/ws/v1/qcli/events` | Server-push events |
+| WS | `/ws/v1/qcli/logs` | Server log stream |
+| WS | `/ws/v1/qcli/shell` | Interactive PTY shell (when `enableShell` is on) |
 
-`GET /capabilities` reports `shell: true|false` and, when the shell is enabled, `shellAuth: 'users' | 'token' | 'custom' | 'anonymous' | 'locked'`.
+Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plugins add their own routes: users (`/api/v1/qcli/sessions`, `/users`, `/groups`, `/tokens`, ...), jobs and admin; see their READMEs.
 
-## MCP Endpoint
+## Plugins
 
-The server can expose **the whole system** to AI clients such as Claude Code over the [Model Context Protocol](https://modelcontextprotocol.io): CLI commands, the filesystem API, the data explorer, jobs and tools contributed by plugins, each with the same permissions as a CLI user. It works with or without the users plugin.
-
-### Enabling
-
-MCP is off by default. Enable it with the `mcp` option:
-
-```typescript
-const { app, mcp } = createCliServer({
-    mcp: true,                         // or an options object:
-    // mcp: {
-    //     tools: ['weather_*', 'echo'],  // allow-list (trailing * = prefix); default: every tool
-    //     exclude: ['fs_delete'],        // deny-list, applied after `tools`
-    //     token: process.env.MCP_TOKEN,  // only WITHOUT an auth provider: required bearer token
-    //     instructions: 'Each tool runs one command of this server.', // returned by initialize
-    //     enabled: true,                 // default true when the object is given
-    // },
-    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
-});
-```
-
-### Route and transport
-
-- `POST /api/qcli/mcp` (`{basePath}/mcp`): MCP *Streamable HTTP*, **stateless** (no `Mcp-Session-Id`) and **JSON responses only** (no SSE). `GET`/`DELETE` → `405` with `Allow: POST`.
-- JSON-RPC 2.0: notifications → `202` with an empty body; malformed JSON → `-32700`, invalid request (including batches) → `-32600`, unknown method → `-32601`, bad params → `-32602` (JSON-RPC errors use HTTP 200).
-- Methods: `initialize` (protocol versions `2025-11-25`, `2025-06-18`, `2025-03-26`; the client's version is echoed when supported, otherwise the newest), `ping`, `tools/list`, `tools/call`.
-- An `Origin` header, when present, must be in `allowedOrigins` or same-origin, otherwise `403` (DNS-rebinding protection; checked before authentication).
-
-### Authentication
-
-| Server | Access |
+| Package | Description |
 |---|---|
-| users plugin mounted (`protectServer`) | a session or an [API token](plugins/users/README.md#api-tokens) (`Authorization: Bearer qcli_pat_…`) holding `commands:execute`; `401`/`403` as plain `{ "error": … }` responses. `tools/list` and `tools/call` only show the tools whose permissions the caller holds. `mcp.token` is ignored. |
-| no auth provider, `mcp.token` set | `Authorization: Bearer <token>` (constant-time compare), else `401` |
-| no auth provider, no token | open, like `/execute` |
+| [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens, audit log; protects the whole server |
+| [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
+| [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management |
+| [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |
+| [`-filesystem-json`](plugins/filesystem-json/README.md), [`-filesystem-sqlite`](plugins/filesystem-sqlite/README.md), [`-filesystem-s3`](plugins/filesystem-s3/README.md) | JSON file, SQLite and Amazon S3 storage providers |
+| [`@qodalis/cli-server-plugin-data-explorer`](plugins/data-explorer/README.md) | Data explorer core |
+| [`-data-explorer-sql`](plugins/data-explorer-sql/README.md), [`-postgres`](plugins/data-explorer-postgres/README.md), [`-mysql`](plugins/data-explorer-mysql/README.md), [`-mssql`](plugins/data-explorer-mssql/README.md), [`-mongo`](plugins/data-explorer-mongo/README.md), [`-redis`](plugins/data-explorer-redis/README.md), [`-elasticsearch`](plugins/data-explorer-elasticsearch/README.md) | Data explorer providers |
+| [`@qodalis/cli-server-plugin-aws`](plugins/aws/README.md) | AWS commands: S3, EC2, Lambda, CloudWatch, SNS, SQS, IAM, DynamoDB, ECS |
+| [`@qodalis/cli-server-plugin-weather`](plugins/weather/README.md) | Example module |
 
-### Tools
-
-Tools are collected from **tool providers** on every request, so new registrations, enabled features and the caller's permissions are always current. The `tools`/`exclude` lists apply to every tool.
-
-| Provider | Tools | Permissions | Annotations |
-|---|---|---|---|
-| server | `server_info` (version, capabilities, enabled features, command names) | — | read-only |
-| commands | one tool per command (below) | `commands:execute` + `requiredPermissions` along the chain | — |
-| filesystem (when a file storage provider is configured) | `fs_list {path}`, `fs_stat {path}`, `fs_read {path, maxBytes?=262144}` | `files:read` | read-only |
-| | `fs_write {path, content}`, `fs_mkdir {path}` | `files:write` | — |
-| | `fs_delete {path, recursive?=false}` | `files:write` | destructive |
-| data explorer (when sources are registered) | `data_sources`, `data_schema {source}` | `data:query` | read-only |
-| | `data_query {source, query, parameters?}` | `data:query` | — |
-| jobs (when the jobs plugin is mounted) | `jobs_list`, `jobs_get {id}`, `jobs_history {id, limit?=20}` | `jobs:read` | read-only |
-| | `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` `{id}` | `jobs:manage` | `jobs_stop`/`jobs_cancel` destructive |
-
-The jobs tools' `id` accepts a job id or a unique job name (exact, then case-insensitive; an ambiguous name is an error).
-
-Feature tools use the same services as the HTTP routes (the storage provider and its path checks, the data explorer executor with its timeouts and row limits, the job scheduler); their errors become `isError: true` results. `fs_read` returns UTF-8 text (binary files → `isError` `binary file, N bytes`). Paths outside the provider's allow-list are rejected exactly as by `/api/qcli/fs` (symlinks are resolved first, so on macOS allow `/private/tmp` rather than `/tmp`).
-
-**Command tools**: every root command and sub-command that has no sub-commands, declares parameters or takes a value (`valueRequired`, or `acceptsValue` for an optional one) becomes a tool named after its path joined with `_` (`weather`, `weather_current`), lower-cased, other characters than `[a-z0-9_-]` replaced by `-`, at most 64 characters. The input schema has one property per parameter (`string`, `number`, `boolean`, `array` of strings; anything else is a string) plus `value` (the positional input) when the command takes one: required with `valueRequired`, optional with `acceptsValue` (set it on processors that read `command.value` without requiring it; the built-in `hash`, `base64 encode|decode`, `http get|post` and the weather commands do). A call builds the same command the CLI would send and runs it through the **same executor as `/execute`**; the outputs are rendered as text (tables as `a | b` rows, lists one item per line, JSON pretty-printed, key-value as `key: value`), `isError` is `exitCode != 0`, and a single JSON-object output is also returned as `structuredContent`. Unknown tools and invalid arguments (wrong type, unknown or missing property) are JSON-RPC `-32602` errors.
-
-Name collisions (a warning is logged): built-in feature tools win, then plugin/host provider tools in registration order, then command tools. The interactive shell is never a tool.
-
-### Adding tools (providers)
+Builder-based plugins are mounted with `mountPlugin`:
 
 ```typescript
-import { McpToolProvider, mcpObjectSchema } from '@qodalis/cli-server-node';
-
-const provider: McpToolProvider = {
-    name: 'inventory',
-    getTools: () => [
-        {
-            name: 'inventory_count',
-            description: 'Count the items of a warehouse',
-            inputSchema: mcpObjectSchema({ warehouse: { type: 'string' } }, ['warehouse']),
-            requiredPermissions: ['inventory:read'], // checked for list and call (with an auth provider)
-            annotations: { readOnlyHint: true },
-            call: async (args, { auth, signal }) => ({ text: `42 items in ${args.warehouse}`, isError: false }),
-        },
-    ],
-};
-
-const server = createCliServer({ mcp: true });
-server.mcp.addProvider(provider);            // or builder.addMcpToolProvider(provider) in `configure`
-// plugins can also return `mcpProviders: [provider]` from their build result (picked up by mountPlugin)
-```
-
-Arguments are validated against `inputSchema` before `call` runs. Return `structured` to also send `structuredContent`.
-
-### Using the MCP endpoint from an MCP client
-
-This guide connects [Claude Code](https://docs.claude.com/en/docs/claude-code) to a server. The commands use the demo server (`cd demo && npm start`: port 8047, users plugin, user `root` / password `admin`); replace the URL and credentials with yours.
-
-#### 1. Enable MCP on the server
-
-MCP is enabled with the `mcp` option of `createCliServer` (`mcp: true`, or an options object).
-
-With the users plugin (sessions, permissions, API tokens):
-
-```typescript
-import { createCliServer, CliEchoCommandProcessor } from '@qodalis/cli-server-node';
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
+import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 
-const { app, eventSocketManager, mountPlugin } = createCliServer({
-    mcp: { instructions: 'Each tool runs one command of this server.' },
-    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
-});
+const { app, eventSocketManager, mountPlugin } = createCliServer({ /* ... */ });
+const broadcast = (msg: Record<string, unknown>) => eventSocketManager.broadcastMessage(msg);
 
-const usersPlugin = new CliUsersBuilder()
-    .setDefaultAdminPassword('admin')
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
-mountPlugin(usersPlugin);
-
-app.listen(8047);
+mountPlugin(new CliJobsBuilder().addJob(new HealthCheckJob(), { name: 'health', interval: '30s' }).build(broadcast));
+mountPlugin(new CliUsersBuilder().setDefaultAdminPassword(process.env.ADMIN_PASSWORD!).build(broadcast));
 ```
 
-Without the users plugin, protect the endpoint with a static bearer token (without `token` it is as open as `/execute`):
+### File storage
 
 ```typescript
-const { app } = createCliServer({
-    mcp: { token: process.env.QCLI_MCP_TOKEN },
-    configure: (builder) => builder.addProcessor(new CliEchoCommandProcessor()),
-});
-app.listen(8047);
-```
+import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 
-The endpoint is `http://localhost:8047/api/qcli/mcp` (`{basePath}/mcp`).
-
-#### 2. Get a token
-
-With the users plugin, sign in and create an API token with the session token (requires `jq`; otherwise copy the `token` field of each response):
-
-```bash
-SESSION=$(curl -s -X POST http://localhost:8047/api/v1/qcli/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"username":"root","password":"admin"}' | jq -r .token)
-
-TOKEN=$(curl -s -X POST http://localhost:8047/api/v1/qcli/tokens \
-  -H "Authorization: Bearer $SESSION" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"claude","expiresInDays":30}' | jq -r .token)
-
-echo "$TOKEN"
-```
-
-The API token (`qcli_pat_…`) is shown only once. In the web CLI connected to the server, `token create claude` does the same. Add `"permissions": ["commands:execute", "files:read"]` to the body to give the token only part of your permissions; tokens are listed with `GET /api/v1/qcli/tokens` and revoked with `DELETE /api/v1/qcli/tokens/<id>` (see [API tokens](plugins/users/README.md#api-tokens)).
-
-Without the users plugin, the token is the `mcp.token` value.
-
-#### 3. Connect Claude Code
-
-**(a) Directly over HTTP** with the token:
-
-```bash
-claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
-```
-
-**(b) Through the [`@qodalis/mcp-cli`](https://github.com/qodalis-solutions/mcp-cli) bridge**, a local MCP server configured with environment variables:
-
-```bash
-claude mcp add qcli -e QCLI_URL=http://localhost:8047 -e QCLI_TOKEN=<token> -- npx -y @qodalis/mcp-cli
-```
-
-Use `QCLI_USER` / `QCLI_PASSWORD` instead of `QCLI_TOKEN` to sign in with a user, and `QCLI_READ_ONLY=true` to expose only read-only tools.
-
-Check the connection with `claude mcp list` (or `/mcp` inside Claude Code); `qcli` should be listed as connected, with the tools of step 4.
-
-#### 4. Check the endpoint with curl
-
-Every request is one JSON-RPC message sent with `POST`; the server is stateless, so no session header is needed between calls.
-
-```bash
-# initialize
-curl -s http://localhost:8047/api/qcli/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
-
-# list the tools
-curl -s http://localhost:8047/api/qcli/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-
-# call a tool
-curl -s http://localhost:8047/api/qcli/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"value":"hello from MCP"}}}'
-```
-
-Responses (shortened):
-
-```json
-{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qodalis-cli-server","version":"1.0.0-beta.7"},"instructions":"…"}}
-{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"server_info","description":"…","inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"echo", …}, …]}}
-{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"hello from MCP"}],"isError":false}}
-```
-
-A failed command is a normal result with `"isError": true`; an unknown tool or invalid arguments is a JSON-RPC error (`-32602`).
-
-#### 5. Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| `claude mcp list` / `/mcp` shows `qcli` as failed | Run the curl checks of step 4 with the same URL and token to see the HTTP error below. |
-| `401 {"error":"unauthorized"}` or `{"error":"invalid or expired token"}` | No `Authorization: Bearer …` header, or the token is wrong, expired or revoked, or its user is disabled or deleted: create a new token (step 2). Without the users plugin, check `mcp.token`. |
-| `403 {"error":"forbidden: origin not allowed"}` | The request has an `Origin` header that is neither in `allowedOrigins` nor the server's own origin (DNS-rebinding protection). Claude Code sends no `Origin`; for browser-based clients add the origin to `allowedOrigins`. |
-| `403 {"error":"forbidden: missing permission commands:execute"}` | The user, or the token's scope, lacks `commands:execute`, which the endpoint requires. Add it to one of the user's groups, or create a token whose scope includes it. |
-| `403 {"error":"password change required"}` | The user must change their password first. |
-| `404` | MCP is not enabled (`mcp` option) or the URL is not `{basePath}/mcp`. |
-| `405` with `Allow: POST` | The endpoint only accepts `POST` (MCP clients that probe with `GET` handle this). |
-| A tool is missing from `tools/list`, or `-32602 Unknown tool` | The user lacks one of the tool's permissions (`commands:execute` plus the command's `requiredPermissions`, `files:read`/`files:write`, `data:query`, `jobs:read`/`jobs:manage`); the token's scope narrows them further; `mcp.tools` / `mcp.exclude` filter it out; or the feature is not enabled on the server (file storage, data explorer sources, jobs plugin). A command whose parameters all live on its sub-commands appears only as `<command>_<sub>` tools. |
-
-## Remote Shell Security
-
-The PTY shell (`/ws/v1/qcli/shell`, `/ws/qcli/shell`) gives OS-level access to the server. It is **off** unless `enableShell: true`. When enabled, exactly one access mode applies:
-
-| Mode (`shellAuth`) | When | Client must |
-|---|---|---|
-| `users` | the users plugin is mounted | connect with a WS ticket (`?ticket=`) of a session holding `shell:execute` |
-| `token` | no users plugin, `shell.token` set | send `Authorization: Bearer <token>` (header, or the `_header_Authorization` query parameter) |
-| `custom` | no users plugin, `shell.authorize` set | pass the host's `authorize(request, { url, remoteAddress, mode })` check |
-| `anonymous` | no users plugin, `shell.allowAnonymous: true` | nothing (a startup WARNING is logged) |
-| `locked` | none of the above | — every connection is closed with 4401 and a startup ERROR explains the options |
-
-Precedence: users plugin mounted (even with `protectServer: false`) ⇒ `users`; otherwise `token`, then `custom`, then `anonymous`. Whatever the mode, **every configured check among `token` and `authorize` must pass** (so with both set, both are required and `shellAuth` reports `token`); `allowAnonymous` is ignored once either is set. Tokens are compared in constant time (SHA-256 of both, then `timingSafeEqual`) and never logged; an `authorize` that throws or rejects denies.
-
-### With the users plugin
-
-```typescript
-const { mountPlugin, eventSocketManager } = createCliServer({ enableShell: true });
-mountPlugin(new CliUsersBuilder().build((m) => eventSocketManager.broadcastMessage(m)));
-// Grant shell:execute to a group (root/admin has '*'):
-//   PUT /api/v1/qcli/groups/ops  { "permissions": ["commands:execute", "shell:execute"] }
-```
-
-An open shell is bound to the session that opened it: logout, idle/absolute session expiry, admin revoke (kick), user disabled or deleted, or losing `shell:execute` (checked once more right after the shell is registered and before it is spawned, so a logout racing the open is not missed; then immediately on session/user/group changes and every `sessionCheckIntervalMs`, default 30 s, max 60 s), or a password change becoming required closes it with **4401** `session ended` and kills its process tree. Users authenticated by an external auth adapter have no stored session: their shells are re-checked by calling the adapter again with the shell's original upgrade request (see the users plugin README). Re-checks never extend the session by themselves; stdin received since the previous check counts as session activity (at most one touch per 30 s), so an active shell user is not idle-logged-out. Opens and closes are audited as `shell_opened` / `shell_closed` (`userId`, `actorId`, `metadata: { mode: 'interactive' | 'command', sessionId, durationMs, reason, exitCode? }`), never with the command text or stdin. `reason` is one of `exited` (then `exitCode` is set), `closed`, `session ended`, `permission removed`, `shell timed out`, `server shutdown`, `error`.
-
-### Without the users plugin (token mode)
-
-```typescript
 createCliServer({
-    enableShell: true,
-    shell: { token: process.env.QCLI_SHELL_TOKEN },   // long random secret
+    configure: (builder) =>
+        builder.setFileStorageProvider(new OsFileStorageProvider({ allowedPaths: ['/srv/share'] }), {
+            maxUploadBytes: 500 * 1024 * 1024, // default 100 MiB, one file per upload
+        }),
 });
 ```
 
-Browser clients cannot set WebSocket headers: configure the server in web-cli with `headers: { Authorization: 'Bearer <token>' }` and the client forwards it as `?_header_Authorization=Bearer%20<token>`. The standalone server (`src/server.ts`) enables token mode when `QCLI_SHELL_TOKEN` is set. Use HTTPS/WSS so the token is not sent in clear text.
+Other providers: `InMemoryFileStorageProvider`, `JsonFileStorageProvider({ filePath })`, `SqliteFileStorageProvider({ dbPath })`, `S3FileStorageProvider({ bucket, region, prefix, credentials })`. Implement `IFileStorageProvider` for your own backend. To mount the router yourself, use `createFilesystemRouter(provider, { maxUploadBytes })`.
 
-For your own scheme (reverse-proxy identity, IP allow-list, …) use `authorize`:
-
-```typescript
-createCliServer({
-    enableShell: true,
-    shell: { authorize: async (req, { remoteAddress }) => remoteAddress === '127.0.0.1' && req.headers['x-ops'] === 'yes' },
-});
-```
-
-Non-users modes log one info line per open/close (remote address, mode, reason) without the command text.
-
-### Options
-
-```typescript
-shell: {
-    token?: string;                    // token mode (or extra requirement with the users plugin)
-    authorize?: (req, ctx) => boolean | Promise<boolean>;  // custom mode (or extra requirement)
-    allowAnonymous?: boolean;          // open to anyone who can reach the server (not recommended)
-    maxSessionsPerUser?: number;       // per user (users mode) or per remote address (default 3; X-Forwarded-For only with trustProxy)
-    maxSessions?: number;              // total concurrent shells (default 20)
-    idleTimeoutMs?: number;            // close after no stdin (resize does not count; default 15 min, 0 = off)
-    maxDurationMs?: number;            // absolute limit (default none)
-    sessionCheckIntervalMs?: number;   // users-mode re-check (default 30 000, max 60 000)
-    cwd?: string;                      // working directory (default: home directory)
-    shell?: string;                    // shell binary (default: detected)
-    env?: { allow?: string[]; set?: Record<string, string> };
-}
-```
-
-The shell does **not** inherit the server environment: it gets only `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `COLUMNS`, `LINES`, `SHELL` (plus the variables Windows needs to start PowerShell), the names in `env.allow`, and `env.set`. Secrets such as database passwords stay out of the shell.
-
-### Process cleanup
-
-Whenever a shell ends (exit, client close, session ended or permission removed, timeout, server shutdown), the server first collects everything the shell started — its process group, its descendants by parent PID (including background jobs that interactive shells move to their own process groups, and `setsid`/`nohup` children), on Linux every process of its session, and every process tagged with the shell's marker (below) — and then sends SIGHUP, SIGTERM and, after a 1 s grace period, SIGKILL to all of them (re-collecting before the SIGKILL). The server's own process and process group are never targeted. Linux reads `/proc` for everything (no `ps` needed); macOS and other Unixes run `ps`. On Windows only the shell process is killed.
-
-Every shell gets a unique marker in its environment, `QCLI_SHELL_ID=<random 128-bit hex>`, added after the `env.allow`/`env.set` filtering so configuration can neither override nor remove it. Children inherit it, so processes that were re-parented to init *and* left the shell's process group and session — e.g. `setsid sleep 100 &` from an interactive shell, double-forking daemons — are still found: on Linux by reading `/proc/<pid>/environ`, on macOS through `ps -A -E -ww` (which shows the environment of the server user's processes).
-
-Limitations: a process escapes only if it deliberately unsets or changes `QCLI_SHELL_ID` before detaching (`env -u QCLI_SHELL_ID setsid …`), or runs as a different user whose environment the server cannot read (e.g. via `sudo`). On macOS the environment of Apple platform binaries (`/bin/sleep`, `/usr/bin/perl`, …) is hidden from `ps -E`, so such a binary that left the shell's tree and session is not found there either. Run the server in a container or under a service manager (cgroup) if every process must be contained.
-
-### Close codes
-
-Refusals are sent as *accept, then close* so browsers can read them (a foreign `Origin` is still rejected with HTTP 403):
-
-| Code | Reason | When |
-|---|---|---|
-| 4401 | `login required` / `session ended` / `shell access is not configured` | missing ticket or (Bearer) token; session ended (logout, expiry, kick, user disabled/deleted, `shell:execute` removed, password change now required) — shell, events and logs sockets; shell locked |
-| 4403 | `forbidden` | wrong token, `authorize` false or threw, no `shell:execute`, password change required |
-| 4404 | `shell disabled` | `enableShell` is false |
-| 4408 | `shell timed out` | idle timeout or `maxDurationMs` |
-| 4429 | `too many shell sessions` | `maxSessionsPerUser` or `maxSessions` reached |
-| 1001 | `server shutdown` | the server is shutting down |
-
-## Processor Base Class Reference
-
-`CliCommandProcessor` provides these members:
-
-| Member | Type | Default | Description |
-|--------|------|---------|-------------|
-| `command` | `string` | (required) | Command name |
-| `description` | `string` | (required) | Help text shown to users |
-| `handleAsync` | method | (required) | Execution logic |
-| `parameters` | `ICliCommandParameterDescriptor[]` | `undefined` | Declared parameters |
-| `processors` | `ICliCommandProcessor[]` | `undefined` | Sub-commands |
-| `allowUnlistedCommands` | `boolean` | `undefined` | Accept sub-commands not in `processors` |
-| `valueRequired` | `boolean` | `undefined` | Require a positional value |
-| `acceptsValue` | `boolean` | `undefined` | Reads an optional positional value (`command.value`); MCP exposes it as an optional `value` argument |
-| `version` | `string` | `'1.0.0'` | Processor version string |
-| `author` | `ICliCommandAuthor` | default author | Author metadata (name, email) |
-
-## Server Options
-
-```typescript
-interface CliServerOptions {
-    basePath?: string;                     // API base path (default: '/api/qcli')
-    cors?: boolean | cors.CorsOptions;     // CORS config (default: only allowedOrigins; off when none)
-    allowedOrigins?: string[];             // CORS + WebSocket Origin allow-list ('http://host:*' = any port)
-    enableShell?: boolean;                 // Interactive shell WebSocket (default: false)
-    shell?: CliShellOptions;               // Shell access mode, limits, timeouts, env (see Remote Shell Security)
-    trustProxy?: boolean | number;         // Trusted proxy hops for X-Forwarded-* (true = 1; default false = none)
-    auth?: ICliServerAuth;                 // Protect the whole server (e.g. usersPlugin.serverAuth)
-    mcp?: boolean | CliMcpOptions;         // MCP endpoint at {basePath}/mcp (default off, see MCP Endpoint)
-    configure?: (builder: CliBuilder) => void;  // Processor registration
-}
-```
-
-CORS is disabled unless `allowedOrigins` (or an explicit `cors` option) is given. The shell socket is off unless `enableShell: true`, and even then it is locked until an access mode applies (see [Remote Shell Security](#remote-shell-security)).
-
-Same-origin requests (e.g. the bundled admin dashboard at `/qcli/admin`) are always allowed by the Origin, CORS and CSRF checks, even when `allowedOrigins` does not list the server's own origin (`X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only with `trustProxy`, and read like `X-Forwarded-For`: the entry at index `len - hops`, the leftmost when the list is shorter, an empty entry ignored).
-
-`trustProxy` is the number of trusted reverse-proxy hops in front of the server (`true` = 1, `false`/`0`/absent = none). With n hops the client IP (Express `req.ip`, the shell's per-address limits) is the `X-Forwarded-For` entry at index `len - n` of the comma-separated list, i.e. with one hop the rightmost entry, appended by your proxy; the leftmost entries are client-controlled and never used unless the list is shorter than n. Without the header (or when the selected entry is empty) the socket address is used. Set it to the exact number of proxies you run, otherwise clients can spoof their IP.
-
-When the users plugin is mounted (`mountPlugin(usersPlugin)`) or passed as `auth`, every `/api/...` route and every WebSocket requires a users session (see [Users Plugin](#users-plugin)); without it the server behaves as before.
-
-`createCliServer()` returns:
-
-```typescript
-{
-    app: Express;                          // Configured Express app
-    registry: CliCommandRegistry;          // Processor registry
-    builder: CliBuilder;                   // Registration builder
-    executor: CliCommandExecutorService;   // Command executor
-    eventSocketManager: CliEventSocketManager;  // WebSocket event manager
-    logSocketManager: CliLogSocketManager;      // WebSocket log manager
-    mountPlugin(plugin: MountablePlugin): void; // Mount a plugin with its routes (installs plugin.serverAuth)
-    setAuth(auth?: ICliServerAuth): void;       // Install/remove the server auth provider
-    mcp: CliServerMcp;                          // MCP endpoint: { enabled, path, addProvider(provider) }
-}
-```
-
-## Exported Types
-
-All types are exported from the package root for TypeScript consumers:
-
-```typescript
-// Abstractions (for creating custom processors and modules)
-import {
-    ICliCommandProcessor,
-    CliCommandProcessor,
-    ICliCommandParameterDescriptor,
-    CliCommandParameterDescriptor,
-    CliProcessCommand,
-    ICliCommandAuthor,
-    CliCommandAuthor,
-    ICliModule,
-    CliModule,
-} from '@qodalis/cli-server-node';
-
-// Models
-import {
-    CliServerResponse,
-    CliServerOutput,
-    CliServerCommandDescriptor,
-} from '@qodalis/cli-server-node';
-
-// Services (for advanced integration)
-import {
-    ICliCommandRegistry,
-    CliCommandRegistry,
-    ICliCommandExecutorService,
-    CliCommandExecutorService,
-    ICliResponseBuilder,
-    CliResponseBuilder,
-    CliEventSocketManager,
-} from '@qodalis/cli-server-node';
-
-// Factory
-import {
-    createCliServer,
-    CliServerOptions,
-} from '@qodalis/cli-server-node';
-```
-
-## File Storage
-
-The server includes a pluggable file storage system exposed at `/api/qcli/fs/*`. Enable it with `setFileStorageProvider()` and choose a storage backend.
-
-### Filesystem API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/qcli/fs/ls?path=/` | List directory contents |
-| GET | `/api/qcli/fs/cat?path=/file.txt` | Read file content |
-| GET | `/api/qcli/fs/stat?path=/file.txt` | File/directory metadata |
-| GET | `/api/qcli/fs/download?path=/file.txt` | Download file |
-| POST | `/api/qcli/fs/upload` | Upload file (multipart) |
-| POST | `/api/qcli/fs/mkdir` | Create directory |
-| DELETE | `/api/qcli/fs/rm?path=/file.txt` | Delete file or directory |
-
-Uploads are held in memory and limited to **one file of at most `maxUploadBytes`** (default 100 MiB = `104857600`). A larger file is refused with `413 {"error":"File too large: the upload limit is <n> bytes"}`; more than one file or an unexpected file field is a `400`. Set the limit with the provider (or with `addFileSystem({ allowedPaths, maxUploadBytes })`):
-
-```typescript
-builder.setFileStorageProvider(new OsFileStorageProvider({ allowedPaths: ['/srv/share'] }), {
-    maxUploadBytes: 500 * 1024 * 1024, // 500 MiB
-});
-```
-
-When mounting the router yourself: `createFilesystemRouter(provider, { maxUploadBytes })`.
-
-### Storage Providers
-
-```typescript
-import { InMemoryFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
-import { JsonFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-json';
-import { SqliteFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-sqlite';
-import { S3FileStorageProvider } from '@qodalis/cli-server-plugin-filesystem-s3';
-
-const { app, eventSocketManager } = createCliServer({
-    configure: (builder) => {
-        // In-memory (default) — files lost on restart
-        builder.setFileStorageProvider(new InMemoryFileStorageProvider());
-
-        // OS filesystem
-        builder.setFileStorageProvider(new OsFileStorageProvider());
-
-        // JSON file — persists to a single JSON file
-        builder.setFileStorageProvider(
-            new JsonFileStorageProvider({ filePath: './data/files.json' }),
-        );
-
-        // SQLite — persists to a SQLite database
-        builder.setFileStorageProvider(
-            new SqliteFileStorageProvider({ dbPath: './data/files.db' }),
-        );
-
-        // Amazon S3
-        builder.setFileStorageProvider(
-            new S3FileStorageProvider({
-                bucket: 'my-cli-files',
-                region: 'us-east-1',
-                prefix: 'uploads/',
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            }),
-        );
-    },
-});
-```
-
-### Custom Provider
-
-Implement `IFileStorageProvider` to add your own backend:
-
-```typescript
-import { IFileStorageProvider, FileEntry, FileStat } from '@qodalis/cli-server-node';
-
-class MyProvider implements IFileStorageProvider {
-    readonly name = 'my-provider';
-    async list(path: string): Promise<FileEntry[]> { /* ... */ }
-    async readFile(path: string): Promise<string> { /* ... */ }
-    async writeFile(path: string, content: string | Buffer): Promise<void> { /* ... */ }
-    async stat(path: string): Promise<FileStat> { /* ... */ }
-    async mkdir(path: string, recursive?: boolean): Promise<void> { /* ... */ }
-    async remove(path: string, recursive?: boolean): Promise<void> { /* ... */ }
-    async copy(src: string, dest: string): Promise<void> { /* ... */ }
-    async move(src: string, dest: string): Promise<void> { /* ... */ }
-    async exists(path: string): Promise<boolean> { /* ... */ }
-    async getDownloadStream(path: string): Promise<Readable> { /* ... */ }
-    async uploadFile(path: string, content: Buffer): Promise<void> { /* ... */ }
-}
-
-builder.setFileStorageProvider(new MyProvider());
-```
-
-## Data Explorer
-
-The Data Explorer plugin provides interactive, full-screen REPL access to data sources. It exposes a provider-based API where each data source type (SQL, MongoDB, etc.) is a separate plugin implementing `IDataExplorerProvider`.
-
-### API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/qcli/data-explorer/sources` | List registered data sources with metadata |
-| POST | `/api/qcli/data-explorer/execute` | Execute a query against a named source |
-
-### SQL Provider
+### Data explorer
 
 ```typescript
 import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
 import { DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 
-const { app } = createCliServer({
-    configure: (builder) => {
-        builder.addDataExplorerProvider(
-            new SqlDataExplorerProvider({ type: 'sqlite', filename: './data.db' }),
-            {
-                name: 'my-database',
-                description: 'Application database',
-                language: DataExplorerLanguage.Sql,
-                defaultOutputFormat: DataExplorerOutputFormat.Table,
-                timeout: 30000,
-                maxRows: 1000,
-                templates: [
-                    {
-                        name: 'list_tables',
-                        query: "SELECT name FROM sqlite_master WHERE type='table'",
-                        description: 'List all tables',
-                    },
-                ],
-            },
-        );
-    },
+builder.addDataExplorerProvider(new SqlDataExplorerProvider({ type: 'sqlite', filename: './data.db' }), {
+    name: 'app-db',
+    description: 'Application database',
+    language: DataExplorerLanguage.Sql,
+    defaultOutputFormat: DataExplorerOutputFormat.Table,
+    timeout: 30000,
+    maxRows: 1000,
 });
 ```
 
-### MongoDB Provider
+The same provider class can be registered several times under different names. Implement `IDataExplorerProvider` for other sources.
 
-```typescript
-import { MongoDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-mongo';
+## Security
 
-builder.addDataExplorerProvider(
-    new MongoDataExplorerProvider({
-        connectionString: 'mongodb://localhost:27017',
-        database: 'myapp',
-    }),
-    {
-        name: 'mongo-primary',
-        description: 'Primary MongoDB database',
-        language: DataExplorerLanguage.Json,
-        defaultOutputFormat: DataExplorerOutputFormat.Json,
-        templates: [
-            { name: 'show_collections', query: 'show collections', description: 'List all collections' },
-            { name: 'find_users', query: 'db.users.find({})', description: 'Find all users' },
-        ],
-    },
-);
-```
-
-**Supported MongoDB operations:** `db.collection.find({...})`, `findOne`, `aggregate([...])`, `insertOne`, `insertMany`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `countDocuments`, `distinct`. Convenience commands: `show collections`, `show dbs`.
-
-### Custom Provider
-
-Implement `IDataExplorerProvider` to add your own data source:
-
-```typescript
-import { IDataExplorerProvider, DataExplorerExecutionContext, DataExplorerResult } from '@qodalis/cli-server-abstractions';
-
-class MyProvider implements IDataExplorerProvider {
-    async executeAsync(context: DataExplorerExecutionContext): Promise<DataExplorerResult> {
-        // context.query — the user's query string
-        // context.parameters — key-value parameters
-        // context.options — provider options (name, language, etc.)
-        return {
-            success: true,
-            source: context.options.name,
-            language: context.options.language,
-            defaultOutputFormat: context.options.defaultOutputFormat,
-            executionTime: 0,
-            columns: ['id', 'name'],       // null for document-oriented results
-            rows: [[1, 'Alice'], [2, 'Bob']], // objects when columns is null
-            rowCount: 2,
-            truncated: false,
-            error: null,
-        };
-    }
-}
-
-builder.addDataExplorerProvider(new MyProvider(), { name: 'custom', ... });
-```
-
-The same provider class can be registered multiple times with different configurations (e.g., two databases with different names).
-
-## AWS Cloud Services
-
-The AWS plugin adds commands for managing AWS resources (S3, EC2, Lambda, CloudWatch, SNS, SQS, IAM, DynamoDB, ECS) directly from the CLI. It uses AWS SDK v3 and supports the full credential chain.
-
-```typescript
-import { AwsModule } from '@qodalis/cli-server-plugin-aws';
-
-const { app } = createCliServer({
-    configure: (builder) => {
-        builder.addModule(new AwsModule());
-    },
-});
-```
-
-### Authentication
-
-The plugin resolves credentials in this order:
-
-1. **CLI configure**: `aws configure set --key <KEY> --secret <SECRET> --region <REGION>`
-2. **Environment variables**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
-3. **AWS profiles**: `aws configure set --profile <name>`
-4. **IAM roles**: Automatic on EC2/ECS/Lambda
-
-Verify connectivity with `aws status`.
-
-### Available Commands
-
-| Service | Commands |
-|---------|----------|
-| **configure** | `aws configure set`, `aws configure get`, `aws configure profiles` |
-| **status** | `aws status` — STS GetCallerIdentity connectivity check |
-| **S3** | `aws s3 ls`, `aws s3 cp`, `aws s3 rm`, `aws s3 mb`, `aws s3 rb`, `aws s3 presign` |
-| **EC2** | `aws ec2 list`, `aws ec2 describe`, `aws ec2 start`, `aws ec2 stop`, `aws ec2 reboot`, `aws ec2 sg list` |
-| **Lambda** | `aws lambda list`, `aws lambda invoke`, `aws lambda logs` |
-| **CloudWatch** | `aws cloudwatch alarms`, `aws cloudwatch logs`, `aws cloudwatch metrics` |
-| **SNS** | `aws sns topics`, `aws sns publish`, `aws sns subscriptions` |
-| **SQS** | `aws sqs list`, `aws sqs send`, `aws sqs receive`, `aws sqs purge` |
-| **IAM** | `aws iam users`, `aws iam roles`, `aws iam policies` |
-| **DynamoDB** | `aws dynamodb tables`, `aws dynamodb describe`, `aws dynamodb scan`, `aws dynamodb query` |
-| **ECS** | `aws ecs clusters`, `aws ecs services`, `aws ecs tasks` |
-
-All commands support `--region` (`-r`) for region override and `--output` (`-o`) for format selection (`table`, `json`, `text`). Destructive commands support `--dry-run`.
-
-See [`plugins/aws/README.md`](plugins/aws/README.md) for the full command reference.
-
-### Users Plugin
-
-The users plugin (`@qodalis/cli-server-plugin-users`) adds REST endpoints under `/api/v1/qcli` for authentication, users, groups with permissions, sessions and an audit log, with swappable storage (in-memory by default). It is the server side of the `@qodalis/cli-users` browser plugin's *server mode*.
-
-```typescript
-import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
-
-const usersPlugin = new CliUsersBuilder()
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
-mountPlugin(usersPlugin); // protects the whole server (protectServer: true)
-```
-
-Once mounted, every server route and socket requires a users session (login, version discovery and capabilities stay public):
+When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth`), every `/api/...` route and WebSocket requires a session or an API token; login, version discovery and capabilities stay public.
 
 | Surface | Permission |
 |---|---|
 | `GET /commands` | authenticated |
-| `POST /execute`, `/execute/stream` | `commands:execute` + the processor's `requiredPermissions` |
-| `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own permissions) |
-| fs `ls`/`cat`/`stat`/`download` | `files:read` |
-| fs `upload`/`mkdir`/`rm` | `files:write` |
+| `POST /execute`, `/execute/stream` | `commands:execute` plus the processor's `requiredPermissions` |
+| `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own) |
+| fs `ls` / `cat` / `stat` / `download` | `files:read` |
+| fs `upload` / `mkdir` / `rm` | `files:write` |
 | data explorer | `data:query` |
 | jobs read / manage | `jobs:read` / `jobs:manage` |
-| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (see [Remote Shell Security](#remote-shell-security)) |
+| events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
 | admin dashboard | `admin:access` |
 
-WebSockets authenticate with a single-use ticket: `POST /api/v1/qcli/sessions/ws-ticket` → `{ ticket, expiresIn: 30 }`, then connect with `?ticket=<ticket>`. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('perm')`. Processors declare `requiredPermissions: ['deploy:run']` to be enforced server-side.
+WebSockets authenticate with a single-use ticket from `POST /api/v1/qcli/sessions/ws-ticket` (`?ticket=<ticket>`). Sockets bound to a session close with 4401 `session ended` on logout, expiry, kick, or when the user is disabled or deleted. Details: [users plugin README](plugins/users/README.md).
 
-Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with **4401** `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets authenticated by an external auth adapter have no stored session and are not re-checked.
+### Remote shell
 
-API tokens (`qcli_pat_…`) are long-lived, revocable bearer tokens for MCP clients, CI and scripts; they are accepted wherever a session token is (see [API tokens](plugins/users/README.md#api-tokens)). Sockets opened with a token identity close with 4401 when the token is revoked or expires, or the user is disabled.
+The PTY shell gives OS-level access, so it is off unless `enableShell: true`, and then exactly one access mode applies:
 
-See [`plugins/users/README.md`](plugins/users/README.md) for options, endpoints, API tokens, custom storage and external auth adapters.
+| Mode (`shellAuth`) | When | Client must |
+|---|---|---|
+| `users` | users plugin mounted | connect with a WS ticket of a session holding `shell:execute` |
+| `token` | `shell.token` set | send `Authorization: Bearer <token>` (or the `_header_Authorization` query parameter) |
+| `custom` | `shell.authorize` set | pass `authorize(request, { url, remoteAddress, mode })` |
+| `anonymous` | `shell.allowAnonymous: true` | nothing (a startup warning is logged) |
+| `locked` | none of the above | connections are closed with 4401 |
 
-## Built-in Processors
+The users plugin wins when mounted; otherwise `token`, then `custom`, then `anonymous`. Every configured check among `token` and `authorize` must pass. Tokens are compared in constant time and never logged.
 
-These processors ship with the library and are included in the standalone server:
+```typescript
+createCliServer({
+    enableShell: true,
+    shell: { token: process.env.QCLI_SHELL_TOKEN },
+});
+```
+
+| `shell` option | Default | Description |
+|---|---|---|
+| `token`, `authorize`, `allowAnonymous` | none | Access mode (see above) |
+| `maxSessionsPerUser` | `3` | Per user (users mode) or per remote address |
+| `maxSessions` | `20` | Total concurrent shells |
+| `idleTimeoutMs` | 15 min | Close after no stdin (`0` = off) |
+| `maxDurationMs` | none | Absolute session limit |
+| `sessionCheckIntervalMs` | `30000` | Users-mode re-check (max 60000) |
+| `cwd`, `shell` | home dir, detected | Working directory and shell binary |
+| `env` | `{}` | `{ allow: string[], set: Record<string, string> }` |
+
+- The shell does not inherit the server environment: it gets `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `COLUMNS`, `LINES`, `SHELL`, plus `env.allow` and `env.set`.
+- A shell bound to a users session closes with 4401 when the session ends or `shell:execute` is removed; opens and closes are audited as `shell_opened` / `shell_closed`, never with the command text.
+- When a shell ends, its whole process tree is killed (SIGHUP, SIGTERM, then SIGKILL after 1 s): process group, descendants, Linux session, and every process carrying the shell's `QCLI_SHELL_ID` marker. On Windows only the shell process is killed. Run the server in a container if every process must be contained.
+
+| Close code | Reason |
+|---|---|
+| 4401 | login required, session ended, or shell access not configured |
+| 4403 | forbidden (wrong token, `authorize` false, missing `shell:execute`, password change required) |
+| 4404 | shell disabled |
+| 4408 | shell timed out |
+| 4429 | too many shell sessions |
+| 1001 | server shutdown |
+
+## MCP endpoint
+
+`POST {basePath}/mcp` (default `/api/qcli/mcp`) exposes the server to AI clients such as Claude Code over the [Model Context Protocol](https://modelcontextprotocol.io): stateless Streamable HTTP with JSON responses, methods `initialize`, `ping`, `tools/list`, `tools/call`. It is off by default.
+
+```typescript
+const { mcp } = createCliServer({
+    mcp: {
+        tools: ['weather_*', 'echo'],     // allow-list (trailing * = prefix); default: every tool
+        exclude: ['fs_delete'],           // deny-list applied after `tools`
+        token: process.env.MCP_TOKEN,     // only without an auth provider: required bearer token
+        instructions: 'Each tool runs one command of this server.',
+    },
+});
+```
+
+| Server setup | Access |
+|---|---|
+| users plugin mounted | session or API token (`qcli_pat_...`) holding `commands:execute`; tools are filtered by the caller's permissions |
+| no auth provider, `mcp.token` set | `Authorization: Bearer <token>` |
+| no auth provider, no token | open, like `/execute` |
+
+| Tools | Available when | Permission |
+|---|---|---|
+| `server_info` | always | none |
+| one tool per command (`weather`, `weather_current`, ...) | always | `commands:execute` plus `requiredPermissions` |
+| `fs_list`, `fs_stat`, `fs_read` / `fs_write`, `fs_mkdir`, `fs_delete` | file storage configured | `files:read` / `files:write` |
+| `data_sources`, `data_schema`, `data_query` | data sources registered | `data:query` |
+| `jobs_list`, `jobs_get`, `jobs_history` / `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` | jobs plugin mounted | `jobs:read` / `jobs:manage` |
+
+Command tools run through the same executor as `/execute`; outputs are rendered as text, `isError` is `exitCode != 0`. Add your own tools with `mcp.addProvider(provider)`, `builder.addMcpToolProvider(provider)` or a plugin's `mcpProviders` (use `mcpObjectSchema` to build the input schema). An `Origin` header, when present, must be allowed or same-origin.
+
+Connect Claude Code (with the users plugin, create a token with `token create claude` in the web CLI or `POST /api/v1/qcli/tokens`):
+
+```bash
+# directly over HTTP
+claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
+
+# or through the @qodalis/mcp-cli bridge
+claude mcp add qcli -e QCLI_URL=http://localhost:8047 -e QCLI_TOKEN=<token> -- npx -y @qodalis/mcp-cli
+```
+
+| Symptom | Fix |
+|---|---|
+| `401` | Missing, wrong, expired or revoked token; without the users plugin check `mcp.token` |
+| `403 forbidden: origin not allowed` | Add the client's origin to `allowedOrigins` (Claude Code sends none) |
+| `403 forbidden: missing permission commands:execute` | Grant it to one of the user's groups or the token's scope |
+| `404` | MCP is not enabled or the URL is not `{basePath}/mcp` |
+| `405` | Only `POST` is accepted |
+| Tool missing from `tools/list` | Missing permission, filtered by `tools`/`exclude`, or the feature is not enabled |
+
+## Built-in processors
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `echo` | Echoes input text |
-| `status` | Server status (uptime, OS info) |
-| `system` | Detailed system information (memory, CPU, uptime) |
-| `http` | HTTP request operations |
-| `hash` | Hash computation (MD5, SHA1, SHA256, SHA512) |
-| `base64` | Base64 encode/decode (sub-commands) |
+| `status` | Server status (uptime, OS) |
+| `system` | System information (memory, CPU, uptime) |
+| `http` | HTTP `get` / `post` requests |
+| `hash` | MD5, SHA1, SHA256, SHA512 |
+| `base64` | `encode` / `decode` |
+
+All are exported (`CliEchoCommandProcessor`, `CliStatusCommandProcessor`, ...) and registered by the standalone server.
 
 ## Docker
 
@@ -1012,76 +394,27 @@ These processors ship with the library and are included in the standalone server
 docker run -p 8047:8047 ghcr.io/qodalis-solutions/cli-server-node
 ```
 
-## Demo
+The image runs the standalone server and accepts the same environment variables. `docker-compose.yml` builds and runs the demo server (`demo/Dockerfile`) on port 8047.
+
+## Development
 
 ```bash
-cd demo
 npm install
-npm start
-# Server starts on http://localhost:8047
+npm run build        # tsc -> dist/
+npm test             # vitest run
+npm run test:watch   # vitest in watch mode
+npm run dev          # standalone server with watch (tsx)
+
+cd demo && npm install && npm start   # full demo: all plugins, users (root / admin), MCP, shell
 ```
 
-## Testing
-
-```bash
-npm test          # Run test suite (Vitest)
-npm run test:watch  # Watch mode
-```
-
-## Project Structure
-
-```
-packages/
-  abstractions/                       # @qodalis/cli-server-abstractions (zero-dep)
-    src/
-      cli-command-processor.ts        # ICliCommandProcessor interface & base class
-      cli-module.ts                   # ICliModule interface & base class
-      cli-process-command.ts          # Command input model
-      cli-command-parameter-descriptor.ts  # Parameter declaration
-      cli-command-author.ts           # Author metadata
-plugins/
-  admin/                              # Admin dashboard plugin (auth, status, config, logs)
-  aws/                                # AWS cloud services (S3, EC2, Lambda, CloudWatch, etc.)
-  data-explorer/                      # Core data explorer abstraction
-  data-explorer-sql/                  # SQL data explorer provider (SQLite)
-  data-explorer-mongo/                # MongoDB data explorer provider
-  data-explorer-postgres/             # PostgreSQL data explorer provider
-  data-explorer-mysql/                # MySQL data explorer provider
-  data-explorer-mssql/                # MS SQL data explorer provider
-  data-explorer-redis/                # Redis data explorer provider
-  data-explorer-elasticsearch/        # Elasticsearch data explorer provider
-  filesystem/                         # Core file storage abstraction (IFileStorageProvider, InMemory, OS)
-  filesystem-json/                    # JSON file persistence provider
-  filesystem-sqlite/                  # SQLite persistence provider (better-sqlite3)
-  filesystem-s3/                      # Amazon S3 storage provider (@aws-sdk/client-s3)
-  jobs/                               # Job scheduling plugin
-  users/                              # Users plugin (auth, sessions, groups, audit)
-  weather/                            # Weather module (example plugin)
-src/
-  abstractions/                       # Re-exports from @qodalis/cli-server-abstractions
-  models/
-    cli-server-response.ts            # Response wrapper (exitCode + outputs)
-    cli-server-output.ts              # Output types (text, table, list, json, key-value)
-    cli-server-command-descriptor.ts  # Command metadata for /commands endpoint
-  services/
-    cli-command-registry.ts           # Processor registry and lookup
-    cli-command-executor-service.ts   # Command execution pipeline
-    cli-response-builder.ts           # Structured output builder
-    cli-event-socket-manager.ts       # WebSocket event broadcasting
-    cli-log-socket-manager.ts         # WebSocket log streaming
-    cli-shell-session-manager.ts      # PTY shell session management
-  controllers/
-    cli-controller.ts                 # V1 REST API (/api/v1/qcli)
-    cli-version-controller.ts         # Version discovery (/api/qcli/versions)
-  extensions/
-    cli-builder.ts                    # Fluent registration API (addProcessor, addModule)
-  processors/                         # Built-in processors
-  create-cli-server.ts               # Factory function
-  server.ts                          # Standalone CLI entry point
-  index.ts                           # Package exports
-demo/                                # Demo app with sample processors
-```
+| Path | Contents |
+|---|---|
+| `src/` | Server factory, controllers, services, MCP, built-in processors, standalone entry (`server.ts`) |
+| `packages/abstractions/` | `@qodalis/cli-server-abstractions` |
+| `plugins/` | Plugin packages (users, admin, jobs, filesystem, data explorer, aws, weather) |
+| `demo/` | Demo server with custom processors and every plugin |
 
 ## License
 
-MIT
+[MIT](LICENSE)
