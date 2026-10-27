@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-admin",
-    "version": "1.0.0-beta.6",
+    "version": "1.0.0-beta.7",
     "description": "Admin dashboard plugin for Qodalis CLI server — provides auth, status, plugins, config, logs, and WebSocket client management endpoints",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -33,13 +33,16 @@
     },
     "dependencies": {
         "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
-        "@qodalis/cli-server-dashboard": "^1.0.0-beta.6",
-        "express": "^4.21.0",
+        "@qodalis/cli-server-dashboard": "^1.0.0-beta.8",
+        "express": "^4.22.3",
         "jsonwebtoken": "^9.0.0"
     },
     "devDependencies": {
         "@types/express": "^4.17.21",
         "@types/jsonwebtoken": "^9.0.0",
         "typescript": "^5.6.0"
+    },
+    "overrides": {
+        "react-router-dom": "^7.18.4"
     }
 }

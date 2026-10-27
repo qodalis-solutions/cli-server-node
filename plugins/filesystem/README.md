@@ -50,6 +50,8 @@ const { app } = createCliServer({
 
 The OS provider validates every path against the allowlist using `realpath` resolution, preventing symlink-based path traversal attacks.
 
+An allowed root itself can be listed and written into, but never removed, moved or used as a move target: `remove`, and `move` whose source or destination is an allowed root (after `realpath`, so a symlink to the root counts too), throw `PermissionDeniedError` (`403` on `DELETE /api/qcli/fs/rm`). Entries inside the root are unaffected.
+
 ## IFileStorageProvider Interface
 
 All providers implement the `IFileStorageProvider` interface:

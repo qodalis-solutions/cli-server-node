@@ -95,6 +95,8 @@ When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth
 |---|---|---|
 | GET | `/logs` | Query log entries with optional `level`, `search`, `limit`, `offset` params |
 
+The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a value written after a `password`, `passwd`, `secret` or `token` label (`password: x`, `token=x`, `password for user "root": x`) is replaced with `[REDACTED]` before the entry is stored or broadcast.
+
 ### WebSocket Clients
 
 | Method | Endpoint | Description |
@@ -103,7 +105,7 @@ When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth
 
 ## Dashboard
 
-The plugin includes a bundled SPA dashboard served at the built-in prefix (`/qcli/admin`). The dashboard auto-resolves from the package's `dashboard/` directory, or from the `@qodalis/cli-server-dashboard` package if installed separately.
+The plugin includes a bundled SPA dashboard served at the built-in prefix (`/qcli/admin`). The dashboard is found in this order: the directory given to `setDashboardDir()`, a sibling `cli-server-dashboard/dist` build (development), the package's bundled `dashboard/` directory, and the `@qodalis/cli-server-dashboard` package if installed separately. The same order applies whether the plugin runs compiled or from source (`tsx`).
 
 ## License
 

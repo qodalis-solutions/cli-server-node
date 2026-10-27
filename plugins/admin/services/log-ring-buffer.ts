@@ -24,6 +24,17 @@ export interface LogQueryResult {
     total: number;
 }
 
+/**
+ * Matches a secret written after a `password`/`secret`/`token` label
+ * (`password: x`, `token=x`, `password for user "root": x`).
+ */
+const SECRET_PATTERN = /\b((?:password|passwd|secret|token)\b(?:\s+for\s+user\s+"[^"]*")?\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+
+/** Replaces values that look like secrets (see {@link SECRET_PATTERN}) with `[REDACTED]`. */
+export function redactSecrets(message: string): string {
+    return message.replace(SECRET_PATTERN, '$1[REDACTED]');
+}
+
 export class LogRingBuffer {
     private readonly _buffer: LogEntry[];
     private readonly _capacity: number;
@@ -49,6 +60,8 @@ export class LogRingBuffer {
      * Add a log entry to the buffer.
      */
     push(entry: LogEntry): void {
+        // Safety net: entries are served to the dashboard and broadcast to sockets
+        entry.message = redactSecrets(entry.message);
         entry.level = entry.level.toUpperCase() as LogEntry['level'];
         this._buffer[this._head] = entry;
         this._head = (this._head + 1) % this._capacity;

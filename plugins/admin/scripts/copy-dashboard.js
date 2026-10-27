@@ -3,6 +3,9 @@ const path = require('path');
 
 const dest = path.resolve(__dirname, '..', 'dashboard');
 
+// Start from an empty directory so assets of an older build are not kept
+fs.rmSync(dest, { recursive: true, force: true });
+
 // Source 1: sibling repo (development)
 const devSrc = path.resolve(__dirname, '..', '..', '..', '..', 'cli-server-dashboard', 'dist');
 if (fs.existsSync(devSrc)) {
