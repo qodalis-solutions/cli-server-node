@@ -69,7 +69,7 @@ describe('Sessions', () => {
         expect(res.status).toBe(201);
         expect(typeof res.body.token).toBe('string');
         const session = res.body.session;
-        expect(Object.keys(session).sort()).toEqual(['expiresAt', 'id', 'lastActivity', 'loginTime', 'permissions', 'user']);
+        expect(Object.keys(session).sort()).toEqual(['expiresAt', 'groupsReadOnly', 'id', 'lastActivity', 'loginTime', 'permissions', 'user', 'usersReadOnly']);
         expect(session.permissions).toEqual(['*']);
         expect(session.user).toMatchObject({ name: 'root', email: 'root@localhost', groups: ['admin'], disabled: false });
         expect(session.user.lastLoginAt).toBeGreaterThan(0);
@@ -124,7 +124,7 @@ describe('Sessions', () => {
     it('GET /sessions/current returns the login session shape', async () => {
         const res = await request(s.app).get(`${BASE}/sessions/current`).set(auth(rootToken));
         expect(res.status).toBe(200);
-        expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'id', 'lastActivity', 'loginTime', 'permissions', 'user']);
+        expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'groupsReadOnly', 'id', 'lastActivity', 'loginTime', 'permissions', 'user', 'usersReadOnly']);
         expect(res.body.user.name).toBe('root');
         expect(res.body).not.toHaveProperty('token');
     });

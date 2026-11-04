@@ -41,6 +41,8 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage |
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
 | `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
+| `setReadOnlyUsers(bool = true)` | `false` | The host owns the users: user writes answer `501` (see [Read-only stores](#read-only-stores)) |
+| `setReadOnlyGroups(bool = true)` | `false` | The host owns the groups: group writes answer `501` |
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
 | `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout (each within the lockout duration of the previous one; an older count resets) |
 | `setLockoutDuration(ms)` | 5 min | Lockout duration, and how long a failure count below the threshold is remembered |
@@ -86,7 +88,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | Endpoint | Requirement | Notes |
 |----------|-------------|-------|
 | `POST /sessions` | public | Login `{ username, password }` (name or email) → `201 { token, session }`; disabled → 403, locked → 429 |
-| `GET /sessions/current` | authenticated | `{ id, user, permissions, loginTime, lastActivity, expiresAt }` |
+| `GET /sessions/current` | authenticated | `{ id, user, permissions, loginTime, lastActivity, expiresAt, usersReadOnly, groupsReadOnly }` |
 | `DELETE /sessions/current` | authenticated | Logout (204) |
 | `GET /sessions` | `sessions:read` | Sessions (never tokens), `current` flag |
 | `DELETE /sessions/:id` | `sessions:revoke` or own session | 204, broadcasts `session-kicked` |
@@ -172,7 +174,7 @@ const usersPlugin = new CliUsersBuilder()
 
 ## External auth adapter
 
-If the host application already authenticates requests, pass an adapter. It receives the Express request and returns the CLI user plus an admin flag, or `null` when unauthenticated. The user is resolved per request; login, logout, verify-password and password endpoints answer `501`; no `root` user is seeded (built-in groups still are); adapter sessions are not stored or listed.
+If the host application already authenticates requests, pass an adapter. It receives the Express request and returns an `ExternalAuthResult` (the CLI user, an optional admin flag and optional permissions), or `null` when unauthenticated. The user is resolved per request; login, logout, verify-password and password endpoints answer `501`; no `root` user is seeded (built-in groups still are); adapter sessions are not stored or listed. Permissions come from the groups the adapter returns (`isAdmin` adds `admin`) plus the result's `permissions`. Group names missing from the group store grant nothing (and break nothing).
 
 ```typescript
 const usersPlugin = new CliUsersBuilder()
@@ -181,6 +183,15 @@ const usersPlugin = new CliUsersBuilder()
         return principal ? { user: toCliUser(principal), isAdmin: principal.roles.includes('admin') } : null;
     })
     .build(broadcast);
+```
+
+Hosts with their own roles can grant permissions directly instead of keeping a group per permission:
+
+```typescript
+return {
+    user: toCliUser(account),                       // groups may be empty
+    permissions: ['commands:execute', 'logs:read'], // added to the groups' permissions
+};
 ```
 
 The adapter may also be async (return a Promise), so it can load the user, their roles or their disabled state from a database. The plugin always awaits it: for requests, ticket issuance and every re-check of an open socket.
@@ -201,6 +212,25 @@ const usersPlugin = new CliUsersBuilder()
 A user the adapter returns with `disabled: true` is refused (401 `account disabled`) on requests and ticket issuance.
 
 The admin dashboard plugin keeps its own login at `/auth/login`; both plugins can be mounted at the same prefix.
+
+## Read-only stores
+
+When the host application owns the users or groups (a custom `ICliUserStore`/`ICliGroupStore` over its own accounts and roles), mark them read-only instead of throwing from the store's write methods:
+
+```typescript
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter(hostAdapter)
+    .setUserStore(new HostUserStore()) // only the read methods need real implementations
+    .setReadOnlyUsers()
+    .setReadOnlyGroups()
+    .build(broadcast);
+```
+
+(or `setOptions({ readOnlyUsers: true, readOnlyGroups: true })`)
+
+- **`setReadOnlyUsers()`** (`readOnlyUsers: true`): `POST /users`, `PUT /users/{idOrName}` (self updates too), `DELETE /users/{idOrName}`, `PUT /users/{idOrName}/password` and `POST`/`PUT`/`DELETE /groups/{name}/members/{idOrName}` answer `501 { "error": "Users are managed by the host application" }` without calling any store (before authentication; with an auth adapter, password changes keep answering `501` `Authentication is managed by the host application`). No `root` user is seeded, and deleting a group leaves the users' memberships alone.
+- **`setReadOnlyGroups()`** (`readOnlyGroups: true`): `POST /groups`, `PUT /groups/{name}` and `DELETE /groups/{name}` answer `501 { "error": "Groups are managed by the host application" }` without calling the store, and the built-in `admin` and `users` groups are not seeded (the host's store provides the groups it needs).
+- Reads keep working. `GET /sessions/current` and the login response (`session`) carry `usersReadOnly` and `groupsReadOnly` (always present, `false` by default) so clients can hide `adduser`, `groupadd` and the like.
 
 ## License
 
