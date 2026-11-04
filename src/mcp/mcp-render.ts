@@ -1,6 +1,25 @@
-import { CliStructuredOutput } from '../abstractions';
+import { CliStructuredOutput, CliTablePage } from '../abstractions';
 import { CliServerResponse } from '../models';
 import { McpToolResult } from './mcp-types';
+
+/**
+ * The line under a paged table: which rows these are (1-based) and the `skip` for the next ones,
+ * e.g. `(rows 51-100 of 120; next: skip=100)`.
+ * @param page - The table's page.
+ * @param rowCount - The rows the table holds.
+ */
+export function describePage(page: CliTablePage, rowCount: number): string {
+    const hasTotal = page.total !== undefined && page.total !== null;
+    if (page.truncated === true) {
+        return `(first ${rowCount}${hasTotal ? ` of ${page.total}` : ''} rows; the command does not page, narrow it down to see the rest)`;
+    }
+    const total = hasTotal ? ` of ${page.total}` : '';
+    if (rowCount <= 0) {
+        return `(no rows at skip=${page.skip}${total})`;
+    }
+    const next = page.hasMore ? `; next: skip=${page.skip + rowCount}` : '';
+    return `(rows ${page.skip + 1}-${page.skip + rowCount}${total}${next})`;
+}
 
 /** Renders command outputs as plain text (text as-is, tables `a | b`, lists one per line, json pretty, key-value `k: v`). */
 export function renderOutputsAsText(outputs: readonly CliStructuredOutput[]): string {
@@ -10,9 +29,12 @@ export function renderOutputsAsText(outputs: readonly CliStructuredOutput[]): st
             case 'text':
                 blocks.push(output.value ?? '');
                 break;
-            case 'table':
-                blocks.push([(output.headers ?? []).join(' | '), ...(output.rows ?? []).map((r) => (r ?? []).join(' | '))].join('\n'));
+            case 'table': {
+                const lines = [(output.headers ?? []).join(' | '), ...(output.rows ?? []).map((r) => (r ?? []).join(' | '))];
+                if (output.page) lines.push(describePage(output.page, output.rows?.length ?? 0));
+                blocks.push(lines.join('\n'));
                 break;
+            }
             case 'list':
                 blocks.push((output.items ?? []).join('\n'));
                 break;

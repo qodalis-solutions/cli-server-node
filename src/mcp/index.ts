@@ -23,7 +23,7 @@ export {
     mcpJson,
 } from './mcp-types';
 export { validateMcpArguments } from './mcp-schema';
-export { renderOutputsAsText } from './mcp-render';
+export { renderOutputsAsText, describePage } from './mcp-render';
 export { CommandsMcpToolProvider, commandInputSchema, mcpToolName } from './providers/commands-provider';
 export { ServerMcpToolProvider } from './providers/server-provider';
 export { FilesystemMcpToolProvider } from './providers/filesystem-provider';

@@ -112,6 +112,12 @@ export interface CliServerOptions {
      * an auth provider) and `instructions` returned by `initialize`.
      */
     mcp?: boolean | CliMcpOptions;
+    /**
+     * The most rows a table may return without paging (default 200; 0 = no limit). A larger
+     * table from a command that does not page (`writePagedTable`) is cut to this many rows and
+     * marked `page.truncated`, in `/execute`, `/execute/stream` and MCP command results.
+     */
+    maxTableRows?: number;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -224,7 +230,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         configure(builder);
     }
 
-    const executor = new CliCommandExecutorService(registry);
+    const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
     const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy });

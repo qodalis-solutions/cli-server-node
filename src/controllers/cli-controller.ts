@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as os from 'os';
 import { CliStructuredOutput, ICliCommandProcessor, isStreamCapable } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
-import { ICliCommandRegistry, ICliCommandExecutorService } from '../services';
+import { ICliCommandRegistry, ICliCommandExecutorService, CliOutputLimits, DEFAULT_MAX_TABLE_ROWS } from '../services';
 import { createLogger } from '../utils/logger';
 import { CapabilitiesOptions, resolveShellCapabilities } from './cli-version-controller';
 
@@ -82,8 +82,10 @@ export function createCliController(
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
 
+        const maxTableRows = executor.maxTableRows ?? DEFAULT_MAX_TABLE_ROWS;
         const emit = (output: CliStructuredOutput) => {
-            res.write(`event: output\ndata: ${JSON.stringify(output)}\n\n`);
+            const limited = CliOutputLimits.apply(output, maxTableRows);
+            res.write(`event: output\ndata: ${JSON.stringify(limited)}\n\n`);
         };
 
         try {

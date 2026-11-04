@@ -4,7 +4,8 @@ export { splitShellWords, joinShellWords, getPositionals, getPositionalText, quo
 export { ICliCommandParameterDescriptor, CliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
 export { ICliCommandProcessor, CliCommandProcessor } from './cli-command-processor';
 export { ICliModule, CliModule } from './cli-module';
-export { CliStructuredOutput, CliStructuredResponse } from './cli-structured-response';
+export { CliStructuredOutput, CliStructuredResponse, CliTablePage } from './cli-structured-response';
+export { CliPageRequest, CliPaging, DEFAULT_TAKE, MAX_TAKE } from './cli-paging';
 export {
     ICliJob,
     ICliJobExecutionContext,
