@@ -354,6 +354,68 @@ createCliServer({
 | 4429 | too many shell sessions |
 | 1001 | server shutdown |
 
+## Use with your app's sign-in
+
+When your application already signs users in (cookies, JWT, an identity provider), the users plugin can take its users from your app instead of its own logins. The browser terminal, the MCP endpoint and the admin dashboard then all use your session.
+
+```typescript
+import express from 'express';
+import http from 'http';
+import { createCliServer } from '@qodalis/cli-server-node';
+import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
+import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
+
+// Your app's origin: the browser terminal and the dashboard call the API and open sockets from it
+const cli = createCliServer({ allowedOrigins: ['https://app.example.com'] });
+const { registry, builder, eventSocketManager, logSocketManager } = cli;
+
+const usersPlugin = new CliUsersBuilder()
+    // Runs on every CLI request and WebSocket ticket, and again on open sockets (see below)
+    .setAuthAdapter(async (req) => {
+        const principal = (req as any).user; // set by your auth middleware below
+        if (!principal) return null;
+        const account = await accounts.findById(principal.sub);
+        if (!account) return null;
+        return {
+            user: { id: account.id, name: account.email, email: account.email, groups: [], disabled: account.disabled, createdAt: 0, updatedAt: 0 },
+            permissions: account.cliPermissions, // e.g. ['commands:execute', 'logs:read']
+            isAdmin: account.isAdmin,
+        };
+    })
+    // Your app owns accounts and roles: the CLI's user and group endpoints answer 501
+    .setReadOnlyUsers()
+    .setReadOnlyGroups()
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+
+const adminPlugin = new CliAdminBuilder()
+    .setAuthProvider(usersPlugin.serverAuth)
+    .setSignInUrl('https://app.example.com/sign-in')
+    .build({ registry, eventSocketManager, builder });
+
+cli.mountPlugin(adminPlugin);
+cli.mountPlugin(usersPlugin); // protects every CLI route and socket
+
+const app = express();
+app.use(cookieParser());
+app.use(authenticate);   // your sign-in: sets req.user, and lets anonymous requests through
+app.use(cli.app);        // after your authentication: the CLI routes, its auth gate and the dashboard
+
+const server = http.createServer(app);
+eventSocketManager.attach(server);
+logSocketManager.attach(server);
+server.listen(8047);
+```
+
+The order matters: `createCliServer()` installs its auth gate inside `cli.app`, so your authentication must run before `cli.app` is reached. Mount `cli.app` under your own app (as above) rather than adding your middleware to `cli.app` with `cli.app.use(...)`, which would run after the gate. WebSocket upgrades never pass through Express middleware; they authenticate with tickets (below).
+
+- **The adapter** (`setAuthAdapter`) returns the user for a request, or `null` when it is not signed in. It can be async, so it can load the account, its roles and its disabled state from your database. A user returned with `disabled: true` is refused (401 `account disabled`).
+- **Permissions:** a command's `requiredPermissions` are checked against the user's permissions: those in the result's `permissions`, those of the groups the user is in (`user.groups`, from the group store), and every permission when `isAdmin` is set. Running commands needs `commands:execute`, the logs stream needs `logs:read`.
+- **WebSockets:** the browser cannot send headers on a WebSocket, so clients first get a single-use ticket (`POST /api/v1/qcli/sessions/ws-ticket` with your session) and connect with `?ticket=`; the web CLI does this by itself. Open sockets are checked again through the adapter, on the ticket request (so `req.user` is set as above), every `shell.sessionCheckIntervalMs` (30 s by default, at most 60 s) and closed with `4401` when the user is gone, disabled, or lost the socket's permission.
+- **Read-only stores:** with `setReadOnlyUsers()` / `setReadOnlyGroups()` the CLI's create, update and delete endpoints answer `501` instead of writing; the session response carries `usersReadOnly` / `groupsReadOnly` so clients can hide those commands.
+- **Admin dashboard:** with `setAuthProvider(usersPlugin.serverAuth)` and an external adapter the dashboard signs in through your app: `GET /api/v1/qcli/auth/mode` answers `external` with the `setSignInUrl` URL, its own username/password form is off, and your app opens it as `/qcli/admin/#token=<your bearer token>` (a URL fragment, never sent to servers or logs). See [plugins/admin/README.md](plugins/admin/README.md#sign-in-with-the-host-apps-session).
+
+Details: [plugins/users/README.md](plugins/users/README.md#external-auth-adapter).
+
 ## MCP endpoint
 
 `POST {basePath}/mcp` (default `/api/qcli/mcp`) exposes the server to AI clients such as Claude Code over the [Model Context Protocol](https://modelcontextprotocol.io): stateless Streamable HTTP with JSON responses, methods `initialize`, `ping`, `tools/list`, `tools/call`. It is off by default.

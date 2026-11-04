@@ -108,6 +108,8 @@ The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a 
 
 ### Sign in with the host app's session
 
+The full setup (adapter, middleware order, permissions) is in [Use with your app's sign-in](../../README.md#use-with-your-apps-sign-in).
+
 When the users plugin delegates authentication to your application (`setAuthAdapter`), the dashboard runs in **external** mode. The users plugin sets the server's `serverOptions.externalAuthentication` when it is mounted (`mountPlugin(usersPlugin)` or `createCliServer({ auth })`), and the admin plugin reads it on every request, so the mounting order does not matter.
 
 - `GET /api/v1/qcli/auth/mode` answers `{ "mode": "external", "signInUrl": "<setSignInUrl>" }`. It is public, also on protected servers, so the dashboard can call it before anyone signs in. Otherwise it answers `"password"`.
