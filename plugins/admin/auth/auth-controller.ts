@@ -10,6 +10,11 @@ interface FailedAttempt {
     firstAttemptAt: number;
 }
 
+/** Mode name for the dashboard's own username/password form. */
+export const ADMIN_AUTH_MODE_PASSWORD = 'password';
+/** Mode name for sign-in through the host application. */
+export const ADMIN_AUTH_MODE_EXTERNAL = 'external';
+
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60_000; // 1 minute
 
@@ -25,12 +30,18 @@ export interface AuthControllerResult {
  * Creates the auth controller router.
  *
  * Routes (relative to mount point):
- * - POST /login — authenticate and receive JWT
+ * - GET  /mode  — public: `{ mode: 'password' | 'external', signInUrl }`
+ * - POST /login — authenticate and receive JWT (501 in external mode)
  * - GET  /me    — get current user info from token
  */
-export function createAuthController(config: AdminConfig, jwtSecret: string, provider?: AdminAuthProvider): AuthControllerResult {
+export function createAuthController(
+    config: AdminConfig,
+    jwtSecret: string,
+    provider?: AdminAuthProvider,
+    isExternal: () => boolean = () => false,
+): AuthControllerResult {
     const router = Router();
-    const authMiddleware = createAuthMiddleware(jwtSecret, provider);
+    const authMiddleware = createAuthMiddleware(jwtSecret, provider, isExternal);
     const failedAttempts = new Map<string, FailedAttempt>();
 
     // Periodically clean up expired entries (every 5 minutes)
@@ -48,7 +59,25 @@ export function createAuthController(config: AdminConfig, jwtSecret: string, pro
         cleanupInterval.unref();
     }
 
+    // GET /mode — public: which sign-in the dashboard shows. `external` when the users
+    // plugin uses an external auth adapter (the host app signs users in and hands its
+    // token to the dashboard through /qcli/admin/#token=…), otherwise `password`.
+    router.get('/mode', (_req: Request, res: Response): void => {
+        res.set('Cache-Control', 'no-store');
+        res.json({ mode: isExternal() ? ADMIN_AUTH_MODE_EXTERNAL : ADMIN_AUTH_MODE_PASSWORD, signInUrl: config.signInUrl ?? null });
+    });
+
     router.post('/login', (req: Request, res: Response): void => {
+        // External sign-in mode: the static admin credentials sign no one in.
+        if (isExternal()) {
+            const where = config.signInUrl !== undefined ? ` at ${config.signInUrl}` : ' through the host application';
+            res.status(501).json({
+                error: `Sign-in is managed by the host application. Sign in${where}.`,
+                code: 'EXTERNAL_AUTH',
+                signInUrl: config.signInUrl ?? null,
+            });
+            return;
+        }
         const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
         // Rate limiting

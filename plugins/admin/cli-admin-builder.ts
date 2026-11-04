@@ -110,6 +110,17 @@ export class CliAdminBuilder {
     }
 
     /**
+     * Where the host application signs users in, shown by the dashboard in external
+     * sign-in mode (the users plugin with an external auth adapter) and returned by
+     * `GET /api/v1/qcli/auth/mode`. An absolute `http(s)` URL or a root-relative path
+     * (`/sign-in`); anything else (e.g. `javascript:` or `//host`) makes `build()` throw.
+     */
+    setSignInUrl(url: string | undefined): CliAdminBuilder {
+        this._config.signInUrl = url;
+        return this;
+    }
+
+    /**
      * Set admin credentials.
      */
     setCredentials(username: string, password: string): CliAdminBuilder {
@@ -150,6 +161,9 @@ export class CliAdminBuilder {
      */
     build(deps: CliAdminBuildDeps): CliAdminPluginResult {
         const { registry, eventSocketManager, builder, executor, broadcastFn } = deps;
+        this._config.validate();
+        // Read on every request: the users plugin sets it when it is mounted (possibly after this build).
+        const isExternal = () => !!builder.serverOptions?.externalAuthentication;
 
         if (!this._authProvider && this._config.usesDefaultCredentials()) {
             console.warn('[qcli-admin] WARNING: Using default admin credentials. Set QCLI_ADMIN_USERNAME and QCLI_ADMIN_PASSWORD environment variables.');
@@ -175,13 +189,13 @@ export class CliAdminBuilder {
         logBuffer.interceptConsole();
 
         // Create auth middleware
-        const authMiddleware = createAuthMiddleware(secret, this._authProvider);
+        const authMiddleware = createAuthMiddleware(secret, this._authProvider, isExternal);
 
         // Create main router
         const router = Router();
 
         // Auth routes (login is unauthenticated, /me requires auth)
-        const authResult = createAuthController(this._config, secret, this._authProvider);
+        const authResult = createAuthController(this._config, secret, this._authProvider, isExternal);
         router.use('/auth', authResult.router);
 
         // Auth is applied per admin route group (not router-wide): this router
@@ -192,7 +206,6 @@ export class CliAdminBuilder {
         // Status
         const registeredJobs = this._registeredJobs;
         const enabledFeatures = this._enabledFeatures;
-        const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
         const statusDeps: StatusDeps = {
             getActiveWsConnections: () => eventSocketManager.getClients().length,
             getActiveShellSessions: () => 0,
@@ -200,10 +213,12 @@ export class CliAdminBuilder {
             getRegisteredJobs: () => registeredJobs,
             getEnabledFeatures: () => {
                 const features: string[] = [...enabledFeatures];
+                const hasFilesystem = !!(builder.fileStorageProvider || builder.fileSystemOptions);
                 if (hasFilesystem && !features.includes('filesystem')) {
                     features.push('filesystem');
                 }
-                if (registeredJobs > 0 && !features.includes('jobs')) {
+                const hasJobs = registeredJobs > 0 || !!builder.serverOptions?.jobsEnabled;
+                if (hasJobs && !features.includes('jobs')) {
                     features.push('jobs');
                 }
                 return features;
@@ -262,7 +277,7 @@ export class CliAdminBuilder {
             dashboardRouter,
             authMiddleware,
             logBuffer,
-            publicRoutes: ['POST /api/v1/qcli/auth/login'],
+            publicRoutes: ['POST /api/v1/qcli/auth/login', 'GET /api/v1/qcli/auth/mode'],
             dispose,
         };
     }

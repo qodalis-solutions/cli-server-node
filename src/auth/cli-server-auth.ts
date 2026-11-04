@@ -13,6 +13,22 @@ export interface CliServerAuthContext {
     permissions: string[];
 }
 
+/**
+ * Server-wide options that plugins set and read at runtime (one object per
+ * server: `CliServerResult.serverOptions`, also `CliBuilder.serverOptions`).
+ */
+export interface CliServerRuntimeOptions {
+    /**
+     * True when requests are authenticated by the host application rather than by
+     * the CLI's own sign-in (set by an auth provider, e.g. the users plugin with an
+     * external auth adapter). The admin dashboard then signs in through the host
+     * (`GET /api/v1/qcli/auth/mode`).
+     */
+    externalAuthentication: boolean;
+    /** True once a job scheduler (the jobs plugin) is mounted. */
+    jobsEnabled: boolean;
+}
+
 /** Error thrown by {@link ICliServerAuth.authenticateRequest}; rendered as `{ error }`. */
 export interface CliServerAuthError extends Error {
     status?: number;
@@ -40,10 +56,15 @@ export interface ICliServerAuth {
      */
     consumeTicket(ticket: string): Promise<CliServerAuthContext | undefined>;
     hasPermission(ctx: CliServerAuthContext, permission: string): boolean;
-    /** Called once when installed into a server. */
+    /**
+     * Called once when installed into a server. `serverOptions` is the server's
+     * runtime options object: a provider that delegates sign-in to the host sets
+     * `externalAuthentication` on it.
+     */
     attachToServer?(server: {
         allowedOrigins?: string[];
         broadcast: (message: Record<string, unknown>) => void;
+        serverOptions?: CliServerRuntimeOptions;
     }): void;
     /**
      * Re-validates a socket identity without sliding the session: the session still

@@ -26,6 +26,14 @@ export interface UsersServerAuthContext {
     [EXTERNAL_REQUEST]?: Request | IncomingMessage;
 }
 
+/** The server the provider is installed into (`ICliServerAuth.attachToServer`). */
+export interface UsersServerAttachment {
+    allowedOrigins?: string[];
+    broadcast: (msg: Record<string, unknown>) => void;
+    /** The server's runtime options (`externalAuthentication` is set from the auth adapter). */
+    serverOptions?: { externalAuthentication: boolean };
+}
+
 const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|audit|tokens)(\/.*)?$/;
 
 /**
@@ -37,7 +45,7 @@ export class UsersServerAuth {
         private readonly authService: AuthService,
         private readonly authenticator: RequestAuthenticator,
         readonly protectServer: boolean,
-        private readonly onAttach: (server: { allowedOrigins?: string[]; broadcast: (msg: Record<string, unknown>) => void }) => void,
+        private readonly onAttach: (server: UsersServerAttachment) => void,
     ) {}
 
     static toServerContext(ctx: AuthContext): UsersServerAuthContext {
@@ -80,7 +88,7 @@ export class UsersServerAuth {
         return hasPermission(ctx.permissions, permission);
     }
 
-    attachToServer(server: { allowedOrigins?: string[]; broadcast: (msg: Record<string, unknown>) => void }): void {
+    attachToServer(server: UsersServerAttachment): void {
         this.onAttach(server);
     }
 

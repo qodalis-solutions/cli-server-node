@@ -36,6 +36,11 @@ export interface IBuilderLike {
     readonly modules: ReadonlyArray<ICliModule>;
     readonly fileStorageProvider?: unknown;
     readonly fileSystemOptions?: unknown;
+    /**
+     * The server's runtime options (`CliServerRuntimeOptions` of `@qodalis/cli-server-node`):
+     * `externalAuthentication` selects the dashboard's sign-in mode, `jobsEnabled` reports "jobs".
+     */
+    readonly serverOptions?: { readonly externalAuthentication?: boolean; readonly jobsEnabled?: boolean };
 }
 
 /**

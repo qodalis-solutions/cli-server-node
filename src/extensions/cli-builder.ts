@@ -1,4 +1,5 @@
 import { ICliCommandProcessor, ICliModule, IDataExplorerProvider, DataExplorerProviderOptions } from '../abstractions';
+import type { CliServerRuntimeOptions } from '../auth/cli-server-auth';
 import { FileSystemApiOptions, FileSystemOptions } from '../filesystem';
 import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
@@ -17,6 +18,13 @@ export class CliBuilder {
     private _fileSystemApiOptions: FileSystemApiOptions = {};
     private _dataExplorerBuilder?: DataExplorerBuilder;
     private readonly _mcpToolProviders: McpToolProvider[] = [];
+
+    /**
+     * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,
+     * set by the users plugin with an external auth adapter) and read by others
+     * (the admin dashboard's sign-in mode).
+     */
+    readonly serverOptions: CliServerRuntimeOptions = { externalAuthentication: false, jobsEnabled: false };
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
