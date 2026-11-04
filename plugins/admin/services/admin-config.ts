@@ -40,7 +40,51 @@ export class AdminConfig {
     private _username: string;
     private _password: string;
     private _jwtSecret: string | undefined;
+    private _signInUrl: string | undefined;
     private readonly _mutableSettings: Record<string, unknown> = {};
+
+    /**
+     * Where the host application signs users in, shown by the dashboard in external
+     * sign-in mode (users plugin with an external auth adapter) and returned by
+     * `GET /api/v1/qcli/auth/mode`. An absolute `http(s)` URL or a root-relative path
+     * (`/sign-in`). Undefined: the dashboard tells users to sign in through the host application.
+     */
+    get signInUrl(): string | undefined {
+        return this._signInUrl;
+    }
+
+    set signInUrl(value: string | undefined) {
+        this._signInUrl = value;
+    }
+
+    /** Validates the options set by the host. Throws on an invalid {@link signInUrl}. */
+    validate(): void {
+        if (this._signInUrl !== undefined && !AdminConfig.isValidSignInUrl(this._signInUrl)) {
+            throw new Error(`signInUrl must be an absolute http(s) URL or a root-relative path, got '${this._signInUrl}'.`);
+        }
+    }
+
+    /**
+     * True for an absolute `http`/`https` URL with a host, or a root-relative path
+     * (`/sign-in`; not protocol-relative `//host` or `/\host`). Rejects other schemes
+     * such as `javascript:`, and control characters or whitespace.
+     */
+    static isValidSignInUrl(value: string | null | undefined): boolean {
+        // eslint-disable-next-line no-control-regex
+        if (typeof value !== 'string' || value.length === 0 || /[\s\x00-\x1f\x7f-\x9f]/.test(value)) {
+            return false;
+        }
+        if (value.startsWith('/')) {
+            return value.length === 1 || (value[1] !== '/' && value[1] !== '\\');
+        }
+        let url: URL;
+        try {
+            url = new URL(value);
+        } catch {
+            return false;
+        }
+        return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.length > 0;
+    }
 
     constructor() {
         this._username = process.env.QCLI_ADMIN_USERNAME ?? 'admin';

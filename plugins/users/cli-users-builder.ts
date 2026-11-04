@@ -291,6 +291,10 @@ export class CliUsersBuilder {
             if (!authService.hasBroadcast()) {
                 authService.setBroadcast(server.broadcast);
             }
+            // The host application signs users in (admin dashboard: GET /api/v1/qcli/auth/mode).
+            if (server.serverOptions) {
+                server.serverOptions.externalAuthentication = externalAuth;
+            }
         });
 
         const router = Router();
