@@ -32,6 +32,12 @@ jobs:
       - name: Build abstractions
         run: cd packages/abstractions && npx tsc
 
+      - name: Install plugin dependencies
+        run: |
+          for plugin in data-explorer-sql data-explorer-mongo data-explorer-postgres data-explorer-mysql data-explorer-mssql data-explorer-redis data-explorer-elasticsearch aws; do
+            (cd plugins/$plugin && npm install)
+          done
+
       - name: Build plugins (filesystem first, then dependents)
         run: |
           cd plugins/filesystem && npx tsc
@@ -41,6 +47,15 @@ jobs:
           cd ../filesystem-s3 && npx tsc
           cd ../jobs && npx tsc
           cd ../users && npx tsc
+          cd ../data-explorer && npx tsc
+          cd ../data-explorer-sql && npx tsc
+          cd ../data-explorer-mongo && npx tsc
+          cd ../data-explorer-postgres && npx tsc
+          cd ../data-explorer-mysql && npx tsc
+          cd ../data-explorer-mssql && npx tsc
+          cd ../data-explorer-redis && npx tsc
+          cd ../data-explorer-elasticsearch && npx tsc
+          cd ../aws && npx tsc
           cd ../admin && npm install && npx tsc
 
       - name: Build
@@ -93,6 +108,11 @@ jobs:
           publish_pkg plugins/jobs
           publish_pkg plugins/users
           publish_pkg plugins/admin
+          publish_pkg plugins/data-explorer
+          for provider in sql postgres mysql mssql mongo redis elasticsearch; do
+            publish_pkg plugins/data-explorer-$provider
+          done
+          publish_pkg plugins/aws
           publish_pkg .
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
