@@ -233,7 +233,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
-    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy });
+    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy, sessionCheckIntervalMs: shell?.sessionCheckIntervalMs });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };

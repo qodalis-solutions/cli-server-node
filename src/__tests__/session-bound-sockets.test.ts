@@ -2,7 +2,8 @@
  * Events and logs sockets authenticated with a stored session are bound to it:
  * when the session ends (logout, revoke, user disabled/deleted, expiry) the
  * socket closes with 4401 `session ended`; for a revoke `session-kicked` is
- * sent first. Adapter identities have no stored session and are not re-checked.
+ * sent first. Adapter identities are re-checked through the adapter (see
+ * external-auth-socket-recheck.test.ts).
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
@@ -175,7 +176,7 @@ describe('events/logs sockets are bound to their session', () => {
         expect(await within(mine.logs.closed, 3000)).toMatchObject(ENDED);
     });
 
-    it('sockets of adapter identities (no stored session) are not re-checked', async () => {
+    it('sockets of adapter identities (no stored session) are re-checked through the adapter on users changes', async () => {
         const ext: User = { id: 'ext-1', name: 'extuser', email: 'ext@host.io', groups: [], createdAt: 0, updatedAt: 0 };
         let hostSays: 'in' | 'out' = 'in';
         const adapter: AuthAdapter = (req) =>
@@ -189,12 +190,16 @@ describe('events/logs sockets are bound to their session', () => {
         const events = await open(h.port, `/ws/v1/qcli/events?ticket=${await adapterTicket()}`, { Cookie: 'sid=ok' });
         const logs = await open(h.port, `/ws/v1/qcli/logs?ticket=${await adapterTicket()}`, { Cookie: 'sid=ok' });
 
-        hostSays = 'out';
-        // A users change notification and several sweeps
+        // A users change notification while the host still authenticates the ticket request
         await h.users.authService.audit({ event: 'group_updated', username: 'root' });
-        await sleep(300);
+        await sleep(100);
         expect(events.ws.readyState).toBe(WebSocket.OPEN);
         expect(logs.ws.readyState).toBe(WebSocket.OPEN);
+
+        hostSays = 'out';
+        await h.users.authService.audit({ event: 'group_updated', username: 'root' });
+        expect(await within(events.closed)).toMatchObject(ENDED);
+        expect(await within(logs.closed)).toMatchObject(ENDED);
     });
 
     it('re-checks on users change notifications close sockets whose session ended silently', async () => {

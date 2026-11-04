@@ -1,3 +1,5 @@
+import type { IncomingMessage } from 'http';
+import type { Request } from 'express';
 import { randomBytes, randomUUID } from 'crypto';
 import {
     ICliUserStore,
@@ -77,6 +79,12 @@ export interface AuthContext {
     tokenHash?: string;
     /** The API token, for requests authenticated by an API token (no session). */
     apiToken?: ApiToken;
+    /**
+     * External-auth (adapter) identities: the request the adapter accepted. Kept on
+     * WebSocket tickets so the sockets they open are re-checked by running the adapter
+     * again on that request.
+     */
+    externalRequest?: Request | IncomingMessage;
 }
 
 /**

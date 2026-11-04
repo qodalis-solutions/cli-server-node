@@ -50,7 +50,9 @@ const USER_SCOPED_EVENTS = new Set(['session-kicked']);
  * upgrades need a single-use `?ticket=`; `session-kicked` is delivered only to
  * the affected user. Sockets authenticated with a stored session are bound to
  * it: once it ends they are closed with 4401 `session ended` (after
- * `session-kicked` for revocations; see {@link SessionBoundSockets}). Shell
+ * `session-kicked` for revocations; see {@link SessionBoundSockets}); sockets
+ * opened through an external auth adapter are re-checked through it every
+ * `shell.sessionCheckIntervalMs` (default 30 s, at most 60 s). Shell
  * access (modes, limits, session binding) is decided by {@link CliShellSessionManager}.
  */
 export class CliEventSocketManager {
@@ -62,9 +64,13 @@ export class CliEventSocketManager {
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
     private readonly _trustProxy: boolean | number;
-    private readonly _sessionBound = new SessionBoundSockets({ awaitKick: true });
+    private readonly _sessionBound: SessionBoundSockets;
 
     constructor(options: CliEventSocketManagerOptions = {}) {
+        this._sessionBound = new SessionBoundSockets({
+            awaitKick: true,
+            sessionCheckIntervalMs: options.shell?.sessionCheckIntervalMs,
+        });
         this._shellManager = new CliShellSessionManager({
             enabled: options.enableShell ?? false,
             shell: options.shell,
@@ -180,7 +186,7 @@ export class CliEventSocketManager {
                 remoteAddress: request.socket.remoteAddress ?? 'unknown',
                 auth,
             });
-            this._sessionBound.bind(ws, auth);
+            this._sessionBound.bind(ws, auth, request);
             logger.info('Client connected (id=%s)', id);
             ws.send(JSON.stringify({ type: 'connected' }));
 

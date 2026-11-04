@@ -337,7 +337,7 @@ createCliServer({
 | `maxSessions` | `20` | Total concurrent shells |
 | `idleTimeoutMs` | 15 min | Close after no stdin (`0` = off) |
 | `maxDurationMs` | none | Absolute session limit |
-| `sessionCheckIntervalMs` | `30000` | Users-mode re-check (max 60000) |
+| `sessionCheckIntervalMs` | `30000` | Users-mode re-check (max 60000); also re-checks events/logs sockets opened through an external auth adapter, whether or not the shell is enabled |
 | `cwd`, `shell` | home dir, detected | Working directory and shell binary |
 | `env` | `{}` | `{ allow: string[], set: Record<string, string> }` |
 

@@ -15,6 +15,7 @@ import {
     CliShellAuthMode,
     CliShellOptions,
     SHELL_DEFAULTS,
+    effectiveSessionCheckIntervalMs,
     ShellCloseCodes,
     buildShellEnv,
     readBearerToken,
@@ -451,10 +452,7 @@ export class CliShellSessionManager {
 
     private ensureCheckTimer(): void {
         if (this._checkTimer || !this._auth) return;
-        const interval = Math.min(
-            Math.max(this._options.sessionCheckIntervalMs ?? SHELL_DEFAULTS.sessionCheckIntervalMs, 10),
-            SHELL_DEFAULTS.maxSessionCheckIntervalMs,
-        );
+        const interval = effectiveSessionCheckIntervalMs(this._options.sessionCheckIntervalMs);
         this._checkTimer = setInterval(() => void this.recheck(), interval);
         this._checkTimer.unref?.();
     }
