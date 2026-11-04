@@ -52,7 +52,8 @@ Credentials and JWT secret can be set via the builder or environment variables:
 | `setCredentials(username, password)` | Set admin login credentials (only used without the users plugin) |
 | `setAuthProvider(usersPlugin.serverAuth)` | Log in through the users plugin; requires the `admin:access` permission (`admin` has it via `*`) |
 | `setJwtSecret(secret)` | Set JWT signing secret |
-| `setRegisteredJobs(count)` | Report job count in the status endpoint |
+| `setSignInUrl(url)` | Where the host app signs users in, for external sign-in mode (see [Sign in with the host app's session](#sign-in-with-the-host-apps-session)); `build()` throws on an invalid URL |
+| `setRegisteredJobs(count)` | Report job count in the status endpoint (`jobs` is listed in `enabledFeatures` once the jobs plugin is mounted, or with a count above 0) |
 | `setEnabledFeatures(features)` | Add custom feature flags to the status endpoint |
 | `setDashboardDir(dir)` | Override the path to the dashboard SPA dist directory |
 | `setTheme(theme)` | Dashboard color scheme: mode and per-scheme colors (see [Color scheme](#color-scheme)) |
@@ -65,7 +66,8 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/auth/login` | Authenticate with username/password, receive JWT |
+| GET | `/auth/mode` | Public. Which sign-in the dashboard shows: `{ "mode": "password" \| "external", "signInUrl": string \| null }` (`Cache-Control: no-store`) |
+| POST | `/auth/login` | Authenticate with username/password, receive JWT (501 in external mode) |
 | GET | `/auth/me` | Get current user info from token |
 
 ### Status
@@ -103,6 +105,53 @@ The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a 
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/ws/clients` | List connected WebSocket clients |
+
+### Sign in with the host app's session
+
+The full setup (adapter, middleware order, permissions) is in [Use with your app's sign-in](../../README.md#use-with-your-apps-sign-in).
+
+When the users plugin delegates authentication to your application (`setAuthAdapter`), the dashboard runs in **external** mode. The users plugin sets the server's `serverOptions.externalAuthentication` when it is mounted (`mountPlugin(usersPlugin)` or `createCliServer({ auth })`), and the admin plugin reads it on every request, so the mounting order does not matter.
+
+- `GET /api/v1/qcli/auth/mode` answers `{ "mode": "external", "signInUrl": "<setSignInUrl>" }`. It is public, also on protected servers, so the dashboard can call it before anyone signs in. Otherwise it answers `"password"`.
+- The dashboard hides its username/password form and shows "Sign in at `<signInUrl>`" with a Retry button (or tells users to sign in through the host application when no sign-in URL is set). Any 401 leads to that screen.
+- `POST /api/v1/qcli/auth/login` signs no one in: it answers `501` with `code: "EXTERNAL_AUTH"`, a message pointing to the host's sign-in and `signInUrl`. The static admin credentials are never accepted in this mode.
+- With `setAuthProvider(usersPlugin.serverAuth)`, admin routes authenticate the request through the users plugin (your adapter) and require `admin:access` (`isAdmin` grants it through the `admin` group).
+
+The sign-in URL must be an absolute `http`/`https` URL or a root-relative path (`/sign-in`); anything else (for example `javascript:` or `//host`) makes `build()` throw.
+
+**Handoff.** Send signed-in users to the dashboard with your bearer token in the URL fragment:
+
+```
+/qcli/admin/#token=<host bearer token>
+```
+
+A fragment is never sent to servers or written to access logs. The dashboard reads it on startup, stores it as its admin token, removes it from the address bar (`history.replaceState`) and sends it as `Authorization: Bearer …` on every API call, where your external auth adapter validates it like any other request from your app.
+
+```typescript
+// Host app: the adapter accepts the app's own JWT (verified by your middleware, which sets req.user).
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter((req) => {
+        const principal = (req as any).user;
+        if (!principal) return null;
+        return { user: { id: principal.sub, name: principal.name, email: principal.email ?? '', groups: [], createdAt: 0, updatedAt: 0 }, isAdmin: principal.roles?.includes('admin') };
+    })
+    .build((msg) => eventSocketManager.broadcastMessage(msg));
+
+const adminPlugin = new CliAdminBuilder()
+    .setAuthProvider(usersPlugin.serverAuth)
+    .setSignInUrl('/sign-in?returnUrl=%2Fadmin%2Fconsole')
+    .build({ registry, eventSocketManager, builder });
+
+mountPlugin(adminPlugin);
+mountPlugin(usersPlugin);
+```
+
+```ts
+// Host front end: an "Open console" button for a signed-in admin.
+window.location.href = `/qcli/admin/#token=${encodeURIComponent(accessToken)}`;
+```
+
+When the token expires, the next API call answers 401 and the dashboard shows the sign-in screen; after signing in again, the host repeats the handoff.
 
 ## Dashboard
 

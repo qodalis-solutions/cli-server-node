@@ -7,6 +7,13 @@ import { hasPermission } from './permissions';
 import { SessionMetadata } from './models';
 import { hashToken } from './security';
 
+/**
+ * Symbol-keyed slot on an adapter identity holding the request the adapter
+ * accepted (e.g. `POST /sessions/ws-ticket`). Symbol keys survive object spread
+ * (the server copies contexts) and are skipped by `JSON.stringify`.
+ */
+export const EXTERNAL_REQUEST: unique symbol = Symbol('qcli.users.externalRequest');
+
 /** Identity handed to the CLI server (same shape as `CliServerAuthContext` in `@qodalis/cli-server-node`). */
 export interface UsersServerAuthContext {
     userId: string;
@@ -15,6 +22,16 @@ export interface UsersServerAuthContext {
     /** Set when the identity comes from an API token (no session). */
     tokenId?: string;
     permissions: string[];
+    /** Adapter identities: the request the adapter accepted (see {@link EXTERNAL_REQUEST}). */
+    [EXTERNAL_REQUEST]?: Request | IncomingMessage;
+}
+
+/** The server the provider is installed into (`ICliServerAuth.attachToServer`). */
+export interface UsersServerAttachment {
+    allowedOrigins?: string[];
+    broadcast: (msg: Record<string, unknown>) => void;
+    /** The server's runtime options (`externalAuthentication` is set from the auth adapter). */
+    serverOptions?: { externalAuthentication: boolean };
 }
 
 const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|audit|tokens)(\/.*)?$/;
@@ -28,7 +45,7 @@ export class UsersServerAuth {
         private readonly authService: AuthService,
         private readonly authenticator: RequestAuthenticator,
         readonly protectServer: boolean,
-        private readonly onAttach: (server: { allowedOrigins?: string[]; broadcast: (msg: Record<string, unknown>) => void }) => void,
+        private readonly onAttach: (server: UsersServerAttachment) => void,
     ) {}
 
     static toServerContext(ctx: AuthContext): UsersServerAuthContext {
@@ -38,6 +55,7 @@ export class UsersServerAuth {
             ...(ctx.session ? { sessionId: ctx.session.id } : {}),
             ...(ctx.apiToken ? { tokenId: ctx.apiToken.id } : {}),
             permissions: [...ctx.permissions],
+            ...(ctx.externalRequest ? { [EXTERNAL_REQUEST]: ctx.externalRequest } : {}),
         };
     }
 
@@ -70,7 +88,7 @@ export class UsersServerAuth {
         return hasPermission(ctx.permissions, permission);
     }
 
-    attachToServer(server: { allowedOrigins?: string[]; broadcast: (msg: Record<string, unknown>) => void }): void {
+    attachToServer(server: UsersServerAttachment): void {
         this.onAttach(server);
     }
 
@@ -79,10 +97,12 @@ export class UsersServerAuth {
     /**
      * Re-validates a socket identity with fresh permissions. Session-backed
      * identities: session alive, user enabled. Identities from the host's auth
-     * adapter (no session) are re-authenticated by calling the adapter again with
-     * the socket's original upgrade `request`: undefined when it returns nothing,
-     * throws, or resolves a different user (adapter users usually are not in the
-     * user store, and `isAdmin` must map to the admin group again).
+     * adapter (no session) are re-authenticated by calling the adapter (sync or
+     * async) again on the request it accepted — the `POST /sessions/ws-ticket`
+     * request for sockets opened with a ticket — or else on the socket's upgrade
+     * `request`: undefined when it returns nothing, a disabled or different user,
+     * or throws (adapter users usually are not in the user store, and `isAdmin`
+     * must map to the admin group again).
      */
     async revalidate(ctx: UsersServerAuthContext, request?: IncomingMessage): Promise<UsersServerAuthContext | undefined> {
         if (ctx.tokenId) {
@@ -90,11 +110,12 @@ export class UsersServerAuth {
             return fresh ? UsersServerAuth.toServerContext(fresh) : undefined;
         }
         if (!ctx.sessionId && this.authenticator.hasAdapter) {
-            if (!request) return undefined;
+            const source = ctx[EXTERNAL_REQUEST] ?? request;
+            if (!source) return undefined;
             let fresh: AuthContext;
             try {
                 // The adapter's contract is an Express request; a raw upgrade request carries the same headers/socket.
-                fresh = await this.authenticator.authenticateWithAdapter(request as Request);
+                fresh = await this.authenticator.authenticateWithAdapter(source as Request);
             } catch {
                 return undefined;
             }

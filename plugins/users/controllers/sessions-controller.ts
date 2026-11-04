@@ -76,6 +76,8 @@ export function createSessionsController(
             loginTime: now,
             lastActivity: now,
             expiresAt: now + authService.sessionTimeoutMs,
+            usersReadOnly: authService.usersReadOnly,
+            groupsReadOnly: authService.groupsReadOnly,
         });
     }));
 

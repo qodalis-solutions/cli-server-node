@@ -1,3 +1,5 @@
+import type { IncomingMessage } from 'http';
+import type { Request } from 'express';
 import { randomBytes, randomUUID } from 'crypto';
 import {
     ICliUserStore,
@@ -65,6 +67,10 @@ export interface AuthServiceOptions {
     apiTokenStore?: ICliApiTokenStore;
     /** Allow API tokens that never expire (default false). */
     allowNonExpiringTokens?: boolean;
+    /** The host owns the users (published on session payloads as `usersReadOnly`). */
+    usersReadOnly?: boolean;
+    /** The host owns the groups (published on session payloads as `groupsReadOnly`). */
+    groupsReadOnly?: boolean;
 }
 
 /** An authenticated request context: the live user plus, for token auth, the session. */
@@ -77,6 +83,12 @@ export interface AuthContext {
     tokenHash?: string;
     /** The API token, for requests authenticated by an API token (no session). */
     apiToken?: ApiToken;
+    /**
+     * External-auth (adapter) identities: the request the adapter accepted. Kept on
+     * WebSocket tickets so the sockets they open are re-checked by running the adapter
+     * again on that request.
+     */
+    externalRequest?: Request | IncomingMessage;
 }
 
 /**
@@ -128,6 +140,10 @@ export class AuthService {
     readonly maxSessionLifetimeMs: number;
     readonly allowNonExpiringTokens: boolean;
     readonly apiTokenStore: ICliApiTokenStore;
+    /** The host owns the users: user writes answer 501 (`readOnlyUsers`). */
+    readonly usersReadOnly: boolean;
+    /** The host owns the groups: group writes answer 501 (`readOnlyGroups`). */
+    readonly groupsReadOnly: boolean;
     private readonly groupStore?: ICliGroupStore;
     private broadcast?: UsersBroadcastFn;
     private readonly lockouts = new Map<string, LockoutState>();
@@ -150,6 +166,8 @@ export class AuthService {
         this.broadcast = options.broadcast;
         this.apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
         this.allowNonExpiringTokens = options.allowNonExpiringTokens ?? false;
+        this.usersReadOnly = options.usersReadOnly ?? false;
+        this.groupsReadOnly = options.groupsReadOnly ?? false;
     }
 
     setBroadcast(fn: UsersBroadcastFn | undefined): void {
@@ -780,6 +798,8 @@ export class AuthService {
             loginTime: session.createdAt,
             lastActivity: session.lastActivity,
             expiresAt: this.expiresAt(session),
+            usersReadOnly: this.usersReadOnly,
+            groupsReadOnly: this.groupsReadOnly,
         };
     }
 

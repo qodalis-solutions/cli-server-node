@@ -12,6 +12,12 @@ export interface AdminAuthProvider {
     ): Promise<{ token: string; userName: string; permissions: string[]; expiresAt: number; mustChangePassword?: boolean }>;
     authenticateToken(token: string): Promise<{ userName: string; permissions: string[]; mustChangePassword?: boolean; loginTime?: number }>;
     logout?(token: string): Promise<void>;
+    /**
+     * Authenticates a whole request (session token or, with an external auth adapter,
+     * the host application's own session). Used in external sign-in mode, where the
+     * dashboard sends the host's bearer token.
+     */
+    authenticateRequest?(req: import('express').Request): Promise<{ userName: string; permissions: string[] }>;
     hasPermission(ctx: { permissions: string[] }, permission: string): boolean;
 }
 

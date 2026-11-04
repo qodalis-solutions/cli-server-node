@@ -364,7 +364,8 @@ export class DirectoryService {
             throw conflict(`built-in group '${group.name}' cannot be deleted`);
         }
         await this.groupStore.deleteGroup(group.name);
-        for (const user of await this.userStore.getUsers()) {
+        // A read-only user store keeps its memberships (the host owns them).
+        for (const user of this.authService.usersReadOnly ? [] : await this.userStore.getUsers()) {
             if (inGroup(user.groups, group.name)) {
                 await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) });
             }

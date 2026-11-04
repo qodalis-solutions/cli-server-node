@@ -61,6 +61,8 @@ export interface CliShellOptions {
     /**
      * How often open users-mode shells re-check their session and `shell:execute` (ms).
      * Default 30 000, maximum 60 000. Session/user/group changes trigger an immediate re-check.
+     * Also the interval at which events and logs sockets opened through an external auth
+     * adapter are re-checked, whether or not the shell is enabled.
      */
     sessionCheckIntervalMs?: number;
     /** Working directory of the shell. Default: the server user's home directory. */
@@ -80,6 +82,18 @@ export const SHELL_DEFAULTS = {
     /** stdin touches the users session at most this often. */
     touchIntervalMs: 30 * 1000,
 } as const;
+
+/**
+ * The effective session re-check interval of shells and of events/logs sockets
+ * opened through an external auth adapter: `sessionCheckIntervalMs` (default
+ * 30 s), at least 10 ms and at most 60 s.
+ */
+export function effectiveSessionCheckIntervalMs(configured: number | undefined): number {
+    return Math.min(
+        Math.max(configured ?? SHELL_DEFAULTS.sessionCheckIntervalMs, 10),
+        SHELL_DEFAULTS.maxSessionCheckIntervalMs,
+    );
+}
 
 /** WebSocket close codes used by the shell socket (accept, then close). */
 export const ShellCloseCodes = {
