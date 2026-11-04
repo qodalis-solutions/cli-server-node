@@ -69,7 +69,11 @@ export class RequestAuthenticator {
             groups.push(ADMIN_GROUP);
         }
         const liveUser = { ...user, groups };
-        return { user: liveUser, permissions: await this.authService.getEffectivePermissions(liveUser) };
+        return {
+            user: liveUser,
+            permissions: await this.authService.getEffectivePermissions(liveUser),
+            externalRequest: req,
+        };
     }
 
     async authenticate(req: Request): Promise<AuthContext> {

@@ -59,7 +59,9 @@ function normalizeLevel(level: string): string {
  * Parity with CliLogSocketManager in the .NET and Python servers.
  * Handles `/ws/v1/qcli/logs` and `/ws/qcli/logs` upgrade paths. Sockets
  * authenticated with a stored session are bound to it: once it ends they are
- * closed with 4401 `session ended` (see {@link SessionBoundSockets}).
+ * closed with 4401 `session ended` (see {@link SessionBoundSockets}). Sockets
+ * opened through an external auth adapter are re-checked through it every
+ * `sessionCheckIntervalMs` and close once it fails or the user lost `logs:read`.
  */
 export class CliLogSocketManager {
     private _wss: WebSocketServer | null = null;
@@ -68,9 +70,17 @@ export class CliLogSocketManager {
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
     private readonly _trustProxy: boolean | number;
-    private readonly _sessionBound = new SessionBoundSockets();
+    private readonly _sessionBound: SessionBoundSockets;
 
-    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean | number } = {}) {
+    /**
+     * @param options.sessionCheckIntervalMs Re-check interval of sockets opened through an
+     *   external auth adapter (the shell's `sessionCheckIntervalMs`: default 30 s, at most 60 s).
+     */
+    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean | number; sessionCheckIntervalMs?: number } = {}) {
+        this._sessionBound = new SessionBoundSockets({
+            externalPermission: CliServerPermissions.LogsRead,
+            sessionCheckIntervalMs: options.sessionCheckIntervalMs,
+        });
         this._allowedOrigins = options.allowedOrigins;
         this._trustProxy = options.trustProxy ?? false;
     }
@@ -251,7 +261,7 @@ export class CliLogSocketManager {
         };
 
         this._clients.set(id, entry);
-        this._sessionBound.bind(ws, auth);
+        this._sessionBound.bind(ws, auth, request);
 
         ws.send(JSON.stringify({ type: 'connected' }));
         logger.info('Log client connected (id=%s, level=%s)', id, levelFilter ?? 'all');
