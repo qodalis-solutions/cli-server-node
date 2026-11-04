@@ -1,12 +1,13 @@
 export { CliUsersBuilder, generatePassword } from './cli-users-builder';
-export { UsersServerAuth } from './server-auth';
-export type { UsersServerAuthContext } from './server-auth';
+export { UsersServerAuth, EXTERNAL_REQUEST } from './server-auth';
+export type { UsersServerAuthContext, UsersServerAttachment } from './server-auth';
 export { RequestAuthenticator } from './middleware/auth-middleware';
 export { hashToken, isOriginAllowed, isSameOrigin, requestOrigin } from './security';
 export type { UsersPluginResult } from './cli-users-builder';
 export type {
     UsersModuleOptions,
     AuthAdapter,
+    ExternalAuthResult,
     UsersBroadcastFn,
     User,
     CreateUserDto,

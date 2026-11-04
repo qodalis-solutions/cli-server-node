@@ -1,11 +1,32 @@
 {
     "name": "@qodalis/cli-server-plugin-aws",
-    "version": "1.0.0-beta.12",
+    "version": "1.0.0-beta.13",
     "description": "AWS cloud resource management plugin for Qodalis CLI Server",
     "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
     "scripts": {
         "build": "tsc",
         "test": "vitest run"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "aws",
+        "cloud",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/aws"
     },
     "dependencies": {
         "@aws-sdk/client-cloudwatch": "^3.700.0",

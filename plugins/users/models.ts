@@ -94,6 +94,16 @@ export interface SessionPayload {
     loginTime: number;
     lastActivity: number;
     expiresAt: number;
+    /**
+     * Users are managed by the host application (`readOnlyUsers`): user writes
+     * answer 501, so clients hide `adduser`, `usermod`, `userdel`, `passwd`, ...
+     */
+    usersReadOnly: boolean;
+    /**
+     * Groups are managed by the host application (`readOnlyGroups`): group writes
+     * answer 501, so clients hide `groupadd`, `groupmod`, `groupdel`.
+     */
+    groupsReadOnly: boolean;
 }
 
 export interface LoginResult {
@@ -186,12 +196,29 @@ export interface UpdateGroupDto {
     permissions?: string[];
 }
 
+/** What an {@link AuthAdapter} returns for an authenticated request. */
+export interface ExternalAuthResult {
+    user: User;
+    /** Adds the user to the `admin` group for this request. */
+    isAdmin?: boolean;
+    /**
+     * Permissions granted directly by the host (e.g. `logs:read`, `commands:execute`),
+     * added to those of the user's groups (and of `admin` with `isAdmin`). Lets hosts
+     * with their own roles grant permissions without a group per permission; group
+     * names missing from the group store grant nothing.
+     */
+    permissions?: string[];
+}
+
 /**
  * Resolves the CLI user from a request already authenticated by the host app.
- * Return `null`/`undefined` when the request is unauthenticated.
- * `isAdmin: true` adds the user to the `admin` group for this request.
+ * Return `null`/`undefined` when the request is unauthenticated. May be async
+ * (return a Promise), e.g. to load the user, their roles or their disabled
+ * state from a database: the plugin always awaits the result.
  */
-export type AuthAdapter = (req: Request) => { user: User; isAdmin: boolean } | undefined | null;
+export type AuthAdapter = (
+    req: Request,
+) => ExternalAuthResult | undefined | null | Promise<ExternalAuthResult | undefined | null>;
 
 /** Broadcasts an event over the server's events socket. */
 export type UsersBroadcastFn = (msg: Record<string, unknown>) => void;
@@ -244,4 +271,18 @@ export interface UsersModuleOptions {
      * is seeded, and adapter sessions are neither stored nor listed.
      */
     authAdapter?: AuthAdapter;
+    /**
+     * The host application owns the users (e.g. a user store over its own
+     * accounts): creating, updating (self too) and deleting users, password
+     * changes and group membership changes answer 501 `Users are managed by the
+     * host application` without calling any store, no `root` user is seeded, and
+     * deleting a group leaves memberships alone. Default false.
+     */
+    readOnlyUsers?: boolean;
+    /**
+     * The host application owns the groups: creating, updating and deleting
+     * groups answer 501 `Groups are managed by the host application` without
+     * calling the store, and the built-in groups are not seeded. Default false.
+     */
+    readOnlyGroups?: boolean;
 }

@@ -8,7 +8,7 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
-import { ICliServerAuth, isOriginAllowed, isSameOrigin, trustedProxyHops } from './auth/cli-server-auth';
+import { CliServerRuntimeOptions, ICliServerAuth, isOriginAllowed, isSameOrigin, trustedProxyHops } from './auth/cli-server-auth';
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
@@ -136,6 +136,12 @@ export interface CliServerResult {
     eventSocketManager: CliEventSocketManager;
     logSocketManager: CliLogSocketManager;
     /**
+     * Server-wide runtime options set by plugins (same object as `builder.serverOptions`):
+     * `externalAuthentication` (set by the users plugin with an external auth adapter)
+     * and `jobsEnabled` (set when a job scheduler is mounted).
+     */
+    serverOptions: CliServerRuntimeOptions;
+    /**
      * Mount a plugin using its built-in prefix.
      * Reads `prefix` and `router` from the plugin result, and optionally
      * `dashboardPrefix` / `dashboardRouter` for plugins that serve a UI.
@@ -233,7 +239,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
-    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy });
+    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy, sessionCheckIntervalMs: shell?.sessionCheckIntervalMs });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };
@@ -305,13 +311,17 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     logger.info('CLI server created with %d processors', registry.processors.length);
 
+    const serverOptions = builder.serverOptions;
     const setAuth = (auth: ICliServerAuth | undefined) => {
         serverAuth = auth;
         eventSocketManager.setAuth(auth);
         logSocketManager.setAuth(auth);
+        // The new provider says again whether the host signs users in.
+        serverOptions.externalAuthentication = false;
         auth?.attachToServer?.({
             allowedOrigins,
             broadcast: (msg) => eventSocketManager.broadcastMessage(msg),
+            serverOptions,
         });
     };
 
@@ -331,6 +341,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
             app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
         }
+        if (isJobScheduler(plugin.scheduler)) {
+            serverOptions.jobsEnabled = true;
+        }
         if (isJobScheduler(plugin.scheduler) && !mcpFeatures.has('jobs')) {
             mcpFeatureProviders.push(new JobsMcpToolProvider(plugin.scheduler));
             mcpFeatures.add('jobs');
@@ -348,7 +361,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         },
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin, setAuth, mcp };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, serverOptions, mountPlugin, setAuth, mcp };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */

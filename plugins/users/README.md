@@ -40,7 +40,9 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setDefaultAdminPassword(pw)` | `'root'` | Password of the seeded `root` user |
 | `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage |
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
-| `setAuthAdapter(fn)` | — | Delegate authentication to the host app (see below) |
+| `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
+| `setReadOnlyUsers(bool = true)` | `false` | The host owns the users: user writes answer `501` (see [Read-only stores](#read-only-stores)) |
+| `setReadOnlyGroups(bool = true)` | `false` | The host owns the groups: group writes answer `501` |
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
 | `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout (each within the lockout duration of the previous one; an older count resets) |
 | `setLockoutDuration(ms)` | 5 min | Lockout duration, and how long a failure count below the threshold is remembered |
@@ -69,7 +71,7 @@ The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the 
 | events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (an open shell is closed with 4401 when its session ends or loses `shell:execute`) |
 | admin dashboard (`setAuthProvider`) | `admin:access` |
 
-WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticket, expiresIn: 30 }`, then `?ticket=<ticket>` on the upgrade URL (bound to the session, 30 s, consumed on first use). Bearer tokens are not accepted in WS query strings. `session-kicked` is sent only to sockets of the affected user. Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with 4401 `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets authenticated by an external auth adapter have no stored session and are not re-checked. Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('deploy:run')`: 401/403 for auth failures (errors with a numeric `status` keep it and their message), while unexpected errors (e.g. a failing store or adapter) are logged and answered with 500 `{ "error": "internal server error" }`.
+WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticket, expiresIn: 30 }`, then `?ticket=<ticket>` on the upgrade URL (bound to the session, 30 s, consumed on first use). Bearer tokens are not accepted in WS query strings. `session-kicked` is sent only to sockets of the affected user. Events and logs sockets authenticated with a stored session are bound to it: when the session ends (logout, revoke/kick, user disabled or deleted, a password change becoming required, idle/absolute expiry) the socket is closed with 4401 `session ended`; for a revoke the events socket first receives `session-kicked`. Bound sockets are re-checked on every session/user/group change and after each expired-session sweep (`setCleanupInterval`, default 5 minutes). Sockets opened through an external auth adapter are re-checked through the adapter (see [External auth adapter](#external-auth-adapter)). Host routes can use `usersPlugin.requireAuth()` / `usersPlugin.requirePermission('deploy:run')`: 401/403 for auth failures (errors with a numeric `status` keep it and their message), while unexpected errors (e.g. a failing store or adapter) are logged and answered with 500 `{ "error": "internal server error" }`.
 
 While a user has `mustChangePassword`, only `GET/DELETE /sessions/current` and `PUT /users/{self}/password` work; everything else answers `403 { "error": "password change required" }`.
 
@@ -86,7 +88,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | Endpoint | Requirement | Notes |
 |----------|-------------|-------|
 | `POST /sessions` | public | Login `{ username, password }` (name or email) → `201 { token, session }`; disabled → 403, locked → 429 |
-| `GET /sessions/current` | authenticated | `{ id, user, permissions, loginTime, lastActivity, expiresAt }` |
+| `GET /sessions/current` | authenticated | `{ id, user, permissions, loginTime, lastActivity, expiresAt, usersReadOnly, groupsReadOnly }` |
 | `DELETE /sessions/current` | authenticated | Logout (204) |
 | `GET /sessions` | `sessions:read` | Sessions (never tokens), `current` flag |
 | `DELETE /sessions/:id` | `sessions:revoke` or own session | 204, broadcasts `session-kicked` |
@@ -172,7 +174,9 @@ const usersPlugin = new CliUsersBuilder()
 
 ## External auth adapter
 
-If the host application already authenticates requests, pass an adapter. It receives the Express request and returns the CLI user plus an admin flag, or `null` when unauthenticated. The user is resolved per request; login, logout, verify-password and password endpoints answer `501`; no `root` user is seeded (built-in groups still are); adapter sessions are not stored or listed.
+The middleware order and a complete setup with the admin dashboard are in [Use with your app's sign-in](../../README.md#use-with-your-apps-sign-in).
+
+If the host application already authenticates requests, pass an adapter. It receives the Express request and returns an `ExternalAuthResult` (the CLI user, an optional admin flag and optional permissions), or `null` when unauthenticated. The user is resolved per request; login, logout, verify-password and password endpoints answer `501`; no `root` user is seeded (built-in groups still are); adapter sessions are not stored or listed. Permissions come from the groups the adapter returns (`isAdmin` adds `admin`) plus the result's `permissions`. Group names missing from the group store grant nothing (and break nothing).
 
 ```typescript
 const usersPlugin = new CliUsersBuilder()
@@ -183,9 +187,52 @@ const usersPlugin = new CliUsersBuilder()
     .build(broadcast);
 ```
 
-**Remote shell.** A shell opened by an adapter-authenticated user has no stored session to re-check. Instead, every periodic/event re-check (and one right after the shell opens) calls the adapter again with the shell socket's original HTTP **upgrade request** (a raw Node `IncomingMessage`: headers such as `Cookie`/`Authorization`, URL, socket — no Express middleware has run on it, so e.g. `req.user` is not set). Returning `null`/`undefined`, throwing, or returning a different user closes the shell with 4401 `session ended`; a user that no longer holds `shell:execute` (after the `isAdmin` → `admin` group mapping) closes it with audit reason `permission removed`. Make sure the adapter can authenticate the upgrade request on its own (e.g. from the session cookie the browser sends with the WebSocket handshake).
+Hosts with their own roles can grant permissions directly instead of keeping a group per permission:
+
+```typescript
+return {
+    user: toCliUser(account),                       // groups may be empty
+    permissions: ['commands:execute', 'logs:read'], // added to the groups' permissions
+};
+```
+
+The adapter may also be async (return a Promise), so it can load the user, their roles or their disabled state from a database. The plugin always awaits it: for requests, ticket issuance and every re-check of an open socket.
+
+```typescript
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter(async (req) => {
+        const account = await accounts.findBySession(req.headers.cookie);
+        return account ? { user: toCliUser(account), isAdmin: account.isAdmin } : null;
+    })
+    .build(broadcast);
+```
+
+**Remote shell.** A shell opened by an adapter-authenticated user has no stored session to re-check. Instead, every periodic/event re-check (and one right after the shell opens) calls the adapter again on the request it accepted: the `POST /sessions/ws-ticket` request the shell's ticket was issued from (the Express request, as your middleware left it, e.g. with `req.user` set). Without such a request it falls back to the shell socket's HTTP upgrade request (a raw Node `IncomingMessage`: headers such as `Cookie`, URL, socket; no Express middleware has run on it). Returning `null`/`undefined`, throwing, or returning a different or disabled user closes the shell with 4401 `session ended`; a user that no longer holds `shell:execute` (after the `isAdmin` → `admin` group mapping) closes it with audit reason `permission removed`.
+
+**Events and logs sockets opened by adapter users** are re-checked the same way: every `sessionCheckIntervalMs` of the server's `shell` options (default 30 s, capped at 60 s; it applies whether or not the shell is enabled), and on every users/groups change, the adapter runs again on the ticket request. `null`/`undefined`, a different user, a disabled user, an exception, or a user who no longer holds the socket's permission (`logs:read` for the logs socket; the events socket only needs authentication) closes the socket with 4401 `session ended`. A slow adapter never stacks checks: a socket whose check is still running is skipped.
+
+A user the adapter returns with `disabled: true` is refused (401 `account disabled`) on requests and ticket issuance.
 
 The admin dashboard plugin keeps its own login at `/auth/login`; both plugins can be mounted at the same prefix.
+
+## Read-only stores
+
+When the host application owns the users or groups (a custom `ICliUserStore`/`ICliGroupStore` over its own accounts and roles), mark them read-only instead of throwing from the store's write methods:
+
+```typescript
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter(hostAdapter)
+    .setUserStore(new HostUserStore()) // only the read methods need real implementations
+    .setReadOnlyUsers()
+    .setReadOnlyGroups()
+    .build(broadcast);
+```
+
+(or `setOptions({ readOnlyUsers: true, readOnlyGroups: true })`)
+
+- **`setReadOnlyUsers()`** (`readOnlyUsers: true`): `POST /users`, `PUT /users/{idOrName}` (self updates too), `DELETE /users/{idOrName}`, `PUT /users/{idOrName}/password` and `POST`/`PUT`/`DELETE /groups/{name}/members/{idOrName}` answer `501 { "error": "Users are managed by the host application" }` without calling any store (before authentication; with an auth adapter, password changes keep answering `501` `Authentication is managed by the host application`). No `root` user is seeded, and deleting a group leaves the users' memberships alone.
+- **`setReadOnlyGroups()`** (`readOnlyGroups: true`): `POST /groups`, `PUT /groups/{name}` and `DELETE /groups/{name}` answer `501 { "error": "Groups are managed by the host application" }` without calling the store, and the built-in `admin` and `users` groups are not seeded (the host's store provides the groups it needs).
+- Reads keep working. `GET /sessions/current` and the login response (`session`) carry `usersReadOnly` and `groupsReadOnly` (always present, `false` by default) so clients can hide `adduser`, `groupadd` and the like.
 
 ## License
 
