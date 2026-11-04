@@ -425,6 +425,10 @@ docker run -p 8047:8047 ghcr.io/qodalis-solutions/cli-server-node
 
 The image runs the standalone server and accepts the same environment variables. `docker-compose.yml` builds and runs the demo server (`demo/Dockerfile`) on port 8047.
 
+## Versioning
+
+Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.12` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
+
 ## Development
 
 ```bash
