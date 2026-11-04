@@ -2,6 +2,7 @@ import { CliProcessCommand, ICliCommandProcessor, ICliProcessorFilter } from '..
 import { CliServerResponse } from '../models';
 import { ICliCommandRegistry } from './cli-command-registry';
 import { createLogger } from '../utils/logger';
+import { CliOutputLimits, DEFAULT_MAX_TABLE_ROWS } from './cli-output-limits';
 
 const logger = createLogger('CommandExecutor');
 
@@ -26,13 +27,37 @@ export interface ICliCommandExecutorService {
      * @param processor - The processor to check.
      */
     isBlocked(processor: ICliCommandProcessor): boolean;
+
+    /**
+     * The most rows an unpaged table may return (0 = no limit); `/execute/stream` caps
+     * streamed tables with it. Defaults to {@link DEFAULT_MAX_TABLE_ROWS} when not set.
+     */
+    readonly maxTableRows?: number;
+}
+
+/** Options for {@link CliCommandExecutorService}. */
+export interface CliCommandExecutorOptions {
+    /**
+     * The most rows a table may return without paging (default 200; 0 = no limit). A larger
+     * table from a command that does not page (`writePagedTable`) is cut to this many rows
+     * and marked `truncated`, so a terminal never receives thousands of rows at once.
+     */
+    maxTableRows?: number;
 }
 
 /** Default executor that resolves processors from the registry and delegates command handling. */
 export class CliCommandExecutorService implements ICliCommandExecutorService {
     private readonly _filters: ICliProcessorFilter[] = [];
 
-    constructor(private readonly _registry: ICliCommandRegistry) {}
+    /** The most rows an unpaged table may return (0 = no limit). */
+    readonly maxTableRows: number;
+
+    constructor(
+        private readonly _registry: ICliCommandRegistry,
+        options: CliCommandExecutorOptions = {},
+    ) {
+        this.maxTableRows = options.maxTableRows ?? DEFAULT_MAX_TABLE_ROWS;
+    }
 
     addFilter(filter: ICliProcessorFilter): void {
         this._filters.push(filter);
@@ -80,7 +105,7 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
             if (processor.handleStructuredAsync) {
                 const response = await processor.handleStructuredAsync(command, signal);
                 logger.debug('Command completed: %s (exitCode=%d)', command.command, response.exitCode);
-                return response;
+                return CliOutputLimits.applyResponse(response, this.maxTableRows);
             }
 
             const result = await processor.handleAsync(command, signal);
