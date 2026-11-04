@@ -12,6 +12,7 @@ import { ModuleRegistry, IRegistryLike, IBuilderLike } from './services/module-r
 import { LogRingBuffer } from './services/log-ring-buffer';
 import { AdminConfig } from './services/admin-config';
 import { resolveDashboardDir } from './services/dashboard-dir';
+import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
 import { join } from 'path';
 import * as crypto from 'crypto';
 
@@ -75,6 +76,27 @@ export class CliAdminBuilder {
     private _dashboardDir?: string;
     private _enabledFeatures: string[] = [];
     private _authProvider?: AdminAuthProvider;
+    private _theme: AdminThemeDocument = validateAdminTheme(undefined);
+
+    /**
+     * Set the dashboard's color scheme: the mode (`dark`, `light` or `system`)
+     * and color overrides per scheme. Tokens left out keep the dashboard
+     * defaults. Values must be plain CSS colors (hex, rgb()/hsl()/oklch(...)
+     * or a named color); anything else throws here.
+     *
+     * @example
+     * ```ts
+     * builder.setTheme({
+     *     mode: 'system',
+     *     light: { primary: '#2a6bba', background: '#f1f6fa' },
+     *     dark: { primary: '#4f9be0', background: '#0d1823' },
+     * });
+     * ```
+     */
+    setTheme(theme: AdminTheme): CliAdminBuilder {
+        this._theme = validateAdminTheme(theme);
+        return this;
+    }
 
     /**
      * Authenticate the dashboard through the users plugin
@@ -204,6 +226,14 @@ export class CliAdminBuilder {
         // Dashboard SPA static file serving
         const dashboardRouter = Router();
         const dashboardDistDir = resolveDashboardDir(this._dashboardDir);
+
+        // Color scheme, read by the dashboard before its first render (public,
+        // like the dashboard itself: the login page uses it too)
+        const themeJson = JSON.stringify(this._theme);
+        dashboardRouter.get('/theme.json', (_req, res) => {
+            res.set('Cache-Control', 'no-cache');
+            res.type('application/json').send(themeJson);
+        });
 
         if (dashboardDistDir) {
             dashboardRouter.use(expressStatic(dashboardDistDir));
