@@ -2,7 +2,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthAdapter } from '../models';
 import { AuthService, AuthContext } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
-import { ADMIN_GROUP, hasPermission, inGroup } from '../permissions';
+import { ADMIN_GROUP, hasPermission, inGroup, mergePermissions } from '../permissions';
 import { isOriginAllowed, isSameOrigin } from '../security';
 
 declare global {
@@ -48,7 +48,8 @@ export class RequestAuthenticator {
 
     /**
      * Resolves the identity through the host's auth adapter, sync or async (no
-     * CSRF check): 401 when the adapter returns nothing or a disabled user; `isAdmin` adds the
+     * CSRF check): 401 when the adapter returns nothing or a disabled user;
+     * permissions are those of the user's groups plus the result's `permissions`; `isAdmin` adds the
      * `admin` group. Also used to re-authenticate long-lived sockets from their
      * upgrade request.
      */
@@ -60,7 +61,7 @@ export class RequestAuthenticator {
         if (!result || !result.user) {
             throw unauthorized();
         }
-        const { user, isAdmin } = result;
+        const { user, isAdmin, permissions: granted } = result;
         if (user.disabled) {
             throw unauthorized('account disabled');
         }
@@ -71,7 +72,7 @@ export class RequestAuthenticator {
         const liveUser = { ...user, groups };
         return {
             user: liveUser,
-            permissions: await this.authService.getEffectivePermissions(liveUser),
+            permissions: mergePermissions(await this.authService.getEffectivePermissions(liveUser), granted),
             externalRequest: req,
         };
     }

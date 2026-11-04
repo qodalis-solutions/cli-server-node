@@ -17,6 +17,7 @@ import { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 import { AuthService } from './services/auth-service';
 import { DirectoryService } from './services/directory-service';
 import { createAuthMiddleware, RequestAuthenticator } from './middleware/auth-middleware';
+import { createReadOnlyStoresGuard } from './middleware/read-only-stores';
 import { UsersServerAuth } from './server-auth';
 import { RateLimiter, clientIp } from './security';
 import { randomInt } from 'crypto';
@@ -136,6 +137,27 @@ export class CliUsersBuilder {
         return this;
     }
 
+    /**
+     * The host application owns the users (e.g. a user store over its own accounts):
+     * user writes (create, update, delete, password set) and group membership changes
+     * answer 501 `Users are managed by the host application` without calling any store,
+     * no `root` user is seeded, and session payloads report `usersReadOnly: true`.
+     */
+    setReadOnlyUsers(readOnly = true): this {
+        this.options.readOnlyUsers = readOnly;
+        return this;
+    }
+
+    /**
+     * The host application owns the groups: group create, update and delete answer
+     * 501 `Groups are managed by the host application` without calling the store, the
+     * built-in groups are not seeded, and session payloads report `groupsReadOnly: true`.
+     */
+    setReadOnlyGroups(readOnly = true): this {
+        this.options.readOnlyGroups = readOnly;
+        return this;
+    }
+
     /** Idle session timeout in milliseconds (default 30 minutes). */
     setSessionTimeout(ms: number): this {
         this.options.sessionTimeoutMs = ms;
@@ -212,6 +234,8 @@ export class CliUsersBuilder {
     build(broadcastFn?: UsersBroadcastFn): UsersPluginResult {
         const options = this.options;
         const externalAuth = !!options.authAdapter;
+        const usersReadOnly = options.readOnlyUsers ?? false;
+        const groupsReadOnly = options.readOnlyGroups ?? false;
 
         const userStore = options.userStore ?? new InMemoryUserStore();
         const sessionStore = options.sessionStore ?? new InMemorySessionStore();
@@ -230,10 +254,17 @@ export class CliUsersBuilder {
             broadcast: broadcastFn,
             apiTokenStore,
             allowNonExpiringTokens: options.allowNonExpiringTokens,
+            usersReadOnly,
+            groupsReadOnly,
         });
         const directory = new DirectoryService(userStore, groupStore, authService);
 
-        const ready = seed(userStore, groupStore, authService, externalAuth, options.defaultAdminPassword);
+        const ready = seed(userStore, groupStore, authService, {
+            externalAuth,
+            usersReadOnly,
+            groupsReadOnly,
+            configuredPassword: options.defaultAdminPassword,
+        });
         ready.catch((err) => console.error('[users] seeding failed:', err));
 
         const waitReady = (_req: Request, _res: Response, next: NextFunction) => {
@@ -263,6 +294,10 @@ export class CliUsersBuilder {
         });
 
         const router = Router();
+        // Writes to read-only stores answer 501 before body parsing and authentication.
+        const readOnly = { usersReadOnly, groupsReadOnly, externalAuth };
+        router.use('/users', createReadOnlyStoresGuard('users', readOnly));
+        router.use('/groups', createReadOnlyStoresGuard('groups', readOnly));
         const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens'];
         router.use(scoped, json({ limit: '1mb' }), waitReady);
         router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
@@ -316,9 +351,20 @@ async function seed(
     userStore: ICliUserStore,
     groupStore: ICliGroupStore,
     authService: AuthService,
-    externalAuth: boolean,
-    configuredPassword: string | undefined,
+    options: { externalAuth: boolean; usersReadOnly: boolean; groupsReadOnly: boolean; configuredPassword: string | undefined },
 ): Promise<void> {
+    const { configuredPassword } = options;
+    // Read-only stores belong to the host application: nothing is seeded into them.
+    if (!options.groupsReadOnly) {
+        await seedBuiltInGroups(groupStore);
+    }
+    if (options.externalAuth || options.usersReadOnly) {
+        return;
+    }
+    await seedRoot(userStore, authService, configuredPassword);
+}
+
+async function seedBuiltInGroups(groupStore: ICliGroupStore): Promise<void> {
     if (!(await groupStore.getGroup(ADMIN_GROUP))) {
         await groupStore.createGroup({
             name: ADMIN_GROUP,
@@ -335,10 +381,9 @@ async function seed(
             builtIn: true,
         });
     }
+}
 
-    if (externalAuth) {
-        return;
-    }
+async function seedRoot(userStore: ICliUserStore, authService: AuthService, configuredPassword: string | undefined): Promise<void> {
     const existing = await userStore.getUsers();
     if (existing.length === 0) {
         const generated = configuredPassword === undefined;
