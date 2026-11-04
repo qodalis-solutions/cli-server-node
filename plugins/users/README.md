@@ -40,7 +40,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setDefaultAdminPassword(pw)` | `'root'` | Password of the seeded `root` user |
 | `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage |
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
-| `setAuthAdapter(fn)` | — | Delegate authentication to the host app (see below) |
+| `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
 | `setMaxLoginAttempts(n)` | 5 | Consecutive failures before lockout (each within the lockout duration of the previous one; an older count resets) |
 | `setLockoutDuration(ms)` | 5 min | Lockout duration, and how long a failure count below the threshold is remembered |
@@ -179,6 +179,17 @@ const usersPlugin = new CliUsersBuilder()
     .setAuthAdapter((req) => {
         const principal = (req as any).user; // set by your middleware
         return principal ? { user: toCliUser(principal), isAdmin: principal.roles.includes('admin') } : null;
+    })
+    .build(broadcast);
+```
+
+The adapter may also be async (return a Promise), so it can load the user, their roles or their disabled state from a database. The plugin always awaits it: for requests, ticket issuance and every re-check of an open socket.
+
+```typescript
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter(async (req) => {
+        const account = await accounts.findBySession(req.headers.cookie);
+        return account ? { user: toCliUser(account), isAdmin: account.isAdmin } : null;
     })
     .build(broadcast);
 ```

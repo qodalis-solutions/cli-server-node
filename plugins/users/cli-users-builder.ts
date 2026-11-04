@@ -126,7 +126,11 @@ export class CliUsersBuilder {
         return this;
     }
 
-    /** Delegate authentication to the host application. */
+    /**
+     * Delegate authentication to the host application. The adapter may be sync
+     * or async (return a Promise); the plugin awaits it for requests, ticket
+     * issuance and the re-checks of open sockets.
+     */
     setAuthAdapter(adapter: AuthAdapter): this {
         this.options.authAdapter = adapter;
         return this;
