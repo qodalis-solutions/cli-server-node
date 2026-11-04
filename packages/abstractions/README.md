@@ -45,6 +45,8 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `ICliCommandAuthor` | Author metadata: `name` and `email` |
 | `ICliCommandParameterDescriptor` | Parameter declaration: name, type, required flag, aliases, default value |
 | `CliProcessCommand` | Parsed command input: command name, value, args, chain commands, raw input, data payload |
+| `CliPageRequest` | The rows a list command was asked for: `skip`, `take` |
+| `CliTablePage` | The `page` of a table output: `skip`, `take`, `total?`, `hasMore`, `truncated?` |
 
 ### Classes
 
@@ -53,12 +55,14 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliCommandProcessor` | Abstract base class implementing `ICliCommandProcessor` with sensible defaults |
 | `CliCommandAuthor` | Simple implementation of `ICliCommandAuthor` |
 | `CliCommandParameterDescriptor` | Simple implementation of `ICliCommandParameterDescriptor` |
+| `CliPaging` | `--skip` / `--take` convention: `CliPaging.parameters()` and `CliPaging.from(command)` |
 
 ### Constants
 
 | Constant | Description |
 |----------|-------------|
 | `DefaultLibraryAuthor` | Default `ICliCommandAuthor` instance used when no author is specified |
+| `DEFAULT_TAKE`, `MAX_TAKE` | Rows shown by default (50) and at most (500) |
 
 ### `CliCommandProcessor` Members
 

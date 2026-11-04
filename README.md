@@ -148,6 +148,34 @@ createCliServer({ configure: (builder) => builder.addModule(new WeatherModule())
 
 `plugins/weather/` is a complete reference module (`weather`, `weather current`, `weather forecast`).
 
+### Paging
+
+Commands that can return many rows page them: declare `CliPaging.parameters()` (`--skip`, default 0, and `--take`, default 50, at most 500), read the request with `CliPaging.from(command)` and write the rows with `writePagedTable`. The web CLI shows which rows these are under the table with the command for the next ones.
+
+```typescript
+import { CliCommandProcessor, CliPaging, CliProcessCommand, CliResponseBuilder, CliServerResponse } from '@qodalis/cli-server-node';
+
+class OrdersProcessor extends CliCommandProcessor {
+    command = 'orders';
+    description = 'Lists orders';
+    parameters = [...CliPaging.parameters()];
+
+    async handleAsync(): Promise<string> {
+        return '';
+    }
+
+    async handleStructuredAsync(command: CliProcessCommand): Promise<CliServerResponse> {
+        const page = CliPaging.from(command);
+        const { rows, total } = await db.orders.find({ skip: page.skip, take: page.take });
+        const builder = new CliResponseBuilder();
+        builder.writePagedTable(['Id', 'Customer'], rows.map((o) => [o.id, o.customer]), page, { total });
+        return builder.build();
+    }
+}
+```
+
+The table output carries the page: `{ "type": "table", "headers": [...], "rows": [...], "page": { "skip": 50, "take": 50, "total": 120, "hasMore": true } }`. Without a `total`, pass `hasMore` (query one row more than `take` to find out). Tables from commands that do not page are cut at the `maxTableRows` option (default 200) and marked `"truncated": true`, in `/execute`, `/execute/stream` and MCP results; paged tables are never cut.
+
 ## Configuration
 
 `createCliServer(options)`:
@@ -162,6 +190,7 @@ createCliServer({ configure: (builder) => builder.addModule(new WeatherModule())
 | `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
 | `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
 | `mcp` | off | `true` or `{ tools, exclude, token, instructions, enabled }` (see [MCP](#mcp-endpoint)) |
+| `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 
 `configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider` (all chainable).

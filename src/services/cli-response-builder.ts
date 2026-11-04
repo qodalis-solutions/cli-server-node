@@ -1,3 +1,4 @@
+import { CliPageRequest } from '../abstractions';
 import { CliServerOutput } from '../models';
 import { CliServerResponse } from '../models';
 
@@ -7,6 +8,22 @@ export interface ICliResponseBuilder {
     writeText(text: string, style?: 'success' | 'error' | 'info' | 'warning'): void;
     /** Appends a table output block. */
     writeTable(headers: string[], rows: string[][]): void;
+    /**
+     * Appends some rows of a longer table. The terminal shows which rows they are under it and
+     * the command for the next ones. Pass `total` when known; otherwise `hasMore` says whether
+     * more rows follow (query one row more than `take` to find out).
+     * @param headers - Column headers.
+     * @param rows - The rows shown.
+     * @param page - The rows that were asked for (`CliPaging.from(command)`).
+     * @param options - `total`: all rows of the result, when known; `hasMore`: whether more rows
+     * follow, defaulting to `page.skip + rows.length < total` (false without a total).
+     */
+    writePagedTable(
+        headers: string[],
+        rows: string[][],
+        page: CliPageRequest,
+        options?: { total?: number; hasMore?: boolean },
+    ): void;
     /** Appends a list output block. */
     writeList(items: string[], ordered?: boolean): void;
     /** Appends a JSON output block. */
@@ -30,6 +47,27 @@ export class CliResponseBuilder implements ICliResponseBuilder {
 
     writeTable(headers: string[], rows: string[][]): void {
         this._outputs.push({ type: 'table', headers, rows });
+    }
+
+    writePagedTable(
+        headers: string[],
+        rows: string[][],
+        page: CliPageRequest,
+        options: { total?: number; hasMore?: boolean } = {},
+    ): void {
+        const { total } = options;
+        const hasMore = options.hasMore ?? (total !== undefined && page.skip + rows.length < total);
+        this._outputs.push({
+            type: 'table',
+            headers,
+            rows,
+            page: {
+                skip: page.skip,
+                take: page.take,
+                ...(total !== undefined ? { total } : {}),
+                hasMore,
+            },
+        });
     }
 
     writeList(items: string[], ordered = false): void {

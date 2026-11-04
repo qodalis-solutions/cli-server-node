@@ -15,6 +15,11 @@ export {
     ICliModule,
     CliModule,
     ICliProcessorFilter,
+    CliTablePage,
+    CliPageRequest,
+    CliPaging,
+    DEFAULT_TAKE,
+    MAX_TAKE,
 } from './abstractions';
 
 // Models
@@ -33,6 +38,9 @@ export {
     CliResponseBuilder,
     ICliCommandExecutorService,
     CliCommandExecutorService,
+    CliCommandExecutorOptions,
+    CliOutputLimits,
+    DEFAULT_MAX_TABLE_ROWS,
     CliEventSocketManager,
     CliShellSessionManager,
     CliShellSessionInfo,
@@ -87,6 +95,7 @@ export {
     mcpJson,
     validateMcpArguments,
     renderOutputsAsText,
+    describePage,
     CommandsMcpToolProvider,
     ServerMcpToolProvider,
     FilesystemMcpToolProvider,
