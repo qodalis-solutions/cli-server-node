@@ -174,6 +174,8 @@ const usersPlugin = new CliUsersBuilder()
 
 ## External auth adapter
 
+The middleware order and a complete setup with the admin dashboard are in [Use with your app's sign-in](../../README.md#use-with-your-apps-sign-in).
+
 If the host application already authenticates requests, pass an adapter. It receives the Express request and returns an `ExternalAuthResult` (the CLI user, an optional admin flag and optional permissions), or `null` when unauthenticated. The user is resolved per request; login, logout, verify-password and password endpoints answer `501`; no `root` user is seeded (built-in groups still are); adapter sessions are not stored or listed. Permissions come from the groups the adapter returns (`isAdmin` adds `admin`) plus the result's `permissions`. Group names missing from the group store grant nothing (and break nothing).
 
 ```typescript
