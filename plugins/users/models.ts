@@ -186,12 +186,22 @@ export interface UpdateGroupDto {
     permissions?: string[];
 }
 
+/** What an {@link AuthAdapter} returns for an authenticated request. */
+export interface ExternalAuthResult {
+    user: User;
+    /** Adds the user to the `admin` group for this request. */
+    isAdmin?: boolean;
+}
+
 /**
  * Resolves the CLI user from a request already authenticated by the host app.
- * Return `null`/`undefined` when the request is unauthenticated.
- * `isAdmin: true` adds the user to the `admin` group for this request.
+ * Return `null`/`undefined` when the request is unauthenticated. May be async
+ * (return a Promise), e.g. to load the user, their roles or their disabled
+ * state from a database: the plugin always awaits the result.
  */
-export type AuthAdapter = (req: Request) => { user: User; isAdmin: boolean } | undefined | null;
+export type AuthAdapter = (
+    req: Request,
+) => ExternalAuthResult | undefined | null | Promise<ExternalAuthResult | undefined | null>;
 
 /** Broadcasts an event over the server's events socket. */
 export type UsersBroadcastFn = (msg: Record<string, unknown>) => void;

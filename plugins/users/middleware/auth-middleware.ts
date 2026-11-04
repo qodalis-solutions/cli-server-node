@@ -47,8 +47,8 @@ export class RequestAuthenticator {
     }
 
     /**
-     * Resolves the identity through the host's auth adapter (no CSRF check):
-     * 401 when the adapter returns nothing or a disabled user; `isAdmin` adds the
+     * Resolves the identity through the host's auth adapter, sync or async (no
+     * CSRF check): 401 when the adapter returns nothing or a disabled user; `isAdmin` adds the
      * `admin` group. Also used to re-authenticate long-lived sockets from their
      * upgrade request.
      */
@@ -56,7 +56,7 @@ export class RequestAuthenticator {
         if (!this.authAdapter) {
             throw unauthorized();
         }
-        const result = this.authAdapter(req);
+        const result = await this.authAdapter(req);
         if (!result || !result.user) {
             throw unauthorized();
         }

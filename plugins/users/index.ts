@@ -7,6 +7,7 @@ export type { UsersPluginResult } from './cli-users-builder';
 export type {
     UsersModuleOptions,
     AuthAdapter,
+    ExternalAuthResult,
     UsersBroadcastFn,
     User,
     CreateUserDto,

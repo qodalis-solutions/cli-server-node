@@ -653,6 +653,20 @@ describe('C2: adapter-authenticated shells', () => {
         const entry = await auditEntry(h.users!, (e) => e.event === 'shell_closed' && e.userId === extUser.id);
         expect(entry.metadata).toMatchObject({ reason: 'permission removed' });
     });
+
+    it('re-check through an async adapter closes the shell once the user is gone', async () => {
+        hostSays = 'admin';
+        const asyncAdapter: AuthAdapter = async (req) => {
+            await sleep(5); // a database lookup
+            return adapter(req);
+        };
+        const h = await start({ users: true, shell: { sessionCheckIntervalMs: 50 }, configureUsers: (b) => b.setAuthAdapter(asyncAdapter) });
+        const c = await openAdapterShell(h);
+        await sleep(200); // several re-checks while the host still authenticates
+        expect(c.ws.readyState).toBe(WebSocket.OPEN);
+        hostSays = 'logged-out';
+        expect(await c.closed).toEqual({ code: 4401, reason: 'session ended' });
+    });
 });
 
 describe('C2: the whole process tree dies with the shell', () => {
