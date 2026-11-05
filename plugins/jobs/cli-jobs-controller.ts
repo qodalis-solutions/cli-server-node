@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { CliJobScheduler, JobError } from './cli-job-scheduler';
-import { ICliJobStorageProvider, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
+import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 
 /**
  * Creates the jobs REST controller router.
  *
  * Routes (relative to mount point):
  * - GET    /            - list all jobs
+ * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
  * - GET    /:id         - single job details
  * - POST   /:id/trigger - trigger immediate execution
  * - POST   /:id/pause   - pause scheduled execution
@@ -30,6 +31,45 @@ export function createCliJobsController(
     router.get('/', (_req, res) => {
         const jobs = scheduler.getAll();
         res.json(jobs);
+    });
+
+    // Before /:id, which would take "executions" for a job id
+    router.get('/executions', async (req, res) => {
+        let jobIds: string[] | undefined = queryList(req.query.job).flatMap((j) =>
+            j.split(',').map((id) => id.trim()).filter(Boolean),
+        );
+        const group = typeof req.query.group === 'string' && req.query.group.trim() ? req.query.group.trim() : undefined;
+        if (group) {
+            const inGroup = scheduler
+                .getAll()
+                .filter((j) => j.group !== undefined && j.group.toLowerCase() === group.toLowerCase())
+                .map((j) => j.id);
+            jobIds = jobIds.length > 0 ? jobIds.filter((id) => inGroup.includes(id)) : inGroup;
+        } else if (jobIds.length === 0) {
+            jobIds = undefined;
+        }
+
+        let since: Date | undefined;
+        if (typeof req.query.since === 'string' && req.query.since) {
+            since = new Date(req.query.since);
+            if (Number.isNaN(since.getTime())) {
+                return res.status(400).json({ error: 'since must be an ISO 8601 date', code: 'INVALID_QUERY' });
+            }
+        }
+        const parsedLimit = parseInt(req.query.limit as string, 10);
+        const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
+        const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
+        const status = typeof req.query.status === 'string' && req.query.status ? req.query.status : undefined;
+
+        try {
+            // A group (or a job filter) matching no job lists nothing, not every job
+            const result = jobIds && jobIds.length === 0
+                ? { items: [], total: 0 }
+                : await scheduler.queryExecutions({ jobIds, status, since, limit, offset });
+            res.json({ items: result.items.map(toListItem), total: result.total, limit, offset });
+        } catch (err) {
+            handleError(res, err);
+        }
     });
 
     router.get('/:id', (req, res) => {
@@ -119,10 +159,7 @@ export function createCliJobsController(
         const result = await storage.getExecutions(req.params.id, { limit, offset, status });
 
         // Strip logs from list view, add logCount
-        const items = result.items.map((exec) => {
-            const { logs, ...rest } = exec;
-            return { ...rest, logCount: logs?.length ?? 0 };
-        });
+        const items = result.items.map(toListItem);
 
         res.json({
             items,
@@ -143,10 +180,23 @@ export function createCliJobsController(
             return res.status(404).json({ error: 'Execution not found', code: 'EXECUTION_NOT_FOUND' });
         }
 
-        res.json(execution);
+        res.json({ ...execution, properties: execution.properties ?? {} });
     });
 
     return router;
+}
+
+/** An execution in a list: without its logs, with their count and the run's properties. */
+function toListItem(exec: JobExecution): Omit<JobExecution, 'logs'> & { logCount: number } {
+    const { logs, ...rest } = exec;
+    return { ...rest, properties: exec.properties ?? {}, logCount: logs?.length ?? 0 };
+}
+
+/** A query parameter given once, repeated or not at all, as a list of strings. */
+function queryList(value: unknown): string[] {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+    return [];
 }
 
 /** Map a caught error to an appropriate HTTP response. */

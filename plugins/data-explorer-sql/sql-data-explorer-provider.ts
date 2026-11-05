@@ -6,6 +6,7 @@ import {
     DataExplorerSchemaTable,
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
+import { CLI_INSTALLED_PLUGIN, dataExplorerSqlInstalledPlugin } from './package-info';
 
 /** Connection configuration for the SQL data explorer provider. */
 export interface SqlConnectionOptions {
@@ -19,6 +20,9 @@ export interface SqlConnectionOptions {
 
 /** Data explorer provider for SQLite databases using better-sqlite3. */
 export class SqlDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerSqlInstalledPlugin;
+
     private readonly connectionOptions: SqlConnectionOptions;
 
     constructor(connectionOptions: SqlConnectionOptions) {

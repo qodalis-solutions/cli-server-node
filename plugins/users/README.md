@@ -111,7 +111,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | `GET /tokens` | authenticated | Own API tokens; `?all=true` (requires `tokens:read`) lists every user's |
 | `POST /tokens` | authenticated, **session only** | `{ name, expiresInDays?, permissions? }` → `201 { token, apiToken }` (see [API tokens](#api-tokens)) |
 | `DELETE /tokens/:id` | owner or `tokens:revoke` | 204; unknown or someone else's token without `tokens:revoke` → 404 |
-| `GET /audit` | `audit:read` | `?limit=&event=&username=`, newest first |
+| `GET /audit` | `audit:read` | `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive); without a `limit` the newest 100, at most 1000 |
 | `DELETE /audit` | `audit:clear` | 204 |
 
 ### Protections and cascades
@@ -134,7 +134,7 @@ In adapter/cookie mode, state-changing requests without a bearer header must com
 
 Entries carry `userId` / `actorId` when known. `login_failed` entries are capped separately (last 200).
 
-`login`, `login_failed`, `logout`, `token_created`, `token_revoked` (details: token name and id), `user_created`, `user_updated`, `user_deleted`, `user_disabled`, `user_enabled`, `password_changed`, `group_created`, `group_updated`, `group_deleted`, `group_member_added`, `group_member_removed`, `session_revoked`, `audit_cleared`, `shell_opened`, `shell_closed` (written by the CLI server's shell; `metadata: { mode, sessionId, durationMs, reason, exitCode? }`, never the command text) — with `actor` set to the acting user. The in-memory store keeps the last 1000 entries.
+`login`, `login_failed`, `logout`, `token_created`, `token_revoked` (details: token name and id), `user_created`, `user_updated`, `user_deleted`, `user_disabled`, `user_enabled`, `password_changed`, `group_created`, `group_updated`, `group_deleted`, `group_member_added`, `group_member_removed`, `session_revoked`, `audit_cleared`, `shell_opened`, `shell_closed` (written by the CLI server's shell; `metadata: { mode, sessionId, durationMs, reason, exitCode? }`, never the command text) — with `actor` set to the acting user. The group events set `target: "group:<name>"`. The host can record its own events with `authService.audit({ event, username, actor, target, properties })` (`target`: what the event is about when it is not a user; `properties`: the host's own values). The in-memory store keeps the last 1000 entries; a store may implement `prune(before)` to delete old entries (`pruneAudit(store, before)`; the in-memory store implements it).
 
 ## API tokens
 

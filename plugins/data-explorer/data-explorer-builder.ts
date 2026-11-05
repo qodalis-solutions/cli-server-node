@@ -3,6 +3,8 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { DataExplorerRegistry } from './data-explorer-registry';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
+import { dataExplorerInstalledPlugin } from './package-info';
 
 /** Factory function that creates a data explorer provider on demand. */
 export type DataExplorerProviderFactory = () => IDataExplorerProvider;
@@ -12,6 +14,9 @@ export type DataExplorerProviderFactory = () => IDataExplorerProvider;
  * Use {@link registry} to access the populated registry after configuration.
  */
 export class DataExplorerBuilder {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerInstalledPlugin;
+
     private readonly _registry = new DataExplorerRegistry();
 
     /**

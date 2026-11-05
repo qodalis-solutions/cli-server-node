@@ -1,8 +1,9 @@
-import { ICliJob, CliJobOptions, ICliJobStorageProvider } from '@qodalis/cli-server-abstractions';
+import { ICliJob, CliJobOptions, ICliJobStorageProvider, CliInstalledPlugin } from '@qodalis/cli-server-abstractions';
 import { Router } from 'express';
 import { CliJobScheduler } from './cli-job-scheduler';
 import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
 import { createCliJobsController } from './cli-jobs-controller';
+import { jobsInstalledPlugin } from './package-info';
 
 export interface CliJobsPluginResult {
     /** Default mount prefix for this plugin. */
@@ -11,6 +12,8 @@ export interface CliJobsPluginResult {
     router: Router;
     /** The job scheduler instance. Call `start()` / `stop()` to manage its lifecycle. */
     scheduler: CliJobScheduler;
+    /** This package, listed among the server's installed plugins by `mountPlugin`. */
+    installedPlugin: CliInstalledPlugin;
 }
 
 /**
@@ -68,6 +71,6 @@ export class CliJobsBuilder {
 
         const router = createCliJobsController(scheduler, storage);
 
-        return { prefix: '/api/v1/qcli/jobs', router, scheduler };
+        return { prefix: '/api/v1/qcli/jobs', router, scheduler, installedPlugin: jobsInstalledPlugin };
     }
 }
