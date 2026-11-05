@@ -57,6 +57,7 @@ Credentials and JWT secret can be set via the builder or environment variables:
 | `setEnabledFeatures(features)` | Add custom feature flags to the status endpoint |
 | `setDashboardDir(dir)` | Override the path to the dashboard SPA dist directory |
 | `setTheme(theme)` | Dashboard color scheme: mode and per-scheme colors (see [Color scheme](#color-scheme)) |
+| `setBranding(branding)` | Dashboard name and icon, and its terminal's name (see [Name and icon](#name-and-icon)) |
 
 ## REST API
 
@@ -220,6 +221,23 @@ The defaults match the Qodalis CLI panel: its grays, indigo accent with the viol
 | `warning` | `--qcli-warning` | Warning states | `#f0883e` | `#bc4c00` |
 | `error` | `--qcli-error` | Errors and destructive actions | `#f85149` | `#cf222e` |
 | `info` | `--qcli-info` | Informational states | `#58a6ff` | `#0969da` |
+
+## Name and icon
+
+By default the dashboard is "Qodalis Cli Admin" with the Qodalis Solutions logo. An application that ships it
+under its own name sets `setBranding()`:
+
+```ts
+new CliAdminBuilder().setBranding({
+    name: 'RateBell',          // browser tab, sidebar, sign-in page
+    iconUrl: '/favicon.svg',   // http(s) URL, root-relative path or base64 data:image URL
+    cliName: 'RateBell CLI',   // the terminal's welcome banner
+});
+```
+
+Anything left unset keeps the Qodalis default. The terminal's copyright line, docs link and `version` stay Qodalis
+CLI's. The values are served with the color scheme at `/qcli/admin/theme.json`; `setBranding()` throws on an
+invalid value.
 
 ## License
 
