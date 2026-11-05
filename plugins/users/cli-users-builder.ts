@@ -28,6 +28,7 @@ import { createAuditController } from './controllers/audit-controller';
 import { createTokensController } from './controllers/tokens-controller';
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
+import { CliInstalledPlugin, usersInstalledPlugin } from './package-info';
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -58,6 +59,8 @@ export interface UsersPluginResult {
     requirePermission: (...permissions: string[]) => RequestHandler;
     /** Stops the background session sweep. */
     dispose: () => void;
+    /** This package, listed among the server's installed plugins by `mountPlugin`. */
+    installedPlugin: CliInstalledPlugin;
 }
 
 /**
@@ -335,6 +338,7 @@ export class CliUsersBuilder {
             requireAuth: () => serverAuth.requireAuth(),
             requirePermission: (...permissions: string[]) => serverAuth.requirePermission(...permissions),
             dispose: () => clearInterval(cleanupInterval),
+            installedPlugin: usersInstalledPlugin,
         };
     }
 }

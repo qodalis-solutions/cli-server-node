@@ -7,6 +7,8 @@ import {
     NotADirectoryError,
     FileExistsError,
 } from '../errors';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
+import { filesystemInstalledPlugin } from '../package-info';
 
 interface FileNode {
     name: string;
@@ -47,6 +49,9 @@ function createFileNode(name: string, content: string): FileNode {
 
 /** File storage provider backed by an in-memory tree structure (volatile, lost on restart). */
 export class InMemoryFileStorageProvider implements IFileStorageProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = filesystemInstalledPlugin;
+
     readonly name = 'in-memory';
 
     private root: FileNode = createDirNode('');

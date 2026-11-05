@@ -1,10 +1,18 @@
 import { ICliCommandProcessor, ICliModule, IDataExplorerProvider, DataExplorerProviderOptions } from '../abstractions';
 import type { CliServerRuntimeOptions } from '../auth/cli-server-auth';
 import { FileSystemApiOptions, FileSystemOptions } from '../filesystem';
-import { IFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
+import { IFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
 import { CliCommandRegistry } from '../services';
 import type { McpToolProvider } from '../mcp/mcp-types';
+import { CliInstalledPlugin, installedPluginOf, readInstalledPlugin } from '@qodalis/cli-server-abstractions';
+
+const CORE_PACKAGE = '@qodalis/cli-server-node';
+const FILESYSTEM_PACKAGE = '@qodalis/cli-server-plugin-filesystem';
+const DATA_EXPLORER_PACKAGE = '@qodalis/cli-server-plugin-data-explorer';
+
+/** The server itself, listed first among the installed plugins. */
+const corePlugin: CliInstalledPlugin = readInstalledPlugin(__dirname, CORE_PACKAGE, 'Core') ?? { id: CORE_PACKAGE, name: 'Core' };
 
 /**
  * Fluent builder for configuring CLI server processors, modules, filesystem, and data explorer providers.
@@ -18,6 +26,7 @@ export class CliBuilder {
     private _fileSystemApiOptions: FileSystemApiOptions = {};
     private _dataExplorerBuilder?: DataExplorerBuilder;
     private readonly _mcpToolProviders: McpToolProvider[] = [];
+    private readonly _installedPlugins: CliInstalledPlugin[] = [];
 
     /**
      * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,
@@ -28,6 +37,35 @@ export class CliBuilder {
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
+        this.addInstalledPlugin(corePlugin);
+    }
+
+    /**
+     * Lists a server plugin package among the installed plugins (once, in the order
+     * added), shown on the admin dashboard's plugins page
+     * (`GET /api/v1/qcli/plugins/installed`). The built-in plugins list themselves
+     * when added (`mountPlugin`, `addModule`, `setFileStorageProvider`,
+     * `addDataExplorerProvider`, ...); call it from a plugin of your own with its
+     * description, or with a directory inside the package (e.g. `__dirname`) to read
+     * its `package.json`.
+     */
+    addInstalledPlugin(plugin: CliInstalledPlugin | string): CliBuilder {
+        const resolved = typeof plugin === 'string' ? readInstalledPlugin(plugin) : plugin;
+        if (resolved && !this._installedPlugins.some((p) => p.id === resolved.id)) {
+            this._installedPlugins.push({ ...resolved });
+        }
+        return this;
+    }
+
+    /** The server plugin packages installed so far, the server itself (`Core`) first. */
+    get installedPlugins(): ReadonlyArray<CliInstalledPlugin> {
+        return this._installedPlugins;
+    }
+
+    /** Lists the package a module, provider or plugin result carries (see `CLI_INSTALLED_PLUGIN`), if any. */
+    private _addInstalledPluginOf(value: unknown): void {
+        const plugin = installedPluginOf(value);
+        if (plugin) this.addInstalledPlugin(plugin);
     }
 
     /** Registers a single command processor. */
@@ -39,6 +77,7 @@ export class CliBuilder {
     /** Registers a module and all of its command processors. */
     addModule(module: ICliModule): CliBuilder {
         this._modules.push(module);
+        this._addInstalledPluginOf(module);
         for (const processor of module.processors) {
             this._registry.register(processor);
         }
@@ -53,6 +92,7 @@ export class CliBuilder {
     /** Configures the filesystem API with path-based access control (and `maxUploadBytes`). */
     addFileSystem(options: FileSystemOptions): CliBuilder {
         this._fileSystemOptions = options;
+        this.addInstalledPlugin(filesystemPlugin());
         this._fileSystemApiOptions = { maxUploadBytes: options.maxUploadBytes };
         return this;
     }
@@ -68,6 +108,8 @@ export class CliBuilder {
      */
     setFileStorageProvider(provider: IFileStorageProvider, options?: FileSystemApiOptions): CliBuilder {
         this._fileStorageProvider = provider;
+        this.addInstalledPlugin(filesystemPlugin());
+        this._addInstalledPluginOf(provider);
         if (options) {
             this._fileSystemApiOptions = { ...options };
         }
@@ -97,7 +139,13 @@ export class CliBuilder {
         if (!this._dataExplorerBuilder) {
             this._dataExplorerBuilder = new DataExplorerBuilder();
         }
-        this._dataExplorerBuilder.addProvider(providerOrFactory, options);
+        this.addInstalledPlugin(
+            installedPluginOf(this._dataExplorerBuilder) ?? { id: DATA_EXPLORER_PACKAGE, name: 'DataExplorer' },
+        );
+        // A factory is called right away anyway (DataExplorerBuilder); its provider names the package
+        const provider = typeof providerOrFactory === 'function' ? providerOrFactory() : providerOrFactory;
+        this._addInstalledPluginOf(provider);
+        this._dataExplorerBuilder.addProvider(provider, options);
         return this;
     }
 
@@ -120,4 +168,9 @@ export class CliBuilder {
     get mcpToolProviders(): ReadonlyArray<McpToolProvider> {
         return this._mcpToolProviders;
     }
+}
+
+/** The filesystem plugin package (its in-box OS and in-memory providers). */
+function filesystemPlugin(): CliInstalledPlugin {
+    return installedPluginOf(OsFileStorageProvider) ?? { id: FILESYSTEM_PACKAGE, name: 'FileSystem' };
 }

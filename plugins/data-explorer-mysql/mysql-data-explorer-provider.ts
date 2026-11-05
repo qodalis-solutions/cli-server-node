@@ -8,6 +8,7 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import * as mysql from 'mysql2/promise';
 import type { FieldPacket, RowDataPacket } from 'mysql2/promise';
+import { CLI_INSTALLED_PLUGIN, dataExplorerMysqlInstalledPlugin } from './package-info';
 
 /** Connection configuration for the MySQL data explorer provider. */
 export interface MysqlConnectionOptions {
@@ -17,6 +18,9 @@ export interface MysqlConnectionOptions {
 
 /** Data explorer provider for MySQL databases using mysql2. */
 export class MysqlDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerMysqlInstalledPlugin;
+
     private readonly connectionOptions: MysqlConnectionOptions;
 
     constructor(connectionOptions: MysqlConnectionOptions) {

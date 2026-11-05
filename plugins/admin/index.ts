@@ -22,3 +22,4 @@ export {
     isBrandingIcon,
     validateAdminBranding,
 } from './services/admin-branding';
+export { adminInstalledPlugin, CliInstalledPlugin } from './services/package-info';

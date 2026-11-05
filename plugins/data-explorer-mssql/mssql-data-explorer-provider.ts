@@ -7,6 +7,7 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import * as sql from 'mssql';
+import { CLI_INSTALLED_PLUGIN, dataExplorerMssqlInstalledPlugin } from './package-info';
 
 /** Connection configuration for the MSSQL data explorer provider. */
 export interface MssqlConnectionOptions {
@@ -16,6 +17,9 @@ export interface MssqlConnectionOptions {
 
 /** Data explorer provider for Microsoft SQL Server using the mssql package. */
 export class MssqlDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerMssqlInstalledPlugin;
+
     private readonly connectionOptions: MssqlConnectionOptions;
 
     constructor(connectionOptions: MssqlConnectionOptions) {

@@ -14,7 +14,9 @@ import { createCliJobsController } from '../../plugins/jobs/cli-jobs-controller'
 // ---------------------------------------------------------------------------
 
 class QuickJob implements ICliJob {
+    private calls = 0;
     async executeAsync(context: ICliJobExecutionContext, signal: AbortSignal): Promise<void> {
+        context.properties.calls = ++this.calls;
         context.logger.info('quick job ran');
     }
 }
@@ -39,7 +41,7 @@ let jobIds: Record<string, string>;
 function setup() {
     plugin = new CliJobsBuilder()
         .addJob(new QuickJob(), { name: 'quick', interval: '999s' })
-        .addJob(new SlowJob(), { name: 'slow', interval: '999s' })
+        .addJob(new SlowJob(), { name: 'slow', group: 'Reports', interval: '999s' })
         .build();
 
     app = express();
@@ -233,5 +235,59 @@ describe('GET /api/v1/qcli/jobs/:id/history', () => {
         );
         expect(res.status).toBe(404);
         expect(res.body.code).toBe('EXECUTION_NOT_FOUND');
+    });
+});
+
+describe('GET /api/v1/qcli/jobs/executions', () => {
+    const executions = (query = '') => request(app).get(`/api/v1/qcli/jobs/executions${query}`);
+
+    it('lists executions across jobs, filtered by job, group, status and since', async () => {
+        (plugin.scheduler as any)._running = true;
+        await request(app).post(`/api/v1/qcli/jobs/${jobIds['quick']}/trigger`);
+        await new Promise((r) => setTimeout(r, 5));
+        await request(app).post(`/api/v1/qcli/jobs/${jobIds['quick']}/trigger`);
+
+        const all = await executions();
+        expect(all.status).toBe(200);
+        expect(all.body).toMatchObject({ total: 2, limit: 20, offset: 0 });
+        expect(all.body.items[0]).toMatchObject({
+            jobId: 'quick',
+            jobName: 'quick',
+            status: 'completed',
+            logCount: 1,
+            properties: { calls: 2 },
+        });
+        expect(all.body.items[0]).not.toHaveProperty('logs');
+
+        expect((await executions(`?job=${jobIds['quick']},${jobIds['slow']}`)).body.total).toBe(2);
+        expect((await executions(`?job=${jobIds['slow']}&job=${jobIds['quick']}`)).body.total).toBe(2);
+        expect((await executions(`?job=${jobIds['slow']}`)).body.total).toBe(0);
+        expect((await executions('?status=failed')).body.total).toBe(0);
+        expect((await executions('?status=completed')).body.total).toBe(2);
+        expect((await executions('?limit=1&offset=1')).body).toMatchObject({ limit: 1, offset: 1, items: [{ properties: { calls: 1 } }] });
+        expect((await executions(`?since=${new Date(Date.now() + 60_000).toISOString()}`)).body.total).toBe(0);
+        expect((await executions(`?since=${new Date(Date.now() - 60_000).toISOString()}`)).body.total).toBe(2);
+        // The group (case-insensitive), intersected with the job filter
+        expect((await executions('?group=reports')).body.total).toBe(0);
+        expect((await executions(`?group=reports&job=${jobIds['quick']}`)).body.total).toBe(0);
+        // No job in the group: nothing, not every job
+        expect((await executions('?group=none')).body.total).toBe(0);
+    });
+
+    it('clamps limit and offset and rejects a bad since', async () => {
+        expect((await executions('?limit=1000&offset=-5')).body).toMatchObject({ limit: 100, offset: 0 });
+        expect((await executions('?limit=0')).body.limit).toBe(1);
+        const bad = await executions('?since=yesterday');
+        expect(bad.status).toBe(400);
+        expect(bad.body.code).toBe('INVALID_QUERY');
+    });
+
+    it('history and execution detail carry the properties', async () => {
+        (plugin.scheduler as any)._running = true;
+        await request(app).post(`/api/v1/qcli/jobs/${jobIds['quick']}/trigger`);
+        const history = await request(app).get(`/api/v1/qcli/jobs/${jobIds['quick']}/history`);
+        expect(history.body.items[0].properties).toEqual({ calls: 1 });
+        const detail = await request(app).get(`/api/v1/qcli/jobs/${jobIds['quick']}/history/${history.body.items[0].id}`);
+        expect(detail.body.properties).toEqual({ calls: 1 });
     });
 });

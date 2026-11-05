@@ -363,3 +363,48 @@ describe('InMemoryGroupStore', () => {
         expect(found).toBeUndefined();
     });
 });
+
+// ---------------------------------------------------------------------------
+// InMemoryAuditStore: actor, offset, target/properties and pruning
+// ---------------------------------------------------------------------------
+
+describe('InMemoryAuditStore query and prune', () => {
+    it('filters by actor (case-insensitive), pages with offset, keeps target and properties', async () => {
+        const store = new InMemoryAuditStore();
+        await store.log({ timestamp: 1, event: 'login_failed', username: 'hacker' });
+        await store.log({ timestamp: 2, event: 'login', username: 'root' });
+        expect((await store.getEntries({ offset: 1 })).map((e) => e.event)).toEqual(['login_failed']);
+        expect((await store.getEntries({ offset: 1, limit: 1 })).map((e) => e.event)).toEqual(['login_failed']);
+
+        await store.log({
+            timestamp: 3,
+            event: 'user_updated',
+            username: 'bob',
+            actor: 'Root',
+            target: 'plan:pro',
+            properties: { from: 'free', to: 'pro' },
+        });
+        const byActor = await store.getEntries({ actor: 'root' });
+        expect(byActor).toHaveLength(1);
+        expect(byActor[0]).toMatchObject({ event: 'user_updated', target: 'plan:pro', properties: { from: 'free', to: 'pro' } });
+    });
+
+    it('prune deletes the entries recorded before a time, failed logins included', async () => {
+        const store = new InMemoryAuditStore();
+        await store.log({ timestamp: 1, event: 'login_failed', username: 'hacker' });
+        await store.log({ timestamp: 2, event: 'login', username: 'root' });
+        await store.log({ timestamp: 3, event: 'user_updated', username: 'bob' });
+
+        expect(await store.prune(new Date(3))).toBe(2);
+        expect((await store.getEntries()).map((e) => e.event)).toEqual(['user_updated']);
+    });
+
+    it('pruneAudit keeps everything for a store without prune', async () => {
+        const { pruneAudit } = await import('../../plugins/users/index');
+        const store = new InMemoryAuditStore();
+        await store.log({ timestamp: 1, event: 'login', username: 'root' });
+        const plain = { log: store.log.bind(store), getEntries: store.getEntries.bind(store), clear: store.clear.bind(store) };
+        expect(await pruneAudit(plain, new Date())).toBe(0);
+        expect(await pruneAudit(store, new Date())).toBe(1);
+    });
+});

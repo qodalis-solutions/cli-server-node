@@ -620,7 +620,12 @@ describe('MCP: tool providers', () => {
         expect(paused.result).toMatchObject({ isError: false, structuredContent: { ok: true, id } });
         expect((await call(s.app, 'jobs_resume', { id: 'tick' })).result.isError).toBe(false);
         expect((await call(s.app, 'jobs_history', { id: 'tick' })).result.isError).toBe(false);
-        const ambiguous = await call(s.app, 'jobs_get', { id: 'dup' });
+        expect((await call(s.app, 'jobs_trigger', { id: 'tick' })).result.isError).toBe(false);
+        const history = await call(s.app, 'jobs_history', { id: 'tick' });
+        expect(history.result.structuredContent.items[0]).toMatchObject({ jobId: 'tick', properties: {} });
+        // Ids default to the name ("dup", then "dup-2"): an exact id wins, a name matching two jobs is ambiguous
+        expect((await call(s.app, 'jobs_get', { id: 'dup-2' })).result.structuredContent.interval).toBe('2h');
+        const ambiguous = await call(s.app, 'jobs_get', { id: 'DUP' });
         expect(ambiguous.result.isError).toBe(true);
         expect(ambiguous.result.content[0].text).toMatch(/ambiguous/);
         expect((await call(s.app, 'jobs_trigger', { id: 'nope' })).result.content[0].text).toBe('Job not found');

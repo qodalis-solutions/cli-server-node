@@ -10,6 +10,8 @@ import {
     NotADirectoryError,
     IsADirectoryError,
 } from '../errors';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
+import { filesystemInstalledPlugin } from '../package-info';
 
 /** Configuration for the OS file storage provider. */
 export interface OsProviderOptions {
@@ -22,6 +24,9 @@ export interface OsProviderOptions {
  * Path-traversal is prevented by validating all paths against an allowlist.
  */
 export class OsFileStorageProvider implements IFileStorageProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = filesystemInstalledPlugin;
+
     readonly name = 'os';
     private readonly allowedPaths: string[];
 

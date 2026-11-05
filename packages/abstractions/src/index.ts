@@ -13,6 +13,13 @@ export {
     CliJobOptions,
     JobOverlapPolicy,
     ICliJobStorageProvider,
+    queryJobExecutions,
+    pruneJobExecutions,
+    deleteJobExecution,
+    JobExecutionQuery,
+    JobExecutionListFn,
+    matchesJobExecutionQuery,
+    mergeJobExecutions,
     JobExecution,
     JobExecutionStatus,
     JobState,
@@ -37,3 +44,10 @@ export {
 export { IDataExplorerProvider } from './data-explorer-provider';
 export { ICliProcessorFilter } from './cli-processor-filter';
 export { ICliStreamCommandProcessor, isStreamCapable } from './cli-stream-command-processor';
+export {
+    CliInstalledPlugin,
+    CLI_INSTALLED_PLUGIN,
+    installedPluginName,
+    readInstalledPlugin,
+    installedPluginOf,
+} from './installed-plugin';

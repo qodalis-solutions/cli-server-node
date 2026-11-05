@@ -6,6 +6,7 @@ import {
     DataExplorerSchemaTable,
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
+import { CLI_INSTALLED_PLUGIN, dataExplorerRedisInstalledPlugin } from './package-info';
 
 /** Connection configuration for the Redis data explorer provider. */
 export interface RedisConnectionOptions {
@@ -172,6 +173,9 @@ function normalizeResult(
  * tabular results. Only a safe subset of commands is allowed.
  */
 export class RedisDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerRedisInstalledPlugin;
+
     private readonly connectionOptions: RedisConnectionOptions;
 
     constructor(connectionOptions: RedisConnectionOptions) {

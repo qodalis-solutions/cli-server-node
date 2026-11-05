@@ -14,8 +14,11 @@ import { AdminConfig } from './services/admin-config';
 import { resolveDashboardDir } from './services/dashboard-dir';
 import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
 import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './services/admin-branding';
+import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-info';
 import { join } from 'path';
 import * as crypto from 'crypto';
+
+const USERS_PLUGIN_ID = '@qodalis/cli-server-plugin-users';
 
 /** Executor-like interface — the admin plugin only needs to register filters. */
 export interface IExecutorLike {
@@ -54,6 +57,8 @@ export interface CliAdminPluginResult {
     publicRoutes: string[];
     /** Clean up timers and restore console. Call when shutting down. */
     dispose: () => void;
+    /** This package, listed among the server's installed plugins by `mountPlugin`. */
+    installedPlugin: CliInstalledPlugin;
 }
 
 /**
@@ -239,13 +244,18 @@ export class CliAdminBuilder {
                 if (hasJobs && !features.includes('jobs')) {
                     features.push('jobs');
                 }
+                // The users plugin keeps the audit log (GET /api/v1/qcli/audit)
+                const hasAudit = (builder.installedPlugins ?? []).some((p) => p.id === USERS_PLUGIN_ID);
+                if (hasAudit && !features.includes('audit')) {
+                    features.push('audit');
+                }
                 return features;
             },
         };
         router.use('/status', authMiddleware, createStatusController(statusDeps));
 
         // Plugins
-        router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry));
+        router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry, () => builder.installedPlugins ?? []));
 
         // Config
         router.use('/config', authMiddleware, createConfigController(this._config));
@@ -297,6 +307,7 @@ export class CliAdminBuilder {
             logBuffer,
             publicRoutes: ['POST /api/v1/qcli/auth/login', 'GET /api/v1/qcli/auth/mode'],
             dispose,
+            installedPlugin: adminInstalledPlugin,
         };
     }
 

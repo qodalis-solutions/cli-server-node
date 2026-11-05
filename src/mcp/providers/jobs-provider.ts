@@ -100,7 +100,7 @@ export class JobsMcpToolProvider implements McpToolProvider {
                         const result = await s.storage.getExecutions(id, { limit, offset: 0 });
                         const items = result.items.map((exec) => {
                             const { logs, ...rest } = exec;
-                            return { ...rest, logCount: logs?.length ?? 0 };
+                            return { ...rest, properties: exec.properties ?? {}, logCount: logs?.length ?? 0 };
                         });
                         return mcpJson({ items, total: result.total, limit });
                     } catch (err) {
