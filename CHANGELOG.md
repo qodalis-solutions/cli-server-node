@@ -3,6 +3,44 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## 1.0.0-beta.17
+
+### Audit plugin
+
+- The audit log is a plugin of its own, **`@qodalis/cli-server-plugin-audit`** (`new CliAuditBuilder().build()`,
+  mounted with `mountPlugin`): the entries, the in-memory store and `GET/DELETE /api/v1/qcli/audit`, listed on the
+  dashboard's Plugins page and shown as its Audit page. The users plugin adds it (`usersPlugin.auditPlugin`, served by
+  its router at `/audit` and listed after it among the installed plugins), so existing hosts keep their audit log; a
+  host can use it without the users plugin. See [its README](plugins/audit/README.md).
+- The contract moves to **`@qodalis/cli-server-abstractions`** (`AuditEntry`, `AuditMetadata`, `AuditQueryOptions`,
+  `ICliAuditStore`, `pruneAudit`), so a store of your own needs only the abstractions. `InMemoryAuditStore` is in
+  the audit plugin. The users plugin still re-exports the contract, `InMemoryAuditStore` and `CliAuditBuilder`, so
+  existing imports keep working; only the deep import `plugins/users/stores/in-memory-audit-store` is gone.
+- `CliAuditBuilder.setStore(store)` keeps the log elsewhere; the users plugin's `setAuditStore(store)` (or the
+  `auditStore` option) still works and does the same. A host that builds the audit plugin itself passes it with
+  `new CliUsersBuilder().setAuditPlugin(auditPlugin)` (mounting it too is fine); a store and a plugin that disagree
+  are refused.
+- The route policy protects the audit API itself (`audit:read` for `GET`, `audit:clear` for `DELETE`;
+  `CliServerPermissions.AuditRead` / `AuditClear`); the users plugin no longer authenticates `/audit` as one of its
+  own routes, but still checks its sign-in and those permissions on the API it serves. Clearing records
+  `audit_cleared` with the caller (`actor`, `actorId`, session and address).
+- `GET /audit` answers `400 { "error": "limit and offset must be integers >= 0" }` for a negative or non-integer
+  `limit` or `offset`, and `limit=0` returns no entries.
+- `mountPlugin` lists the further packages a plugin brings along (`installedPlugins`): the users plugin lists the
+  audit plugin.
+- The admin status reports the `audit` feature when the audit plugin is installed (was: the users plugin).
+- No database store ships with this server (the .NET server's `Qodalis.Cli.Plugin.Audit.EfCore` has no Node
+  counterpart): implement `ICliAuditStore` to keep the log across restarts.
+
+### Admin
+
+- The admin plugin ships dashboard 1.0.0-beta.13: the Terminal page is shown on every server again (it was hidden
+  without an OS shell).
+
+### Other packages
+
+- Released at `1.0.0-beta.17` with the .NET and Python servers.
+
 ## 1.0.0-beta.15
 
 ### Installed plugins
