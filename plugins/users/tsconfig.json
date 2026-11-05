@@ -16,7 +16,8 @@
         "resolveJsonModule": true,
         "baseUrl": ".",
         "paths": {
-            "@qodalis/cli-server-abstractions": ["../../packages/abstractions/dist"]
+            "@qodalis/cli-server-abstractions": ["../../packages/abstractions/dist"],
+            "@qodalis/cli-server-plugin-audit": ["../audit/dist"]
         }
     },
     "include": ["./**/*.ts"],

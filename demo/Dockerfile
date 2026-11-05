@@ -12,6 +12,7 @@ COPY plugins/filesystem-sqlite/package.json plugins/filesystem-sqlite/
 COPY plugins/filesystem-s3/package.json plugins/filesystem-s3/
 COPY plugins/weather/package.json plugins/weather/
 COPY plugins/jobs/package.json plugins/jobs/
+COPY plugins/audit/package.json plugins/audit/
 COPY plugins/users/package.json plugins/users/
 COPY plugins/admin/package.json plugins/admin/
 COPY plugins/data-explorer/package.json plugins/data-explorer/
@@ -36,6 +37,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../filesystem-s3 && (npx tsc || true) \
     && cd ../weather && npx tsc \
     && cd ../jobs && npx tsc \
+    && cd ../audit && npx tsc \
     && cd ../users && npx tsc \
     && cd ../data-explorer && npx tsc \
     && cd ../data-explorer-sql && npx tsc \

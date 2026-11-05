@@ -90,6 +90,9 @@ export function requiredServerPermissions(method: string, path: string, body: an
     if (path === '/api/v1/qcli/jobs' || path.startsWith('/api/v1/qcli/jobs/')) {
         return [method === 'GET' ? P.JobsRead : P.JobsManage];
     }
+    if (path === '/api/v1/qcli/audit' || path.startsWith('/api/v1/qcli/audit/')) {
+        return [method === 'GET' ? P.AuditRead : P.AuditClear];
+    }
     return [];
 }
 

@@ -283,7 +283,8 @@ const jobsPlugin = new CliJobsBuilder()
 mountPlugin(jobsPlugin);
 
 // -----------------------------------------------------------
-// Users Plugin (users, groups/permissions, sessions, audit).
+// Users Plugin (users, groups/permissions, sessions, API tokens); it adds
+// the audit plugin and serves its API at /api/v1/qcli/audit.
 // Mounting it protects every server route and socket (protectServer).
 // -----------------------------------------------------------
 const usersPlugin = new CliUsersBuilder()
