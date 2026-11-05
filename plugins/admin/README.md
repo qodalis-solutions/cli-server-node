@@ -103,7 +103,7 @@ When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/logs` | Query log entries with optional `level` (one or several, comma-separated), `search` (message or source), `service` (source), `limit`, `offset` params |
+| GET | `/logs` | Query log entries, oldest first, with optional `level` (one or several, comma-separated), `search` (message or source), `service` (source), `from`/`to` (ISO 8601, `from <= timestamp < to`), `limit`, `offset` params → `{ entries, total, store: "memory", persistent: false, limit, offset, hasMore, services }` (`services`: the distinct sources in the buffer) |
 | GET | `/logs/histogram` | Entries per level (`DEBUG`, `INFO`, `WARN`, `ERROR`) in equal columns of `?from=&to=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), with the filters of `/logs` → `{ from, to, bucketMs, buckets: [{ start, DEBUG, INFO, WARN, ERROR }], totals, store: "memory" }` |
 
 The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a value written after a `password`, `passwd`, `secret` or `token` label (`password: x`, `token=x`, `password for user "root": x`) is replaced with `[REDACTED]` before the entry is stored or broadcast.

@@ -355,6 +355,38 @@ describe('GET /api/v1/qcli/logs/histogram', () => {
         await request(app).get(`/api/v1/qcli/logs/histogram?from=${UNTIL}&to=${SINCE}`).set('Authorization', auth).expect(400);
     });
 
+    it('GET /logs answers the store, paging and services, and filters by from/to', async () => {
+        const { app, admin, token } = adminApp();
+        seed(admin.logBuffer);
+        const auth = `Bearer ${await token()}`;
+        let res = await request(app)
+            .get(`/api/v1/qcli/logs?from=${SINCE}&to=${UNTIL}&limit=2&offset=1`)
+            .set('Authorization', auth)
+            .expect(200);
+        expect(res.body).toMatchObject({ total: 5, store: 'memory', persistent: false, limit: 2, offset: 1, hasMore: true });
+        expect(res.body.entries.map((e: any) => e.message)).toEqual(['request ok', 'slow request']);
+        expect(res.body.services).toEqual(expect.arrayContaining(['app', 'jobs']));
+        expect([...res.body.services].sort()).toEqual(res.body.services);
+
+        res = await request(app).get(`/api/v1/qcli/logs?from=${SINCE}&to=${UNTIL}&offset=3`).set('Authorization', auth).expect(200);
+        expect(res.body).toMatchObject({ total: 5, offset: 3, limit: 100, hasMore: false });
+        expect(res.body.entries.map((e: any) => e.message)).toEqual(['boom', 'tick']);
+
+        // No offset = UTC; to is exclusive; combined with service
+        res = await request(app)
+            .get('/api/v1/qcli/logs?from=2026-11-04T01:00:00&to=2026-11-04T23:59:00.000Z&service=jobs')
+            .set('Authorization', auth)
+            .expect(200);
+        expect(res.body.entries.map((e: any) => e.message)).toEqual(['boom']);
+
+        res = await request(app).get('/api/v1/qcli/logs?to=2026-11-04T00:02:00Z').set('Authorization', auth).expect(200);
+        expect(res.body.entries.map((e: any) => e.message)).toEqual(['started', 'outside (before from)']);
+
+        res = await request(app).get('/api/v1/qcli/logs?from=soon').set('Authorization', auth).expect(400);
+        expect(res.body.error).toMatch(/from/);
+        await request(app).get('/api/v1/qcli/logs?to=nope').set('Authorization', auth).expect(400);
+    });
+
     it('requires the admin auth like GET /logs', async () => {
         const { app } = adminApp();
         await request(app).get('/api/v1/qcli/logs/histogram').expect(401);
