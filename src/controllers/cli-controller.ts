@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as os from 'os';
 import { CliStructuredOutput, ICliCommandProcessor, isStreamCapable } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
-import { ICliCommandRegistry, ICliCommandExecutorService, CliOutputLimits, DEFAULT_MAX_TABLE_ROWS } from '../services';
+import { ICliCommandRegistry, ICliCommandExecutorService, CliOutputLimits, DEFAULT_MAX_TABLE_ROWS, CliCommandUsageStats } from '../services';
 import { createLogger } from '../utils/logger';
 import { CapabilitiesOptions, resolveShellCapabilities } from './cli-version-controller';
 
@@ -21,6 +21,8 @@ export function createCliController(
     options?: CapabilitiesOptions,
 ): Router {
     const router = Router();
+    // Executors without counters (custom implementations) get their own
+    const usage = executor.usage ?? new CliCommandUsageStats();
 
     router.get('/version', (_req, res) => {
         res.json({ version: SERVER_VERSION });
@@ -50,6 +52,11 @@ export function createCliController(
     router.get('/commands', (_req, res) => {
         const descriptors = registry.processors.map(mapToDescriptor);
         res.json(descriptors);
+    });
+
+    // An exact path: never taken for a command named "stats"
+    router.get('/commands/stats', (_req, res) => {
+        res.json(usage.snapshot());
     });
 
     router.post('/execute', async (req, res) => {
@@ -83,6 +90,9 @@ export function createCliController(
         res.flushHeaders();
 
         const maxTableRows = executor.maxTableRows ?? DEFAULT_MAX_TABLE_ROWS;
+        const started = Date.now();
+        let known = false;
+        let failed = true;
         const emit = (output: CliStructuredOutput) => {
             const limited = CliOutputLimits.apply(output, maxTableRows);
             res.write(`event: output\ndata: ${JSON.stringify(limited)}\n\n`);
@@ -94,6 +104,7 @@ export function createCliController(
                 command.chainCommands?.length ? command.chainCommands : undefined,
             );
 
+            known = !!registry.findProcessor(command.command);
             if (!processor) {
                 res.write(`event: error\ndata: ${JSON.stringify({ message: `Unknown command: ${command.command}` })}\n\n`);
                 res.end();
@@ -122,6 +133,7 @@ export function createCliController(
                 exitCode = 0;
             }
 
+            failed = exitCode !== 0;
             res.write(`event: done\ndata: ${JSON.stringify({ exitCode })}\n\n`);
         } catch (err: any) {
             if (signal.aborted) {
@@ -130,6 +142,8 @@ export function createCliController(
                 logger.error('Stream execution failed: %s - %s', command.command, err.message ?? err);
                 res.write(`event: error\ndata: ${JSON.stringify({ message: `Error executing command: ${err.message ?? err}` })}\n\n`);
             }
+        } finally {
+            usage.record(command?.command, known, Date.now() - started, failed);
         }
 
         res.end();

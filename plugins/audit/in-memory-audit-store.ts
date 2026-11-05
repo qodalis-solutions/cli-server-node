@@ -65,6 +65,16 @@ export class InMemoryAuditStore implements ICliAuditStore {
             result = result.filter((e) => e.actor?.toLowerCase() === actor);
         }
 
+        if (options?.from) {
+            const from = options.from.getTime();
+            result = result.filter((e) => e.timestamp >= from);
+        }
+
+        if (options?.to) {
+            const to = options.to.getTime();
+            result = result.filter((e) => e.timestamp < to);
+        }
+
         if (options?.offset !== undefined && options.offset > 0) {
             result = result.slice(options.offset);
         }

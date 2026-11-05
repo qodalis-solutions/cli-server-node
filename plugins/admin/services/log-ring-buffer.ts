@@ -12,16 +12,60 @@ export interface LogEntry {
 
 /** Filtering and pagination parameters for querying the log buffer. */
 export interface LogQueryParams {
+    /** One level or several, comma-separated (`WARN,ERROR`), case-insensitive. */
     level?: string;
+    /** Literal text, case-insensitive, in the message or the source. */
     search?: string;
+    /** The source (service) that wrote the entry, case-insensitive. */
+    service?: string;
+    /** Only entries at or after this time (inclusive). */
+    from?: Date;
+    /** Only entries before this time (exclusive). */
+    to?: Date;
     limit?: number;
     offset?: number;
+}
+
+/** The levels a histogram counts. */
+export const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
+
+/** Counts per level. */
+export type LogLevelCounts = Record<(typeof LOG_LEVELS)[number], number>;
+
+/** Parameters of {@link LogRingBuffer.histogram}: the filters of a query and the range. */
+export interface LogHistogramParams extends Pick<LogQueryParams, 'level' | 'search' | 'service'> {
+    /** Start of the range (inclusive). */
+    from: Date;
+    /** End of the range (exclusive). */
+    to: Date;
+    /** Number of columns (already clamped). */
+    buckets: number;
+}
+
+/** `GET /api/v1/qcli/logs/histogram` */
+export interface LogHistogramResult {
+    from: string;
+    to: string;
+    bucketMs: number;
+    buckets: ({ start: string } & LogLevelCounts)[];
+    totals: LogLevelCounts;
+    store: 'memory';
 }
 
 /** Result of a log buffer query, including matched entries and total count. */
 export interface LogQueryResult {
     entries: LogEntry[];
     total: number;
+    /** Where the entries come from: this buffer, in memory. */
+    store: 'memory';
+    /** Whether the entries survive a restart (never for the buffer). */
+    persistent: false;
+    limit: number;
+    offset: number;
+    /** Whether entries matching the filters follow this page. */
+    hasMore: boolean;
+    /** The distinct sources in the buffer (what `service` filters by), sorted. */
+    services: string[];
 }
 
 /**
@@ -33,6 +77,23 @@ const SECRET_PATTERN = /\b((?:password|passwd|secret|token)\b(?:\s+for\s+user\s+
 /** Replaces values that look like secrets (see {@link SECRET_PATTERN}) with `[REDACTED]`. */
 export function redactSecrets(message: string): string {
     return message.replace(SECRET_PATTERN, '$1[REDACTED]');
+}
+
+/** The test an entry must pass for the level, search and service filters. */
+export function logEntryFilter(params: Pick<LogQueryParams, 'level' | 'search' | 'service'>): (entry: LogEntry) => boolean {
+    const levels = params.level
+        ? new Set(params.level.split(',').map((l) => l.trim().toUpperCase()).filter(Boolean))
+        : undefined;
+    const search = params.search ? params.search.toLowerCase() : undefined;
+    const service = params.service ? params.service.trim().toLowerCase() : undefined;
+    return (entry) => {
+        if (levels && levels.size > 0 && !levels.has(entry.level)) return false;
+        if (search && !entry.message.toLowerCase().includes(search) && !(entry.source ?? '').toLowerCase().includes(search)) {
+            return false;
+        }
+        if (service && (entry.source ?? '').toLowerCase() !== service) return false;
+        return true;
+    };
 }
 
 export class LogRingBuffer {
@@ -81,24 +142,63 @@ export class LogRingBuffer {
      * Query the buffer with optional filtering and pagination.
      */
     query(params: LogQueryParams = {}): LogQueryResult {
-        const { level, search, limit = 100, offset = 0 } = params;
+        const limit = Math.max(params.limit ?? 100, 0);
+        const offset = Math.max(params.offset ?? 0, 0);
+        const all = this.getAll();
+        const matches = logEntryFilter(params);
+        const from = params.from?.getTime();
+        const to = params.to?.getTime();
 
-        let entries = this.getAll();
-
-        if (level) {
-            const upperLevel = level.toUpperCase();
-            entries = entries.filter((e) => e.level === upperLevel);
-        }
-
-        if (search) {
-            const lower = search.toLowerCase();
-            entries = entries.filter((e) => e.message.toLowerCase().includes(lower));
-        }
+        const entries = all.filter((e) => {
+            if (from !== undefined || to !== undefined) {
+                const time = new Date(e.timestamp).getTime();
+                if (from !== undefined && !(time >= from)) return false;
+                if (to !== undefined && !(time < to)) return false;
+            }
+            return matches(e);
+        });
 
         const total = entries.length;
         const paged = entries.slice(offset, offset + limit);
+        const services = Array.from(new Set(all.map((e) => e.source).filter((s): s is string => !!s))).sort();
 
-        return { entries: paged, total };
+        return {
+            entries: paged,
+            total,
+            store: 'memory',
+            persistent: false,
+            limit,
+            offset,
+            hasMore: offset + paged.length < total,
+            services,
+        };
+    }
+
+    /**
+     * Counts the entries matching the filters per level in each column of
+     * `[from, to)`: column i covers `[from + i*bucketMs, from + (i+1)*bucketMs)`.
+     */
+    histogram(params: LogHistogramParams): LogHistogramResult {
+        const from = params.from.getTime();
+        const to = params.to.getTime();
+        const bucketMs = Math.max(1, Math.floor((to - from) / params.buckets));
+        const empty = (): LogLevelCounts => ({ DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0 });
+        const buckets = Array.from({ length: params.buckets }, (_, i) => ({
+            start: new Date(from + i * bucketMs).toISOString(),
+            ...empty(),
+        }));
+        const totals = empty();
+        const matches = logEntryFilter(params);
+        for (const entry of this.getAll()) {
+            const time = new Date(entry.timestamp).getTime();
+            if (!(time >= from && time < to) || !matches(entry)) continue;
+            const level = entry.level as keyof LogLevelCounts;
+            if (!(level in totals)) continue;
+            const index = Math.min(params.buckets - 1, Math.floor((time - from) / bucketMs));
+            buckets[index][level]++;
+            totals[level]++;
+        }
+        return { from: params.from.toISOString(), to: params.to.toISOString(), bucketMs, buckets, totals, store: 'memory' };
     }
 
     /**

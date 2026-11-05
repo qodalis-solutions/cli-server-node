@@ -1,5 +1,22 @@
 export { CliAdminBuilder, CliAdminBuildDeps, CliAdminPluginResult, IExecutorLike } from './cli-admin-builder';
-export { LogRingBuffer, LogEntry, LogQueryParams, LogQueryResult } from './services/log-ring-buffer';
+export {
+    LogRingBuffer,
+    LogEntry,
+    LogQueryParams,
+    LogQueryResult,
+    LogHistogramParams,
+    LogHistogramResult,
+    LogLevelCounts,
+    LOG_LEVELS,
+    logEntryFilter,
+} from './services/log-ring-buffer';
+export {
+    StatusSampler,
+    StatusSample,
+    StatusSampleSource,
+    STATUS_SAMPLE_INTERVAL_SECONDS,
+    STATUS_HISTORY_CAPACITY,
+} from './services/status-sampler';
 export { ModuleRegistry, ModuleInfo, IRegistryLike, IBuilderLike } from './services/module-registry';
 export { AdminConfig, AdminCredentials, ConfigSection } from './services/admin-config';
 export { signToken, verifyToken, JwtPayload } from './auth/jwt-service';

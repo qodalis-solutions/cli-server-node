@@ -63,6 +63,27 @@ class BadRequest extends Error {
     readonly status = 400;
 }
 
+/**
+ * Parses an audit query time: epoch milliseconds or ISO 8601 (UTC when it names no
+ * offset). Undefined when absent; a bad value answers 400.
+ */
+export function parseAuditTime(value: unknown, name: string): Date | undefined {
+    if (value === undefined || value === '') return undefined;
+    if (typeof value !== 'string') throw new BadRequest(`${name} must be an ISO 8601 date or epoch milliseconds`);
+    const text = value.trim();
+    let date: Date;
+    if (/^-?\d+$/.test(text)) {
+        date = new Date(Number(text));
+    } else if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+        // `2026-11-05T10:00` has no offset: UTC, not the server's local time
+        date = new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(text) ? `${text}Z` : text);
+    } else {
+        date = new Date(NaN);
+    }
+    if (Number.isNaN(date.getTime())) throw new BadRequest(`${name} must be an ISO 8601 date or epoch milliseconds`);
+    return date;
+}
+
 /** Answers every error as `{ error }`: 4xx with its message, anything else a generic 500. */
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     if (res.headersSent) return;
@@ -77,10 +98,12 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 
 /**
  * The audit log API, mounted at `/api/v1/qcli/audit`:
- * - `GET /?event=&username=&actor=&limit=&offset=`: entries newest first; the filters are
- *   exact and case-insensitive (`username` is the user an entry is about, `actor` who did
- *   it); `limit` defaults to 100 and is capped at 1000; a negative or non-integer `limit`
- *   or `offset` answers 400 `{ error }`. Requires `audit:read` on a protected server.
+ * - `GET /?event=&username=&actor=&from=&to=&limit=&offset=`: entries newest first; the
+ *   filters are exact and case-insensitive (`username` is the user an entry is about,
+ *   `actor` who did it); `from`/`to` (ISO 8601, UTC without an offset, or epoch
+ *   milliseconds) keep the entries with `from <= timestamp < to`; `limit` defaults to 100
+ *   and is capped at 1000; a negative or non-integer `limit` or `offset`, or a bad time,
+ *   answers 400 `{ error }`. Requires `audit:read` on a protected server.
  * - `DELETE /`: clears the log, then records `audit_cleared` with the caller as actor;
  *   204. Requires `audit:clear` on a protected server.
  *
@@ -104,6 +127,8 @@ export function createAuditController(store: ICliAuditStore, getGuard: () => Cli
             }
             return parseInt(value, 10);
         };
+        const from = parseAuditTime(req.query.from, 'from');
+        const to = parseAuditTime(req.query.to, 'to');
         const limit = Math.min(count('limit') ?? DEFAULT_AUDIT_LIMIT, MAX_AUDIT_LIMIT);
         const offset = count('offset');
         if (limit === 0) {
@@ -114,6 +139,8 @@ export function createAuditController(store: ICliAuditStore, getGuard: () => Cli
             event: text(req.query.event),
             username: text(req.query.username),
             actor: text(req.query.actor),
+            from,
+            to,
             limit,
             offset,
         }));
