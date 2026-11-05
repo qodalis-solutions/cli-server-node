@@ -13,6 +13,7 @@ import { LogRingBuffer } from './services/log-ring-buffer';
 import { AdminConfig } from './services/admin-config';
 import { resolveDashboardDir } from './services/dashboard-dir';
 import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
+import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './services/admin-branding';
 import { join } from 'path';
 import * as crypto from 'crypto';
 
@@ -77,6 +78,7 @@ export class CliAdminBuilder {
     private _enabledFeatures: string[] = [];
     private _authProvider?: AdminAuthProvider;
     private _theme: AdminThemeDocument = validateAdminTheme(undefined);
+    private _branding?: AdminBrandingDocument;
 
     /**
      * Set the dashboard's color scheme: the mode (`dark`, `light` or `system`)
@@ -95,6 +97,22 @@ export class CliAdminBuilder {
      */
     setTheme(theme: AdminTheme): CliAdminBuilder {
         this._theme = validateAdminTheme(theme);
+        return this;
+    }
+
+    /**
+     * Ship the dashboard under your own name and icon (browser tab, sidebar,
+     * sign-in page) and name its terminal. Unset values keep the Qodalis
+     * defaults (Qodalis Cli Admin, the Qodalis Solutions logo, Web CLI); a bad
+     * value throws here.
+     *
+     * @example
+     * ```ts
+     * builder.setBranding({ name: 'RateBell', iconUrl: '/favicon.svg', cliName: 'RateBell CLI' });
+     * ```
+     */
+    setBranding(branding: AdminBranding): CliAdminBuilder {
+        this._branding = validateAdminBranding(branding);
         return this;
     }
 
@@ -242,9 +260,9 @@ export class CliAdminBuilder {
         const dashboardRouter = Router();
         const dashboardDistDir = resolveDashboardDir(this._dashboardDir);
 
-        // Color scheme, read by the dashboard before its first render (public,
-        // like the dashboard itself: the login page uses it too)
-        const themeJson = JSON.stringify(this._theme);
+        // Color scheme and branding, read by the dashboard before its first render
+        // (public, like the dashboard itself: the login page uses it too)
+        const themeJson = JSON.stringify(this._branding ? { ...this._theme, branding: this._branding } : this._theme);
         dashboardRouter.get('/theme.json', (_req, res) => {
             res.set('Cache-Control', 'no-cache');
             res.type('application/json').send(themeJson);
