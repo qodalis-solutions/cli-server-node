@@ -3,6 +3,7 @@ import { CliServerResponse } from '../models';
 import { ICliCommandRegistry } from './cli-command-registry';
 import { createLogger } from '../utils/logger';
 import { CliOutputLimits, DEFAULT_MAX_TABLE_ROWS } from './cli-output-limits';
+import { CliCommandUsageStats } from './cli-command-usage-stats';
 
 const logger = createLogger('CommandExecutor');
 
@@ -33,6 +34,12 @@ export interface ICliCommandExecutorService {
      * streamed tables with it. Defaults to {@link DEFAULT_MAX_TABLE_ROWS} when not set.
      */
     readonly maxTableRows?: number;
+
+    /**
+     * Command usage counters (`GET /api/v1/qcli/commands/stats`): `executeAsync` records
+     * every execution; `/execute/stream` records its own.
+     */
+    readonly usage?: CliCommandUsageStats;
 }
 
 /** Options for {@link CliCommandExecutorService}. */
@@ -52,6 +59,9 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
     /** The most rows an unpaged table may return (0 = no limit). */
     readonly maxTableRows: number;
 
+    /** Usage counters of the commands run through this executor, since it was created. */
+    readonly usage = new CliCommandUsageStats();
+
     constructor(
         private readonly _registry: ICliCommandRegistry,
         options: CliCommandExecutorOptions = {},
@@ -68,6 +78,19 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
     }
 
     async executeAsync(command: CliProcessCommand, signal?: AbortSignal): Promise<CliServerResponse> {
+        const started = Date.now();
+        let response: CliServerResponse | undefined;
+        try {
+            response = await this.run(command, signal);
+            return response;
+        } finally {
+            const known = typeof command?.command === 'string' && !!this._registry.findProcessor(command.command);
+            this.usage.record(command?.command, known, Date.now() - started, !response || response.exitCode !== 0);
+        }
+    }
+
+    /** Resolves the command's processor and runs it. */
+    private async run(command: CliProcessCommand, signal?: AbortSignal): Promise<CliServerResponse> {
         logger.debug('Executing command: %s', command.command);
         const processor = this._registry.findProcessor(
             command.command,

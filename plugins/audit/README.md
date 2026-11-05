@@ -48,7 +48,7 @@ mountPlugin(usersPlugin); // serves the audit API at /api/v1/qcli/audit and list
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| GET | `/api/v1/qcli/audit` | `audit:read` | Entries, newest first. `?event=&username=&actor=` filter exactly and case-insensitively (`username`: the user an entry is about, `actor`: who did it); `?limit=` (default 100, at most 1000) and `?offset=` page. A negative or non-integer `limit`/`offset` answers `400 { "error" }` |
+| GET | `/api/v1/qcli/audit` | `audit:read` | Entries, newest first. `?event=&username=&actor=` filter exactly and case-insensitively (`username`: the user an entry is about, `actor`: who did it); `?from=&to=` (ISO 8601 or epoch milliseconds) keep the entries with `from <= timestamp < to`; `?limit=` (default 100, at most 1000) and `?offset=` page. A negative or non-integer `limit`/`offset`, or a bad time, answers `400 { "error" }` |
 | DELETE | `/api/v1/qcli/audit` | `audit:clear` | Clears the log, then records `audit_cleared` with the caller as actor; 204 |
 
 On a protected server (the users plugin's `protectServer`) the server's route policy requires the permissions above; the users plugin also checks them on the routes it serves.
@@ -62,7 +62,8 @@ import { ICliAuditStore, AuditEntry, AuditQueryOptions } from '@qodalis/cli-serv
 
 class MyAuditStore implements ICliAuditStore {
     async log(entry: AuditEntry): Promise<void> { /* ... */ }
-    async getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]> { /* newest first */ return []; }
+    // newest first; honour every option, including from (inclusive) and to (exclusive)
+    async getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]> { return []; }
     async clear(): Promise<void> { /* ... */ }
     async prune(before: Date): Promise<number> { /* optional */ return 0; }
 }

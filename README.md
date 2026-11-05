@@ -217,6 +217,7 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | GET | `/api/v1/qcli/version` | Server version |
 | GET | `/api/v1/qcli/capabilities` | OS, shell availability (`shell`, `shellAuth`), streaming, version |
 | GET | `/api/v1/qcli/commands` | Registered processors |
+| GET | `/api/v1/qcli/commands/stats` | Command usage since start: executions, failures, average duration, last run and failure per root command (`known: false` for unknown commands), most used first |
 | POST | `/api/v1/qcli/execute` | Execute a command |
 | POST | `/api/v1/qcli/execute/stream` | Execute with Server-Sent Events output |
 | GET | `/api/qcli/fs/ls`, `cat`, `stat`, `download` | File storage (when a provider is configured) |
@@ -298,7 +299,7 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth
 
 | Surface | Permission |
 |---|---|
-| `GET /commands` | authenticated |
+| `GET /commands`, `/commands/stats` | authenticated |
 | `POST /execute`, `/execute/stream` | `commands:execute` plus the processor's `requiredPermissions` |
 | `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own) |
 | fs `ls` / `cat` / `stat` / `download` | `files:read` |

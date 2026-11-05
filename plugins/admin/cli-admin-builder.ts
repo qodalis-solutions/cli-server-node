@@ -10,6 +10,7 @@ import { createLogsController } from './controllers/logs-controller';
 import { createWsClientsController, WsClientsDeps } from './controllers/ws-clients-controller';
 import { ModuleRegistry, IRegistryLike, IBuilderLike } from './services/module-registry';
 import { LogRingBuffer } from './services/log-ring-buffer';
+import { StatusSampler } from './services/status-sampler';
 import { AdminConfig } from './services/admin-config';
 import { resolveDashboardDir } from './services/dashboard-dir';
 import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
@@ -56,6 +57,8 @@ export interface CliAdminPluginResult {
     logBuffer: LogRingBuffer;
     /** Routes that stay public when the users plugin protects the server. */
     publicRoutes: string[];
+    /** Samples the status every 15 seconds for `GET /status/history` (stopped by `dispose`). */
+    statusSampler: StatusSampler;
     /** Clean up timers and restore console. Call when shutting down. */
     dispose: () => void;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
@@ -253,7 +256,10 @@ export class CliAdminBuilder {
                 return features;
             },
         };
-        router.use('/status', authMiddleware, createStatusController(statusDeps));
+        // Status history: sampled every 15 seconds (unref'd timer, stopped by dispose)
+        const statusSampler = new StatusSampler(statusDeps);
+        statusSampler.start();
+        router.use('/status', authMiddleware, createStatusController(statusDeps, statusSampler));
 
         // Plugins
         router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry, () => builder.installedPlugins ?? []));
@@ -296,6 +302,7 @@ export class CliAdminBuilder {
 
         const dispose = () => {
             clearInterval(authResult.cleanupInterval);
+            statusSampler.stop();
             logBuffer.restoreConsole();
         };
 
@@ -306,6 +313,7 @@ export class CliAdminBuilder {
             dashboardRouter,
             authMiddleware,
             logBuffer,
+            statusSampler,
             publicRoutes: ['POST /api/v1/qcli/auth/login', 'GET /api/v1/qcli/auth/mode'],
             dispose,
             installedPlugin: adminInstalledPlugin,
