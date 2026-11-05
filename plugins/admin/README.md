@@ -75,7 +75,10 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/status` | Server uptime, memory, platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the audit plugin, which the users plugin adds) |
+| GET | `/status` | Server uptime, memory, CPU (latest sample), platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the audit plugin, which the users plugin adds) |
+| GET | `/status/history` | Status samples of the last `?minutes=` (default 60, 1-1440), oldest first: `{ intervalSeconds: 15, samples: [{ timestamp, memoryMb, cpuPercent, activeWsConnections, activeShellSessions }] }` |
+
+The plugin samples the status every 15 seconds (the first at build) and keeps 24 hours in memory (lost on restart). `cpuPercent` is the process CPU time over the last interval as a percentage of one core (null for the first sample). The timer never keeps the process alive; `dispose()` stops it.
 
 ### Plugins
 
@@ -100,7 +103,8 @@ When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/logs` | Query log entries with optional `level`, `search`, `limit`, `offset` params |
+| GET | `/logs` | Query log entries with optional `level` (one or several, comma-separated), `search` (message or source), `service` (source), `limit`, `offset` params |
+| GET | `/logs/histogram` | Entries per level (`DEBUG`, `INFO`, `WARN`, `ERROR`) in equal columns of `?from=&to=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), with the filters of `/logs` → `{ from, to, bucketMs, buckets: [{ start, DEBUG, INFO, WARN, ERROR }], totals, store: "memory" }` |
 
 The log buffer captures `console.log`/`warn`/`error` output. As a safety net, a value written after a `password`, `passwd`, `secret` or `token` label (`password: x`, `token=x`, `password for user "root": x`) is replaced with `[REDACTED]` before the entry is stored or broadcast.
 

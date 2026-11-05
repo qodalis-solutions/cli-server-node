@@ -71,6 +71,7 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 |--------|----------|-------------|
 | GET | `/` | List all jobs |
 | GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
+| GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
 | GET | `/:id` | Get job details |
 | POST | `/:id/trigger` | Trigger immediate execution |
 | POST | `/:id/pause` | Pause scheduled execution |
