@@ -217,6 +217,7 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | GET | `/api/v1/qcli/version` | Server version |
 | GET | `/api/v1/qcli/capabilities` | OS, shell availability (`shell`, `shellAuth`), streaming, version |
 | GET | `/api/v1/qcli/commands` | Registered processors |
+| GET | `/api/v1/qcli/commands/stats` | Command usage since start: executions, failures, average duration, last run and failure per root command (`known: false` for unknown commands), most used first |
 | POST | `/api/v1/qcli/execute` | Execute a command |
 | POST | `/api/v1/qcli/execute/stream` | Execute with Server-Sent Events output |
 | GET | `/api/qcli/fs/ls`, `cat`, `stat`, `download` | File storage (when a provider is configured) |
@@ -298,7 +299,7 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth
 
 | Surface | Permission |
 |---|---|
-| `GET /commands` | authenticated |
+| `GET /commands`, `/commands/stats` | authenticated |
 | `POST /execute`, `/execute/stream` | `commands:execute` plus the processor's `requiredPermissions` |
 | `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own) |
 | fs `ls` / `cat` / `stat` / `download` | `files:read` |
@@ -490,7 +491,7 @@ The image runs the standalone server and accepts the same environment variables.
 
 ## Versioning
 
-Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.18` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
+Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.19` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
 
 ## Development
 

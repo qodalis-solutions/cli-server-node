@@ -10,4 +10,8 @@ export interface AuditQueryOptions {
     username?: string;
     /** The user who performed the actions. */
     actor?: string;
+    /** Only entries recorded at or after this time (inclusive). */
+    from?: Date;
+    /** Only entries recorded before this time (exclusive). */
+    to?: Date;
 }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { CliJobScheduler, JobError } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
+import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli-jobs-stats';
 
 /**
  * Creates the jobs REST controller router.
@@ -8,6 +9,7 @@ import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodal
  * Routes (relative to mount point):
  * - GET    /            - list all jobs
  * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
+ * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=)
  * - GET    /:id         - single job details
  * - POST   /:id/trigger - trigger immediate execution
  * - POST   /:id/pause   - pause scheduled execution
@@ -35,19 +37,7 @@ export function createCliJobsController(
 
     // Before /:id, which would take "executions" for a job id
     router.get('/executions', async (req, res) => {
-        let jobIds: string[] | undefined = queryList(req.query.job).flatMap((j) =>
-            j.split(',').map((id) => id.trim()).filter(Boolean),
-        );
-        const group = typeof req.query.group === 'string' && req.query.group.trim() ? req.query.group.trim() : undefined;
-        if (group) {
-            const inGroup = scheduler
-                .getAll()
-                .filter((j) => j.group !== undefined && j.group.toLowerCase() === group.toLowerCase())
-                .map((j) => j.id);
-            jobIds = jobIds.length > 0 ? jobIds.filter((id) => inGroup.includes(id)) : inGroup;
-        } else if (jobIds.length === 0) {
-            jobIds = undefined;
-        }
+        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group);
 
         let since: Date | undefined;
         if (typeof req.query.since === 'string' && req.query.since) {
@@ -67,6 +57,26 @@ export function createCliJobsController(
                 ? { items: [], total: 0 }
                 : await scheduler.queryExecutions({ jobIds, status, since, limit, offset });
             res.json({ items: result.items.map(toListItem), total: result.total, limit, offset });
+        } catch (err) {
+            handleError(res, err);
+        }
+    });
+
+    // Before /:id, which would take "stats" for a job id
+    router.get('/stats', async (req, res) => {
+        let range: StatsRange;
+        try {
+            range = resolveStatsRange(req.query.since, req.query.until, req.query.buckets);
+        } catch (err) {
+            return res.status(400).json({ error: (err as Error).message, code: 'INVALID_QUERY' });
+        }
+        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group);
+        try {
+            // A group (or a job filter) matching no job gives empty stats, not every job
+            const runs = jobIds && jobIds.length === 0
+                ? []
+                : await collectRuns((query) => scheduler.queryExecutions(query), jobIds, range);
+            res.json(buildJobStats(runs, range));
         } catch (err) {
             handleError(res, err);
         }
@@ -190,6 +200,23 @@ export function createCliJobsController(
 function toListItem(exec: JobExecution): Omit<JobExecution, 'logs'> & { logCount: number } {
     const { logs, ...rest } = exec;
     return { ...rest, properties: exec.properties ?? {}, logCount: logs?.length ?? 0 };
+}
+
+/**
+ * The jobs named by `job` (repeatable or comma-separated) within `group` (case-insensitive):
+ * undefined for every job, an empty list when the filters match no job.
+ */
+function resolveJobIds(scheduler: CliJobScheduler, job: unknown, groupValue: unknown): string[] | undefined {
+    const jobIds = queryList(job).flatMap((j) => j.split(',').map((id) => id.trim()).filter(Boolean));
+    const group = typeof groupValue === 'string' && groupValue.trim() ? groupValue.trim() : undefined;
+    if (group) {
+        const inGroup = scheduler
+            .getAll()
+            .filter((j) => j.group !== undefined && j.group.toLowerCase() === group.toLowerCase())
+            .map((j) => j.id);
+        return jobIds.length > 0 ? jobIds.filter((id) => inGroup.includes(id)) : inGroup;
+    }
+    return jobIds.length === 0 ? undefined : jobIds;
 }
 
 /** A query parameter given once, repeated or not at all, as a list of strings. */
