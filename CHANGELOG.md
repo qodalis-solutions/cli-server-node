@@ -3,6 +3,28 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## 1.0.0-beta.19
+
+Read-only endpoints for the admin dashboard's charts, the same on the .NET and Python servers. Older dashboards ignore
+them.
+
+- **Jobs:** `GET /api/v1/qcli/jobs/stats?since=&until=&buckets=&job=&group=`: runs per outcome in equal columns of the
+  range (default the last 24 hours, 24 columns, at most 200), totals and per-job statistics (success rate, average,
+  p95 and longest duration, last failure, the 12 latest runs). It reads every run in the range page by page through
+  the storage's execution query, so it works with every storage provider. `jobs:read` on a protected server.
+- **Admin:** `GET /api/v1/qcli/logs/histogram?from=&to=&buckets=` counts the log buffer per level in each column,
+  with the filters of `GET /logs`. `GET /logs` (and the histogram) now take several levels (`level=WARN,ERROR`), a
+  `service` (the entry's source) and search the source as well as the message.
+- **Admin:** `GET /api/v1/qcli/status/history?minutes=` (default 60, at most 1440): the plugin samples memory, CPU,
+  WebSocket connections and shell sessions every 15 seconds and keeps 24 hours in memory (unref'd timer, stopped by
+  `dispose()`). `GET /status` reports the latest CPU sample as `cpuUsagePercent`.
+- **Core:** the executor counts every command run through `/execute`, `/execute/stream` and the MCP tools
+  (executions, failures, duration, last run and failure, per root command). `GET /api/v1/qcli/commands/stats` returns
+  them, most used first; same auth as `GET /commands`.
+- **Audit:** `GET /api/v1/qcli/audit` takes `from` and `to` (ISO 8601 or epoch milliseconds; `from <= timestamp < to`),
+  and `AuditQueryOptions` gains `from`/`to`, which `InMemoryAuditStore` applies. A store of your own should apply them
+  too.
+
 ## 1.0.0-beta.18
 
 Every package moves to the version of the .NET server's release, which adds a Seq logs plugin
