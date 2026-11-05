@@ -476,6 +476,59 @@ describe('CliJobScheduler ids and start', () => {
         expect(() => scheduler.register(new DummyJob(), { id: ' ' })).toThrow(/empty/);
     });
 
+    it('ids are URL-safe', () => {
+        scheduler.register(new DummyJob(), { name: 'reports/daily' });
+
+        expect([...scheduler.jobs.keys()]).toEqual(['reports-daily']);
+        expect(() => scheduler.register(new DummyJob(), { id: 'a/b' })).toThrow(/may not contain/);
+    });
+
+    it('a job the code disables stays stopped whatever was saved', async () => {
+        const lastRunAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+        await storage.saveJobState('nightly', { status: 'active', lastRunAt, updatedAt: '' });
+        await storage.saveJobState('weekly', { status: 'stopped', updatedAt: '' });
+        const nightly = new DummyJob();
+        scheduler.register(nightly, { name: 'nightly', interval: '1h', enabled: false });
+        scheduler.register(new DummyJob(), { name: 'weekly', interval: '1h' });
+
+        await scheduler.start();
+        await wait(100);
+
+        expect(scheduler.jobs.get('nightly')!.status).toBe('stopped');
+        expect(scheduler.jobs.get('nightly')!.lastRunAt).toBe(lastRunAt);
+        expect(nightly.callCount).toBe(0);
+        // A stop made at run time is kept
+        expect(scheduler.jobs.get('weekly')!.status).toBe('stopped');
+    });
+
+    it('a run whose properties cannot be saved is saved without them', async () => {
+        class RefusingStore extends InMemoryJobStorageProvider {
+            override async saveExecution(execution: Parameters<InMemoryJobStorageProvider['saveExecution']>[0]): Promise<void> {
+                if (execution.properties && Object.keys(execution.properties).length > 0) throw new Error('not serializable');
+                return super.saveExecution(execution);
+            }
+        }
+        const refusing = new RefusingStore();
+        const s = new CliJobScheduler(refusing);
+        const id = s.register(
+            { executeAsync: async (ctx) => { ctx.properties.items = 3; } },
+            { name: 'props' },
+        );
+        await s.start();
+        try {
+            await s.triggerAsync(id);
+            await wait(100);
+
+            const { items } = await refusing.getExecutions(id);
+            expect(items[0].status).toBe('completed');
+            expect(items[0].properties).toEqual({});
+            expect(items[0].logs.some((l) => l.level === 'error' && l.message.includes('properties'))).toBe(true);
+            expect(s.jobs.get(id)!.currentExecutionId).toBeUndefined();
+        } finally {
+            await s.stop();
+        }
+    });
+
     it('saved state is found again after a restart', async () => {
         await storage.saveJobState('nightly', { status: 'paused', updatedAt: new Date().toISOString() });
         scheduler.register(new DummyJob(), { name: 'nightly', interval: '1h' });

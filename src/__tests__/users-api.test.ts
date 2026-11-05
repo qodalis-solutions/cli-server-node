@@ -932,6 +932,15 @@ describe('Audit query', () => {
         expect((await request(s.app).get(`${BASE}/audit?offset=x`).set(auth(rootToken))).status).toBe(400);
     });
 
+    it('returns the newest 100 entries without a limit, and never more than the maximum', async () => {
+        for (let i = 0; i < 105; i++) {
+            await s.plugin.auditStore.log({ id: `n${i}`, timestamp: i, event: 'note', username: `u${i}` });
+        }
+
+        expect((await request(s.app).get(`${BASE}/audit`).set(auth(rootToken))).body).toHaveLength(100);
+        expect((await request(s.app).get(`${BASE}/audit?limit=5000`).set(auth(rootToken))).body.length).toBeGreaterThan(100);
+    });
+
     it('group events name the group as their target', async () => {
         await createGroup(s.app, rootToken, { name: 'ops' });
         await createUser(s.app, rootToken, { name: 'erin', email: 'erin@x.com' });

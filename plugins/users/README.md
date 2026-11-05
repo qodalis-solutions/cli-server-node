@@ -111,7 +111,7 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | `GET /tokens` | authenticated | Own API tokens; `?all=true` (requires `tokens:read`) lists every user's |
 | `POST /tokens` | authenticated, **session only** | `{ name, expiresInDays?, permissions? }` → `201 { token, apiToken }` (see [API tokens](#api-tokens)) |
 | `DELETE /tokens/:id` | owner or `tokens:revoke` | 204; unknown or someone else's token without `tokens:revoke` → 404 |
-| `GET /audit` | `audit:read` | `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive) |
+| `GET /audit` | `audit:read` | `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive); without a `limit` the newest 100, at most 1000 |
 | `DELETE /audit` | `audit:clear` | 204 |
 
 ### Protections and cascades
