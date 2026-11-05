@@ -18,7 +18,8 @@ import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-inf
 import { join } from 'path';
 import * as crypto from 'crypto';
 
-const USERS_PLUGIN_ID = '@qodalis/cli-server-plugin-users';
+/** The audit plugin's package id (the admin plugin does not depend on it). */
+const AUDIT_PLUGIN_ID = '@qodalis/cli-server-plugin-audit';
 
 /** Executor-like interface — the admin plugin only needs to register filters. */
 export interface IExecutorLike {
@@ -244,8 +245,8 @@ export class CliAdminBuilder {
                 if (hasJobs && !features.includes('jobs')) {
                     features.push('jobs');
                 }
-                // The users plugin keeps the audit log (GET /api/v1/qcli/audit)
-                const hasAudit = (builder.installedPlugins ?? []).some((p) => p.id === USERS_PLUGIN_ID);
+                // The audit plugin serves the audit log (GET /api/v1/qcli/audit); the users plugin adds it
+                const hasAudit = (builder.installedPlugins ?? []).some((p) => p.id === AUDIT_PLUGIN_ID);
                 if (hasAudit && !features.includes('audit')) {
                     features.push('audit');
                 }

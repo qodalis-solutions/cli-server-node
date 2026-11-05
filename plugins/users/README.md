@@ -1,6 +1,6 @@
 # @qodalis/cli-server-plugin-users
 
-User management plugin for [Qodalis CLI Server (Node.js)](https://github.com/qodalis-solutions/cli-server-node). Adds REST endpoints for authentication, users, groups with permissions, sessions and an audit log, backed by swappable storage interfaces with in-memory defaults. It is the server side of the `@qodalis/cli-users` plugin's *server mode* and implements the same contract as the .NET and Python servers.
+User management plugin for [Qodalis CLI Server (Node.js)](https://github.com/qodalis-solutions/cli-server-node). Adds REST endpoints for authentication, users, groups with permissions, sessions and API tokens, backed by swappable storage interfaces with in-memory defaults. It is the server side of the `@qodalis/cli-users` plugin's *server mode* and implements the same contract as the .NET and Python servers. It records its events in the [audit plugin](../audit/README.md) (`@qodalis/cli-server-plugin-audit`), which it adds and serves at `/audit`.
 
 ## Install
 
@@ -38,7 +38,8 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | Method | Default | Description |
 |--------|---------|-------------|
 | `setDefaultAdminPassword(pw)` | `'root'` | Password of the seeded `root` user |
-| `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage |
+| `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage (`setAuditStore`: the store of the audit plugin it adds) |
+| `setAuditPlugin(plugin)` | built by the plugin | Record events in, and serve, the host's own audit plugin (`new CliAuditBuilder()...build()`) |
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
 | `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
 | `setReadOnlyUsers(bool = true)` | `false` | The host owns the users: user writes answer `501` (see [Read-only stores](#read-only-stores)) |
@@ -55,7 +56,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setCleanupInterval(ms)` | 5 min | Background sweep of expired sessions |
 | `setOptions(options)` | — | Same options as a plain object |
 
-The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `serverAuth` (the server/admin auth provider), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
+The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
 
 ## Server protection
 
@@ -68,6 +69,7 @@ The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the 
 | fs read / write | `files:read` / `files:write` |
 | data explorer | `data:query` |
 | jobs read / manage | `jobs:read` / `jobs:manage` |
+| audit log read / clear | `audit:read` / `audit:clear` |
 | events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` (an open shell is closed with 4401 when its session ends or loses `shell:execute`) |
 | admin dashboard (`setAuthProvider`) | `admin:access` |
 
@@ -111,8 +113,8 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | `GET /tokens` | authenticated | Own API tokens; `?all=true` (requires `tokens:read`) lists every user's |
 | `POST /tokens` | authenticated, **session only** | `{ name, expiresInDays?, permissions? }` → `201 { token, apiToken }` (see [API tokens](#api-tokens)) |
 | `DELETE /tokens/:id` | owner or `tokens:revoke` | 204; unknown or someone else's token without `tokens:revoke` → 404 |
-| `GET /audit` | `audit:read` | `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive); without a `limit` the newest 100, at most 1000 |
-| `DELETE /audit` | `audit:clear` | 204 |
+| `GET /audit` | `audit:read` | The audit plugin's API: `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive); without a `limit` the newest 100, at most 1000 |
+| `DELETE /audit` | `audit:clear` | 204; records `audit_cleared` with the caller |
 
 ### Protections and cascades
 
@@ -130,7 +132,9 @@ Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte salt, 
 
 In adapter/cookie mode, state-changing requests without a bearer header must come from an `Origin` in `allowedOrigins` or from the server's own origin (same-origin, e.g. the bundled admin dashboard) (CSRF), otherwise 403.
 
-### Audit events
+### Audit log
+
+The audit log is the [audit plugin](../audit/README.md)'s: its entries, store and API. The users plugin adds it (`usersPlugin.auditPlugin`), serves its API at `/audit` behind the users sign-in and lists it among the installed plugins, so hosts that only add the users plugin keep their audit log. `setAuditStore(store)` sets its store; a host that builds the audit plugin itself passes it with `setAuditPlugin(auditPlugin)` (mounting it too is fine: it is the same plugin). The contract (`AuditEntry`, `AuditQueryOptions`, `ICliAuditStore`, `pruneAudit`) is in `@qodalis/cli-server-abstractions`; this package still re-exports it, with `InMemoryAuditStore` and `CliAuditBuilder`.
 
 Entries carry `userId` / `actorId` when known. `login_failed` entries are capped separately (last 200).
 
@@ -163,7 +167,7 @@ claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header
 
 ## Custom storage
 
-Implement any of `ICliUserStore`, `ICliSessionStore`, `ICliCredentialStore`, `ICliAuditStore`, `ICliGroupStore` and pass it to the builder:
+Implement any of `ICliUserStore`, `ICliSessionStore`, `ICliCredentialStore`, `ICliAuditStore` (from `@qodalis/cli-server-abstractions`), `ICliGroupStore` and pass it to the builder:
 
 ```typescript
 const usersPlugin = new CliUsersBuilder()

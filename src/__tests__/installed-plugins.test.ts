@@ -1,6 +1,6 @@
 /**
  * Installed plugins list (`GET /api/v1/qcli/plugins/installed`) and the admin
- * status' `audit` feature (mirrors cli-server-dotnet 1.0.0-beta.15).
+ * status' `audit` feature (mirrors cli-server-dotnet 1.0.0-beta.15 and 1.0.0-beta.16).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import path from 'path';
@@ -20,6 +20,7 @@ import { InMemoryFileStorageProvider, JsonFileStorageProvider } from '../index';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 import { CliAdminBuilder, CliAdminPluginResult } from '../../plugins/admin';
+import { CliAuditBuilder } from '@qodalis/cli-server-plugin-audit';
 
 const V1 = '/api/v1/qcli';
 const ADMIN_USER = 'admin';
@@ -71,6 +72,7 @@ describe('installed plugins', () => {
             '@qodalis/cli-server-node',
             '@qodalis/cli-server-plugin-admin',
             '@qodalis/cli-server-plugin-users',
+            '@qodalis/cli-server-plugin-audit',
             '@qodalis/cli-server-plugin-jobs',
         ]);
         expect(res.body[0]).toMatchObject({ name: 'Core', version: version('.') });
@@ -79,6 +81,26 @@ describe('installed plugins', () => {
         expect(usersEntry.description).toContain('User management');
         expect(res.body.find((p: { name: string }) => p.name === 'Admin').version).toBe(version('plugins/admin'));
         expect(res.body.find((p: { name: string }) => p.name === 'Jobs').version).toBe(version('plugins/jobs'));
+        expect(res.body.find((p: { id: string }) => p.id === '@qodalis/cli-server-plugin-audit')).toMatchObject({
+            name: 'Audit',
+            version: version('plugins/audit'),
+        });
+    });
+
+    it('lists the audit plugin once when mounted alone, again, or with the users plugin that serves it', async () => {
+        const cli = createCliServer();
+        const admin = adminPlugin(cli);
+        const audit = new CliAuditBuilder().build();
+        const users = new CliUsersBuilder().setDefaultAdminPassword('rootpass1').setProtectServer(false).setAuditPlugin(audit).build();
+        track(cli, admin, users);
+        cli.mountPlugin(admin);
+        cli.mountPlugin(audit);
+        cli.mountPlugin(audit);
+        cli.mountPlugin(users);
+
+        const ids = cli.builder.installedPlugins.map((p) => p.id);
+        expect(ids.filter((id) => id === '@qodalis/cli-server-plugin-audit')).toHaveLength(1);
+        expect(ids.slice(1)).toEqual(['@qodalis/cli-server-plugin-admin', '@qodalis/cli-server-plugin-audit', '@qodalis/cli-server-plugin-users']);
     });
 
     it('requires the admin sign-in and is not shadowed by /plugins/:id', async () => {
@@ -145,7 +167,30 @@ describe('installed plugins', () => {
 });
 
 describe('admin status: audit feature', () => {
-    it('reports "audit" after filesystem and jobs when the users plugin is installed', async () => {
+    it('reports "audit" when the audit plugin is installed on its own', async () => {
+        const cli = createCliServer();
+        const admin = adminPlugin(cli);
+        track(cli, admin);
+        cli.mountPlugin(admin);
+        const status = async () =>
+            (await request(cli.app).get(`${V1}/status`).set('Authorization', `Bearer ${await adminToken(cli)}`)).body.enabledFeatures;
+
+        expect(await status()).not.toContain('audit');
+        cli.mountPlugin(new CliAuditBuilder().build());
+        expect(await status()).toContain('audit');
+    });
+
+    it('does not report "audit" for the users package alone (the audit plugin is what counts)', async () => {
+        const cli = createCliServer();
+        const admin = adminPlugin(cli);
+        track(cli, admin);
+        cli.mountPlugin(admin);
+        cli.builder.addInstalledPlugin({ id: '@qodalis/cli-server-plugin-users', name: 'Users' });
+        const res = await request(cli.app).get(`${V1}/status`).set('Authorization', `Bearer ${await adminToken(cli)}`);
+        expect(res.body.enabledFeatures).not.toContain('audit');
+    });
+
+    it('reports "audit" after filesystem and jobs when the users plugin (which adds the audit plugin) is mounted', async () => {
         const cli = createCliServer({ configure: (b) => b.setFileStorageProvider(new InMemoryFileStorageProvider()) });
         const admin = adminPlugin(cli);
         track(cli, admin);
@@ -157,9 +202,9 @@ describe('admin status: audit feature', () => {
         expect(await status()).toEqual(['filesystem', 'jobs']);
 
         // Installed without protecting the server, so the admin sign-in keeps working
-        const users = new CliUsersBuilder().setDefaultAdminPassword('rootpass1').build();
+        const users = new CliUsersBuilder().setDefaultAdminPassword('rootpass1').setProtectServer(false).build();
         disposables.push(() => users.dispose());
-        cli.builder.addInstalledPlugin(users.installedPlugin);
+        cli.mountPlugin(users);
         expect(await status()).toEqual(['filesystem', 'jobs', 'audit']);
     });
 });

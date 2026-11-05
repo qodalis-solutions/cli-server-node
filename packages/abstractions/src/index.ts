@@ -51,3 +51,4 @@ export {
     readInstalledPlugin,
     installedPluginOf,
 } from './installed-plugin';
+export { AuditEntry, AuditMetadata, AuditQueryOptions, ICliAuditStore, pruneAudit } from './audit';

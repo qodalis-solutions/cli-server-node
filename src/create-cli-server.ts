@@ -53,6 +53,8 @@ export interface MountablePlugin {
     scheduler?: unknown;
     /** The plugin's package, listed among the installed plugins (`builder.installedPlugins`). */
     installedPlugin?: CliInstalledPlugin;
+    /** Further packages the plugin brings along and serves (the users plugin: the audit plugin), listed after it. */
+    installedPlugins?: CliInstalledPlugin[];
 }
 
 /** MCP extension point of a server instance. */
@@ -343,6 +345,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         const installed = plugin.installedPlugin ?? installedPluginOf(plugin);
         if (installed) {
             builder.addInstalledPlugin(installed);
+        }
+        for (const bundled of plugin.installedPlugins ?? []) {
+            builder.addInstalledPlugin(bundled);
         }
         app.use(plugin.prefix, plugin.router);
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {

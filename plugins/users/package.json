@@ -1,7 +1,7 @@
 {
     "name": "@qodalis/cli-server-plugin-users",
-    "version": "1.0.0-beta.15",
-    "description": "User management plugin for Qodalis CLI server — authentication, sessions, groups, and audit log",
+    "version": "1.0.0-beta.17",
+    "description": "User management plugin for Qodalis CLI server — authentication, sessions, groups and API tokens; records its events in the audit plugin",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "files": [
@@ -27,6 +27,9 @@
         "type": "git",
         "url": "https://github.com/qodalis-solutions/cli-server-node",
         "directory": "plugins/users"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-plugin-audit": "file:../audit"
     },
     "peerDependencies": {
         "express": "^4.18.0"

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryUserStore } from '../../plugins/users/stores/in-memory-user-store';
 import { InMemorySessionStore } from '../../plugins/users/stores/in-memory-session-store';
 import { InMemoryCredentialStore } from '../../plugins/users/stores/in-memory-credential-store';
-import { InMemoryAuditStore } from '../../plugins/users/stores/in-memory-audit-store';
+import { InMemoryAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { InMemoryGroupStore } from '../../plugins/users/stores/in-memory-group-store';
 import { User } from '../../plugins/users/models';
 
