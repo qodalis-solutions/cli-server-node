@@ -1,13 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { LogRingBuffer } from '../services/log-ring-buffer';
-import { clampBuckets, QueryError, resolveRange } from '../services/query-time';
+import { clampBuckets, parseQueryTime, QueryError, resolveRange } from '../services/query-time';
 
 /**
  * Creates the logs controller router.
  *
  * Routes:
  * - GET / — query log entries with optional filtering
- *   Query params: level (comma-separated), search, service, limit, offset
+ *   Query params: level (comma-separated), search, service, from, to (ISO 8601), limit, offset
+ *   Answers { entries, total, store: "memory", persistent: false, limit, offset, hasMore, services }
  * - GET /histogram — entries per level in equal columns of a time range
  *   Query params: from, to (default the last 24 hours), buckets (1..200, default 24),
  *   and the filters of GET /
@@ -49,7 +50,18 @@ export function createLogsController(logBuffer: LogRingBuffer): Router {
             return;
         }
 
-        const result = logBuffer.query({ level, search, service, limit, offset });
+        let from: Date | undefined;
+        let to: Date | undefined;
+        try {
+            from = parseQueryTime(req.query.from, 'from');
+            to = parseQueryTime(req.query.to, 'to');
+        } catch (err) {
+            if (!(err instanceof QueryError)) throw err;
+            res.status(400).json({ error: err.message });
+            return;
+        }
+
+        const result = logBuffer.query({ level, search, service, from, to, limit, offset });
         res.json(result);
     });
 

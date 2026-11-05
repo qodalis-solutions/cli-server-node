@@ -18,6 +18,10 @@ export interface LogQueryParams {
     search?: string;
     /** The source (service) that wrote the entry, case-insensitive. */
     service?: string;
+    /** Only entries at or after this time (inclusive). */
+    from?: Date;
+    /** Only entries before this time (exclusive). */
+    to?: Date;
     limit?: number;
     offset?: number;
 }
@@ -52,6 +56,16 @@ export interface LogHistogramResult {
 export interface LogQueryResult {
     entries: LogEntry[];
     total: number;
+    /** Where the entries come from: this buffer, in memory. */
+    store: 'memory';
+    /** Whether the entries survive a restart (never for the buffer). */
+    persistent: false;
+    limit: number;
+    offset: number;
+    /** Whether entries matching the filters follow this page. */
+    hasMore: boolean;
+    /** The distinct sources in the buffer (what `service` filters by), sorted. */
+    services: string[];
 }
 
 /**
@@ -128,14 +142,36 @@ export class LogRingBuffer {
      * Query the buffer with optional filtering and pagination.
      */
     query(params: LogQueryParams = {}): LogQueryResult {
-        const { limit = 100, offset = 0 } = params;
+        const limit = Math.max(params.limit ?? 100, 0);
+        const offset = Math.max(params.offset ?? 0, 0);
+        const all = this.getAll();
+        const matches = logEntryFilter(params);
+        const from = params.from?.getTime();
+        const to = params.to?.getTime();
 
-        const entries = this.getAll().filter(logEntryFilter(params));
+        const entries = all.filter((e) => {
+            if (from !== undefined || to !== undefined) {
+                const time = new Date(e.timestamp).getTime();
+                if (from !== undefined && !(time >= from)) return false;
+                if (to !== undefined && !(time < to)) return false;
+            }
+            return matches(e);
+        });
 
         const total = entries.length;
         const paged = entries.slice(offset, offset + limit);
+        const services = Array.from(new Set(all.map((e) => e.source).filter((s): s is string => !!s))).sort();
 
-        return { entries: paged, total };
+        return {
+            entries: paged,
+            total,
+            store: 'memory',
+            persistent: false,
+            limit,
+            offset,
+            hasMore: offset + paged.length < total,
+            services,
+        };
     }
 
     /**

@@ -14,7 +14,9 @@ them.
   the storage's execution query, so it works with every storage provider. `jobs:read` on a protected server.
 - **Admin:** `GET /api/v1/qcli/logs/histogram?from=&to=&buckets=` counts the log buffer per level in each column,
   with the filters of `GET /logs`. `GET /logs` (and the histogram) now take several levels (`level=WARN,ERROR`), a
-  `service` (the entry's source) and search the source as well as the message.
+  `service` (the entry's source) and search the source as well as the message. `GET /logs` also takes `from`/`to`
+  and answers like the .NET server: `store: "memory"`, `persistent: false`, `limit`, `offset`, `hasMore` and
+  `services` (the distinct sources) next to `entries` and `total`, so the dashboard filters on the server.
 - **Admin:** `GET /api/v1/qcli/status/history?minutes=` (default 60, at most 1440): the plugin samples memory, CPU,
   WebSocket connections and shell sessions every 15 seconds and keeps 24 hours in memory (unref'd timer, stopped by
   `dispose()`). `GET /status` reports the latest CPU sample as `cpuUsagePercent`.
