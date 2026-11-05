@@ -5,6 +5,12 @@ import { getAuth, requirePermission } from '../middleware/auth-middleware';
 import { asyncHandler, badRequest } from '../errors';
 import { UsersPermissions as P } from '../permissions';
 
+/** Audit entries returned when the request names no limit. */
+export const DEFAULT_AUDIT_LIMIT = 100;
+
+/** The most audit entries one request returns. */
+export const MAX_AUDIT_LIMIT = 1000;
+
 /** `/audit` resource. Expects the auth middleware to have run. */
 export function createAuditController(auditStore: ICliAuditStore, authService: AuthService): Router {
     const router = Router();
@@ -24,7 +30,8 @@ export function createAuditController(auditStore: ICliAuditStore, authService: A
             event: text(req.query.event),
             username: text(req.query.username),
             actor: text(req.query.actor),
-            limit: count('limit'),
+            // A database store never loads the whole log for one request
+            limit: Math.min(count('limit') ?? DEFAULT_AUDIT_LIMIT, MAX_AUDIT_LIMIT),
             offset: count('offset'),
         }));
     }));

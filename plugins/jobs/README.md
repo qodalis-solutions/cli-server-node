@@ -58,7 +58,7 @@ await jobsPlugin.scheduler.start();
 | `schedule` | `string?` | — | Cron expression (5-field) |
 | `interval` | `string?` | — | Fixed interval (`30s`, `5m`, `1h`, `1d`); the next run is the last run plus the interval, across restarts and pauses (right away when that has passed) |
 | `runOnStart` | `boolean` | `false` | Run once right after the scheduler starts (not for paused or stopped jobs) |
-| `enabled` | `boolean` | `true` | Whether the job starts active |
+| `enabled` | `boolean` | `true` | Whether the job starts active. `false` keeps it stopped whatever state was saved; otherwise a saved pause or stop (made from the API) is kept across restarts |
 | `maxRetries` | `number` | `0` | Retry count on failure |
 | `timeout` | `string?` | — | Max execution duration (same format as interval) |
 | `overlapPolicy` | `string` | `skip` | `skip`, `queue`, or `cancel` |

@@ -15,6 +15,9 @@ import {
 import { CliJobExecutionContext } from './cli-job-execution-context';
 import { parseInterval } from './interval-parser';
 
+/** Characters a job id may not have: it is part of the jobs API's URLs. */
+const UNSAFE_ID_CHARS = /[/\\?#]/;
+
 /** Internal state for a registered job, including timers and execution queue. */
 export interface JobRegistration {
     id: string;
@@ -111,20 +114,26 @@ export class CliJobScheduler implements ICliJobScheduler {
      * @returns The job ID: `options.id`, else the name (`name-2`, `name-3`, ... for
      *   further jobs of the same name). Stable across restarts, so saved state and
      *   history find the job again.
-     * @throws {Error} When `options.id` is empty or already registered.
+     * @throws {Error} When `options.id` is empty, has `/`, `\\`, `?` or `#` (it is part of the jobs API's URLs; a
+     * default id replaces them with `-`), or is already registered.
      */
     register(job: ICliJob, options: CliJobOptions): string {
         const name = options.name ?? (job.constructor?.name && job.constructor.name !== 'Object' ? job.constructor.name : 'job');
         let id: string;
         if (options.id !== undefined) {
-            if (!options.id.trim()) throw new Error('A job id may not be empty');
+            if (!options.id.trim() || UNSAFE_ID_CHARS.test(options.id)) {
+                throw new Error(
+                    `Job id '${options.id}' must be non-empty and may not contain '/', '\\', '?' or '#' (it is part of the jobs API's URLs)`,
+                );
+            }
             if (this._registrations.has(options.id)) {
                 throw new Error(`A job with id '${options.id}' is already registered`);
             }
             id = options.id;
         } else {
-            id = name;
-            for (let n = 2; this._registrations.has(id); n++) id = `${name}-${n}`;
+            const baseId = name.replace(new RegExp(UNSAFE_ID_CHARS.source, 'g'), '-');
+            id = baseId;
+            for (let n = 2; this._registrations.has(id); n++) id = `${baseId}-${n}`;
         }
         const enabled = options.enabled !== false;
         const reg: JobRegistration = {
@@ -145,10 +154,12 @@ export class CliJobScheduler implements ICliJobScheduler {
         // Load persisted states
         const states = await this._storage.getAllJobStates();
         for (const [id, reg] of this._registrations) {
+            // Restore the last run, and a pause or stop made at run time; a job the code disables
+            // (enabled: false) stays stopped whatever was saved.
             const persisted = states.get(id);
             if (persisted) {
-                reg.status = persisted.status;
                 reg.lastRunAt = persisted.lastRunAt;
+                if (reg.options.enabled !== false) reg.status = persisted.status;
             }
 
             if (reg.status === 'active') {
@@ -530,12 +541,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         execution.logs = context.logEntries;
         execution.properties = { ...context.properties };
 
-        // A completed run the job discarded is deleted instead of saved (failed runs are kept)
-        const discarded =
-            context.discarded && finalStatus === 'completed' && (await deleteJobExecution(this._storage, execution.id));
-        if (!discarded) {
-            await this._storage.saveExecution(execution);
-        }
+        await this._saveFinished(execution, context.discarded);
 
         reg.currentExecutionId = undefined;
         reg.currentAbortController = undefined;
@@ -543,8 +549,8 @@ export class CliJobScheduler implements ICliJobScheduler {
         reg.lastRunStatus = finalStatus;
         reg.lastRunDuration = duration;
 
-        // Persist state
-        await this._persistState(reg);
+        // Persist state; a store failure must not leave the job looking busy or stop its retries
+        await this._persistState(reg).catch((err) => console.error(`Saving the state of job ${reg.id} failed:`, err));
 
         // Broadcast completion event
         if (finalStatus === 'completed') {
@@ -596,6 +602,31 @@ export class CliJobScheduler implements ICliJobScheduler {
             reg.timerType = undefined;
         }
         reg.nextRunAt = undefined;
+    }
+
+    /**
+     * Saves the finished run, or deletes a discarded one (failed runs are always kept). When the store refuses the
+     * run's properties (a value that does not serialize), the run is saved without them, so it never stays "running".
+     */
+    private async _saveFinished(execution: JobExecution, discard: boolean): Promise<void> {
+        try {
+            const discarded =
+                discard && execution.status === 'completed' && (await deleteJobExecution(this._storage, execution.id));
+            if (!discarded) await this._storage.saveExecution(execution);
+        } catch (err) {
+            if (!execution.properties || Object.keys(execution.properties).length === 0) throw err;
+            console.error(`Saving execution ${execution.id} of job ${execution.jobId} failed; saving it without its properties:`, err);
+            execution.properties = {};
+            execution.logs = [
+                ...(execution.logs ?? []),
+                {
+                    timestamp: new Date().toISOString(),
+                    level: 'error',
+                    message: `The run's properties could not be saved: ${err instanceof Error ? err.message : String(err)}`,
+                },
+            ];
+            await this._storage.saveExecution(execution);
+        }
     }
 
     private async _persistState(reg: JobRegistration): Promise<void> {
