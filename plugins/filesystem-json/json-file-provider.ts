@@ -10,6 +10,8 @@ import {
     NotADirectoryError,
     IsADirectoryError,
 } from '@qodalis/cli-server-plugin-filesystem';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-plugin-filesystem';
+import { filesystemJsonInstalledPlugin } from './package-info';
 
 /** Configuration for the JSON-backed file storage provider. */
 export interface JsonFileProviderOptions {
@@ -59,6 +61,9 @@ function createFileNode(name: string, content: string): FileNode {
  * The entire tree is loaded on construction and flushed to disk after every mutation.
  */
 export class JsonFileStorageProvider implements IFileStorageProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = filesystemJsonInstalledPlugin;
+
     readonly name = 'json-file';
 
     private root: FileNode;

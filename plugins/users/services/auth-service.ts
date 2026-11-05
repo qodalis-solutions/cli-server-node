@@ -212,6 +212,8 @@ export class AuthService {
         if (entry.details !== undefined) clean.details = sanitize(entry.details, 1024);
         if (entry.actor !== undefined) clean.actor = sanitize(entry.actor);
         if (entry.actorId !== undefined) clean.actorId = entry.actorId;
+        if (entry.target !== undefined) clean.target = sanitize(entry.target, 256);
+        if (entry.properties !== undefined) clean.properties = { ...entry.properties };
         if (entry.metadata !== undefined) {
             const metadata = Object.fromEntries(Object.entries(entry.metadata).filter(([, v]) => v !== undefined));
             if (Object.keys(metadata).length > 0) clean.metadata = metadata;

@@ -7,6 +7,8 @@ import {
     ICliCommandProcessor,
     ICliCommandParameterDescriptor,
 } from '@qodalis/cli-server-abstractions';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
+import { weatherInstalledPlugin } from './package-info';
 
 /** Extract the location from a command's args or value, defaulting to 'London'. */
 function getLocation(command: CliProcessCommand): string {
@@ -124,6 +126,9 @@ class CliWeatherCommandProcessor extends CliCommandProcessor {
 
 /** CLI module providing weather information commands (current conditions and forecast). */
 export class WeatherModule extends CliModule {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = weatherInstalledPlugin;
+
     name = 'weather';
     version = '1.0.0';
     description = 'Provides weather information commands';

@@ -339,7 +339,7 @@ export class DirectoryService {
             throw conflict(`group '${name}' already exists`);
         }
         const group = await this.groupStore.createGroup({ name, description, permissions, builtIn: false });
-        await this.authService.audit({ event: 'group_created', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name });
+        await this.authService.audit({ event: 'group_created', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
         return group;
     }
 
@@ -355,7 +355,7 @@ export class DirectoryService {
             this.assertCanGrant(caller, permissions);
         }
         const updated = await this.groupStore.updateGroup(group.name, { description, permissions });
-        await this.authService.audit({ event: 'group_updated', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name });
+        await this.authService.audit({ event: 'group_updated', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
         return updated;
     }
 
@@ -370,7 +370,7 @@ export class DirectoryService {
                 await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) });
             }
         }
-        await this.authService.audit({ event: 'group_deleted', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name });
+        await this.authService.audit({ event: 'group_deleted', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
     }
 
     async getMembers(group: Group): Promise<User[]> {
@@ -385,7 +385,7 @@ export class DirectoryService {
         await this.assertCanActOn(caller, user);
         this.assertCanAddGroups(caller, [group]);
         await this.userStore.updateUser(user.id, { groups: [...user.groups, group.name] });
-        await this.authService.audit({ event: 'group_member_added', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name });
+        await this.authService.audit({ event: 'group_member_added', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
     }
 
     async removeMember(group: Group, user: User, caller: Caller): Promise<void> {
@@ -395,7 +395,7 @@ export class DirectoryService {
             throw conflict('cannot remove the last enabled member of admin from admin');
         }
         await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) });
-        await this.authService.audit({ event: 'group_member_removed', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name });
+        await this.authService.audit({ event: 'group_member_removed', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
     }
 }
 

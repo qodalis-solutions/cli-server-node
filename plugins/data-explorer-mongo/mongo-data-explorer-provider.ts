@@ -8,6 +8,7 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { MongoClient } from 'mongodb';
+import { CLI_INSTALLED_PLUGIN, dataExplorerMongoInstalledPlugin } from './package-info';
 
 /** Connection configuration for the MongoDB data explorer provider. */
 export interface MongoConnectionOptions {
@@ -22,6 +23,9 @@ export interface MongoConnectionOptions {
  * as well as convenience commands like `show collections` and `show dbs`.
  */
 export class MongoDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerMongoInstalledPlugin;
+
     private readonly connectionOptions: MongoConnectionOptions;
 
     constructor(connectionOptions: MongoConnectionOptions) {

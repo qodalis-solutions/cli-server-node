@@ -6,6 +6,13 @@ export type JobRetryStrategy = 'fixed' | 'linear' | 'exponential';
 
 /** Configuration options for a scheduled or on-demand CLI job. */
 export interface CliJobOptions {
+    /**
+     * The job's id in the jobs API, its history and its saved state (pause, last run),
+     * e.g. `fetch-rates:bnr`. Keep it stable so a restart finds the job's history and
+     * state again. Default: the name, with `-2`, `-3`, ... for further jobs of the same
+     * name, in registration order. An explicit id used twice throws.
+     */
+    id?: string;
     /** Display name for the job. Defaults to class name. */
     name?: string;
     /** Description of what the job does. */
@@ -14,8 +21,17 @@ export interface CliJobOptions {
     group?: string;
     /** Cron expression for scheduling. Mutually exclusive with `interval`. */
     schedule?: string;
-    /** Simple interval string: "30s", "5m", "1h", "1d". Mutually exclusive with `schedule`. */
+    /**
+     * Simple interval string: "30s", "5m", "1h", "1d". Mutually exclusive with `schedule`.
+     * Across restarts and pauses the rhythm is kept: the next run is the last run plus
+     * the interval (right away when that has passed).
+     */
     interval?: string;
+    /**
+     * Runs the job once right after the scheduler starts, whatever its schedule (also
+     * for jobs that only run on demand). Not for paused or stopped jobs. Default false.
+     */
+    runOnStart?: boolean;
     /** Whether the job starts in active state. Default true. */
     enabled?: boolean;
     /** Number of retries on failure. Default 1. */

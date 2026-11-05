@@ -7,6 +7,7 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { Client } from 'pg';
+import { CLI_INSTALLED_PLUGIN, dataExplorerPostgresInstalledPlugin } from './package-info';
 
 /** Connection configuration for the PostgreSQL data explorer provider. */
 export interface PostgresConnectionOptions {
@@ -16,6 +17,9 @@ export interface PostgresConnectionOptions {
 
 /** Data explorer provider for PostgreSQL databases using the `pg` client. */
 export class PostgresDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerPostgresInstalledPlugin;
+
     private readonly connectionOptions: PostgresConnectionOptions;
 
     constructor(connectionOptions: PostgresConnectionOptions) {

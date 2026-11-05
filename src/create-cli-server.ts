@@ -27,6 +27,7 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
+import { CliInstalledPlugin, installedPluginOf } from '@qodalis/cli-server-abstractions';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -50,6 +51,8 @@ export interface MountablePlugin {
     mcpProviders?: McpToolProvider[];
     /** Job scheduler (the jobs plugin): enables the `jobs_*` MCP tools. */
     scheduler?: unknown;
+    /** The plugin's package, listed among the installed plugins (`builder.installedPlugins`). */
+    installedPlugin?: CliInstalledPlugin;
 }
 
 /** MCP extension point of a server instance. */
@@ -336,6 +339,10 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
         if (plugin.serverAuth && plugin.serverAuth !== serverAuth) {
             setAuth(plugin.serverAuth);
+        }
+        const installed = plugin.installedPlugin ?? installedPluginOf(plugin);
+        if (installed) {
+            builder.addInstalledPlugin(installed);
         }
         app.use(plugin.prefix, plugin.router);
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
