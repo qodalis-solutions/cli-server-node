@@ -1,3 +1,4 @@
+import type { CliInstalledPlugin } from './package-info';
 import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
 
 /**
@@ -41,6 +42,11 @@ export interface IBuilderLike {
      * `externalAuthentication` selects the dashboard's sign-in mode, `jobsEnabled` reports "jobs".
      */
     readonly serverOptions?: { readonly externalAuthentication?: boolean; readonly jobsEnabled?: boolean };
+    /**
+     * The server plugin packages installed so far (`CliBuilder.installedPlugins` of
+     * `@qodalis/cli-server-node`), listed by `GET /plugins/installed`.
+     */
+    readonly installedPlugins?: ReadonlyArray<CliInstalledPlugin>;
 }
 
 /**

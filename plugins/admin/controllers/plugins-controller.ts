@@ -1,15 +1,25 @@
 import { Router, Request, Response } from 'express';
 import { ModuleRegistry } from '../services/module-registry';
+import type { CliInstalledPlugin } from '../services/package-info';
 
 /**
  * Creates the plugins controller router.
  *
  * Routes:
  * - GET  /          — list all registered modules
+ * - GET  /installed — list the installed server plugin packages (id, name, version, description)
  * - POST /:id/toggle — toggle a module enabled/disabled
  */
-export function createPluginsController(moduleRegistry: ModuleRegistry): Router {
+export function createPluginsController(
+    moduleRegistry: ModuleRegistry,
+    installedPlugins: () => ReadonlyArray<CliInstalledPlugin> = () => [],
+): Router {
     const router = Router();
+
+    // Before any /:id route
+    router.get('/installed', (_req: Request, res: Response): void => {
+        res.json(installedPlugins());
+    });
 
     router.get('/', (_req: Request, res: Response): void => {
         res.json(moduleRegistry.list());

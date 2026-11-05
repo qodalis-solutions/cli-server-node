@@ -11,6 +11,8 @@ import {
     NotADirectoryError,
     IsADirectoryError,
 } from '@qodalis/cli-server-plugin-filesystem';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-plugin-filesystem';
+import { filesystemSqliteInstalledPlugin } from './package-info';
 
 /** Configuration for the SQLite-backed file storage provider. */
 export interface SqliteProviderOptions {
@@ -23,6 +25,9 @@ export interface SqliteProviderOptions {
  * Uses WAL journaling for concurrent read performance.
  */
 export class SqliteFileStorageProvider implements IFileStorageProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = filesystemSqliteInstalledPlugin;
+
     readonly name = 'sqlite';
 
     private db: DatabaseType;

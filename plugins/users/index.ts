@@ -28,6 +28,9 @@ export type {
     CreateApiTokenResult,
 } from './models';
 export type { ICliUserStore, ICliSessionStore, ICliCredentialStore, ICliAuditStore, ICliGroupStore, ICliApiTokenStore } from './stores/interfaces';
+export { pruneAudit } from './stores/interfaces';
+export { usersInstalledPlugin } from './package-info';
+export type { CliInstalledPlugin } from './package-info';
 export { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 export { InMemoryUserStore } from './stores/in-memory-user-store';
 export { InMemorySessionStore } from './stores/in-memory-session-store';

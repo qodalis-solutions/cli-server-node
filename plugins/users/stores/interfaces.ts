@@ -50,6 +50,17 @@ export interface ICliAuditStore {
     /** Newest first. */
     getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]>;
     clear(): Promise<void>;
+    /**
+     * Deletes the entries recorded before `before`; returns how many. Run it on a
+     * schedule to keep the log bounded. Optional: a store without it keeps everything
+     * (`pruneAudit` returns 0).
+     */
+    prune?(before: Date): Promise<number>;
+}
+
+/** Deletes the audit entries recorded before `before` (`store.prune`); 0 when the store keeps everything. */
+export async function pruneAudit(store: ICliAuditStore, before: Date): Promise<number> {
+    return store.prune ? store.prune(before) : 0;
 }
 
 export interface ICliGroupStore {

@@ -9,18 +9,24 @@ import { UsersPermissions as P } from '../permissions';
 export function createAuditController(auditStore: ICliAuditStore, authService: AuthService): Router {
     const router = Router();
 
-    // GET / — audit:read (?limit=&event=&username=)
+    // GET / — audit:read, newest first (?event=&username=&actor=&limit=&offset=)
     router.get('/', requirePermission(P.AuditRead), asyncHandler(async (req: Request, res: Response) => {
-        const event = typeof req.query.event === 'string' && req.query.event ? req.query.event : undefined;
-        const username = typeof req.query.username === 'string' && req.query.username ? req.query.username : undefined;
-        let limit: number | undefined;
-        if (req.query.limit !== undefined && req.query.limit !== '') {
-            if (typeof req.query.limit !== 'string' || !/^\d+$/.test(req.query.limit)) {
-                throw badRequest('limit must be a non-negative integer');
+        const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
+        const count = (name: 'limit' | 'offset'): number | undefined => {
+            const value = req.query[name];
+            if (value === undefined || value === '') return undefined;
+            if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+                throw badRequest(`${name} must be a non-negative integer`);
             }
-            limit = parseInt(req.query.limit, 10);
-        }
-        res.json(await auditStore.getEntries({ event, username, limit }));
+            return parseInt(value, 10);
+        };
+        res.json(await auditStore.getEntries({
+            event: text(req.query.event),
+            username: text(req.query.username),
+            actor: text(req.query.actor),
+            limit: count('limit'),
+            offset: count('offset'),
+        }));
     }));
 
     // DELETE / — audit:clear

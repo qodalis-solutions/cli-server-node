@@ -16,6 +16,8 @@ import {
     HeadObjectCommand,
     CopyObjectCommand,
 } from '@aws-sdk/client-s3';
+import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-plugin-filesystem';
+import { filesystemS3InstalledPlugin } from './package-info';
 
 /** Configuration for the S3-backed file storage provider. */
 export interface S3ProviderOptions {
@@ -39,6 +41,9 @@ export interface S3ProviderOptions {
  * Directories are represented by zero-byte objects with a trailing `/`.
  */
 export class S3FileStorageProvider implements IFileStorageProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = filesystemS3InstalledPlugin;
+
     readonly name = 's3';
 
     private readonly client: S3Client;

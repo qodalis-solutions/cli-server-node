@@ -75,14 +75,17 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/status` | Server uptime, memory, platform, connections, registered commands, enabled features |
+| GET | `/status` | Server uptime, memory, platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the users plugin) |
 
 ### Plugins
 
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/plugins` | List all registered modules |
+| GET | `/plugins/installed` | The installed server plugin packages (`id`, `name`, `version`, `description`), the server (`Core`) first |
 | POST | `/plugins/:id/toggle` | Enable or disable a module |
+
+The built-in plugins list themselves when added (`mountPlugin` for users, admin and jobs; `addModule`, `setFileStorageProvider`/`addFileSystem` and `addDataExplorerProvider` for modules and providers). A plugin of your own calls `builder.addInstalledPlugin(__dirname)` (reads the nearest `package.json`) or `builder.addInstalledPlugin({ id, name, version, description })`; modules and providers can instead carry the description under `CLI_INSTALLED_PLUGIN` (`@qodalis/cli-server-abstractions`).
 
 ### Configuration
 

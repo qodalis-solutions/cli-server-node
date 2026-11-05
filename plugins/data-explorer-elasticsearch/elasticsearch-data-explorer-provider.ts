@@ -8,6 +8,7 @@ import {
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { Client } from '@elastic/elasticsearch';
+import { CLI_INSTALLED_PLUGIN, dataExplorerElasticsearchInstalledPlugin } from './package-info';
 
 /** Connection configuration for the Elasticsearch data explorer provider. */
 export interface ElasticsearchConnectionOptions {
@@ -53,6 +54,9 @@ function flattenMappingProperties(
  * (`VERB /path` followed by optional JSON body). Supports `_search` and `_cat` endpoints.
  */
 export class ElasticsearchDataExplorerProvider implements IDataExplorerProvider {
+    /** The package this class belongs to, listed among the server's installed plugins. */
+    static readonly [CLI_INSTALLED_PLUGIN] = dataExplorerElasticsearchInstalledPlugin;
+
     private readonly client: Client;
 
     constructor(connectionOptions: ElasticsearchConnectionOptions) {

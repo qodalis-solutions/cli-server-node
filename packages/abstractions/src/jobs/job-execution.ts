@@ -25,4 +25,10 @@ export interface JobExecution {
     logs: JobLogEntry[];
     /** Zero-based retry attempt number. */
     retryAttempt: number;
+    /**
+     * The host's own values for this execution, e.g. `items` and `changed` counts or the
+     * record it worked on: set by the job (`context.properties`), saved with the execution
+     * and returned by the jobs API. Values must serialize to JSON.
+     */
+    properties?: Record<string, unknown>;
 }

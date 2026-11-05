@@ -161,6 +161,16 @@ export interface AuditEntry {
     actor?: string;
     /** Id of the acting user, when known. */
     actorId?: string;
+    /**
+     * What the event is about when it is not a user: a group (`group:admins`), a job,
+     * or a host's own object such as a role or plan.
+     */
+    target?: string;
+    /**
+     * The host's own values for this entry (e.g. the old and new value of a setting),
+     * saved with it and returned by the audit API. Values must serialize to JSON.
+     */
+    properties?: Record<string, unknown>;
     metadata?: {
         remoteAddress?: string;
         sessionId?: string;
@@ -170,8 +180,13 @@ export interface AuditEntry {
 
 export interface AuditQueryOptions {
     limit?: number;
+    /** Entries to skip, for paging (newest first). */
+    offset?: number;
     event?: string;
+    /** The user the events are about (exact, case-insensitive). */
     username?: string;
+    /** The user who performed the actions (exact, case-insensitive). */
+    actor?: string;
 }
 
 export interface Group {

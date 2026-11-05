@@ -52,11 +52,28 @@ export class InMemoryAuditStore implements ICliAuditStore {
             result = result.filter((e) => e.username?.toLowerCase() === username);
         }
 
+        if (options?.actor) {
+            const actor = options.actor.toLowerCase();
+            result = result.filter((e) => e.actor?.toLowerCase() === actor);
+        }
+
+        if (options?.offset !== undefined && options.offset > 0) {
+            result = result.slice(options.offset);
+        }
+
         if (options?.limit !== undefined && options.limit > 0) {
             result = result.slice(0, options.limit);
         }
 
         return result;
+    }
+
+    async prune(before: Date): Promise<number> {
+        const cutoff = before.getTime();
+        const count = this.entries.length + this.failedLogins.length;
+        this.entries = this.entries.filter((s) => s.entry.timestamp >= cutoff);
+        this.failedLogins = this.failedLogins.filter((s) => s.entry.timestamp >= cutoff);
+        return count - this.entries.length - this.failedLogins.length;
     }
 
     async clear(): Promise<void> {

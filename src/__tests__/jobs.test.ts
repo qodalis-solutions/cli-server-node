@@ -5,6 +5,10 @@ import {
     CliJobOptions,
     JobExecution,
     JobState,
+    ICliJobStorageProvider,
+    queryJobExecutions,
+    pruneJobExecutions,
+    deleteJobExecution,
 } from '@qodalis/cli-server-abstractions';
 
 // Use relative paths since these are not aliased in vitest config
@@ -420,5 +424,208 @@ describe('CliJobScheduler', () => {
         await scheduler.start();
         expect(scheduler.getRegistration(id)!.status).toBe('paused');
         await scheduler.stop();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Stable ids, interval rhythm, run on start, properties, discard, pruning
+// ---------------------------------------------------------------------------
+
+class PropsJob implements ICliJob {
+    callCount = 0;
+    async executeAsync(context: ICliJobExecutionContext): Promise<void> {
+        this.callCount++;
+        context.properties.calls = this.callCount;
+    }
+}
+
+class DiscardingJob implements ICliJob {
+    constructor(private readonly fail: boolean) {}
+    async executeAsync(context: ICliJobExecutionContext): Promise<void> {
+        context.discard();
+        context.properties.seen = true;
+        await Promise.resolve();
+        if (this.fail) throw new Error('boom');
+    }
+}
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe('CliJobScheduler ids and start', () => {
+    let storage: InMemoryJobStorageProvider;
+    let scheduler: CliJobScheduler;
+
+    beforeEach(() => {
+        storage = new InMemoryJobStorageProvider();
+        scheduler = new CliJobScheduler(storage);
+    });
+
+    afterEach(async () => {
+        await scheduler.stop();
+    });
+
+    it('ids are the set id, or the name numbered in order', () => {
+        scheduler.register(new DummyJob(), { id: 'fetch-rates:bnr', name: 'BNR' });
+        scheduler.register(new DummyJob(), { name: 'digest' });
+        scheduler.register(new DummyJob(), { name: 'digest' });
+        scheduler.register(new DummyJob(), {});
+
+        expect([...scheduler.jobs.keys()]).toEqual(['fetch-rates:bnr', 'digest', 'digest-2', 'DummyJob']);
+        expect(scheduler.get('DummyJob')!.name).toBe('DummyJob');
+        expect(() => scheduler.register(new DummyJob(), { id: 'digest' })).toThrow(/already registered/);
+        expect(() => scheduler.register(new DummyJob(), { id: ' ' })).toThrow(/empty/);
+    });
+
+    it('saved state is found again after a restart', async () => {
+        await storage.saveJobState('nightly', { status: 'paused', updatedAt: new Date().toISOString() });
+        scheduler.register(new DummyJob(), { name: 'nightly', interval: '1h' });
+
+        await scheduler.start();
+
+        expect(scheduler.jobs.get('nightly')!.status).toBe('paused');
+    });
+
+    it('an interval keeps its rhythm across restarts and an overdue job runs right away', async () => {
+        const lastRun = Date.now() - 20 * 60_000;
+        await storage.saveJobState('hourly', { status: 'active', lastRunAt: new Date(lastRun).toISOString(), updatedAt: '' });
+        await storage.saveJobState('overdue', { status: 'active', lastRunAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), updatedAt: '' });
+        const overdue = new DummyJob();
+        scheduler.register(new DummyJob(), { name: 'hourly', interval: '1h' });
+        scheduler.register(overdue, { name: 'overdue', interval: '1h' });
+
+        await scheduler.start();
+        await wait(150);
+
+        expect(Math.abs(new Date(scheduler.jobs.get('hourly')!.nextRunAt!).getTime() - (lastRun + 3_600_000))).toBeLessThan(1000);
+        expect(overdue.callCount).toBe(1);
+        // Then every interval from that run on
+        expect(new Date(scheduler.jobs.get('overdue')!.nextRunAt!).getTime()).toBeGreaterThan(Date.now() + 3_500_000);
+    });
+
+    it('resume keeps the rhythm of the last run', async () => {
+        const lastRun = Date.now() - 10 * 60_000;
+        await storage.saveJobState('hourly', { status: 'paused', lastRunAt: new Date(lastRun).toISOString(), updatedAt: '' });
+        scheduler.register(new DummyJob(), { name: 'hourly', interval: '1h' });
+        await scheduler.start();
+
+        await scheduler.resumeAsync('hourly');
+
+        expect(Math.abs(new Date(scheduler.jobs.get('hourly')!.nextRunAt!).getTime() - (lastRun + 3_600_000))).toBeLessThan(1000);
+    });
+
+    it('runOnStart runs on-demand jobs once, but not paused ones', async () => {
+        const onDemand = new DummyJob();
+        const hourly = new DummyJob({ sleep: 100 });
+        const paused = new DummyJob();
+        await storage.saveJobState('paused', { status: 'paused', updatedAt: '' });
+        await storage.saveJobState('hourly', { status: 'active', lastRunAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), updatedAt: '' });
+        scheduler.register(onDemand, { name: 'backfill', runOnStart: true });
+        scheduler.register(hourly, { name: 'hourly', interval: '1h', runOnStart: true });
+        scheduler.register(paused, { name: 'paused', runOnStart: true });
+
+        await scheduler.start();
+        await wait(400);
+
+        expect(onDemand.callCount).toBe(1);
+        // Overdue and run on start: still one run
+        expect(hourly.callCount).toBe(1);
+        expect(paused.callCount).toBe(0);
+    });
+
+    it("the job's properties are saved with the execution", async () => {
+        const job = new PropsJob();
+        scheduler.register(job, { name: 'props' });
+        await scheduler.start();
+
+        await scheduler.triggerAsync('props');
+
+        const { items } = await storage.getExecutions('props');
+        expect(items[0].properties).toEqual({ calls: 1 });
+    });
+
+    it('discard leaves a completed run out of the history but keeps failures', async () => {
+        scheduler.register(new DiscardingJob(false), { name: 'quiet' });
+        scheduler.register(new DiscardingJob(true), { name: 'broken', maxRetries: 0 });
+        await scheduler.start();
+
+        await scheduler.triggerAsync('quiet');
+        await scheduler.triggerAsync('broken');
+
+        expect((await storage.getExecutions('quiet')).total).toBe(0);
+        expect(scheduler.jobs.get('quiet')!.lastRunAt).toBeDefined();
+        const broken = await storage.getExecutions('broken');
+        expect(broken.total).toBe(1);
+        expect(broken.items[0]).toMatchObject({ status: 'failed', properties: { seen: true } });
+    });
+
+    it('queryExecutions merges the per-job listings of a storage without its own query', async () => {
+        const plain: ICliJobStorageProvider = {
+            saveExecution: (e) => storage.saveExecution(e),
+            getExecutions: (id, o) => storage.getExecutions(id, o),
+            getExecution: (id) => storage.getExecution(id),
+            saveJobState: (id, s) => storage.saveJobState(id, s),
+            getJobState: (id) => storage.getJobState(id),
+            getAllJobStates: () => storage.getAllJobStates(),
+        };
+        const s = new CliJobScheduler(plain);
+        const job = new PropsJob();
+        s.register(job, { name: 'a' });
+        s.register(job, { name: 'b' });
+        await s.start();
+        await s.triggerAsync('a');
+        await wait(5);
+        await s.triggerAsync('b');
+
+        const all = await s.queryExecutions({});
+        expect(all.total).toBe(2);
+        expect(all.items.map((e) => e.jobId)).toEqual(['b', 'a']);
+        expect((await s.queryExecutions({ jobIds: ['a'] })).items.map((e) => e.properties)).toEqual([{ calls: 1 }]);
+        expect((await s.queryExecutions({ since: new Date(Date.now() + 86_400_000) })).total).toBe(0);
+        expect((await s.queryExecutions({ limit: 1, offset: 1 })).items.map((e) => e.jobId)).toEqual(['a']);
+
+        // The storage default needs job ids
+        await expect(queryJobExecutions(plain, {})).rejects.toThrow(/not supported/);
+        expect((await queryJobExecutions(plain, { jobIds: ['a', 'b'], status: 'COMPLETED' })).total).toBe(2);
+        expect(await pruneJobExecutions(plain, new Date())).toBe(0);
+        expect(await deleteJobExecution(plain, all.items[0].id)).toBe(false);
+        await s.stop();
+    });
+});
+
+describe('InMemoryJobStorageProvider prune, delete and query', () => {
+    const execution = (id: string, jobId: string, startedAt: Date, status: JobExecution['status'] = 'completed'): JobExecution => ({
+        id, jobId, jobName: jobId, status, startedAt: startedAt.toISOString(), logs: [], retryAttempt: 0,
+    });
+
+    it('prunes old executions', async () => {
+        const storage = new InMemoryJobStorageProvider();
+        await storage.saveExecution(execution('old', 'a', new Date(Date.now() - 40 * 86_400_000)));
+        await storage.saveExecution(execution('new', 'a', new Date()));
+
+        expect(await storage.prune(new Date(Date.now() - 30 * 86_400_000))).toBe(1);
+        expect((await storage.getExecutions('a')).total).toBe(1);
+        expect(await storage.getExecution('old')).toBeNull();
+    });
+
+    it('deletes an execution', async () => {
+        const storage = new InMemoryJobStorageProvider();
+        await storage.saveExecution(execution('x', 'a', new Date()));
+
+        expect(await storage.deleteExecution('x')).toBe(true);
+        expect(await storage.deleteExecution('x')).toBe(false);
+        expect((await storage.getExecutions('a')).total).toBe(0);
+    });
+
+    it('queries executions across jobs, newest first', async () => {
+        const storage = new InMemoryJobStorageProvider();
+        await storage.saveExecution(execution('1', 'a', new Date(1000)));
+        await storage.saveExecution(execution('2', 'b', new Date(2000), 'failed'));
+        await storage.saveExecution(execution('3', 'c', new Date(3000)));
+
+        expect((await storage.queryExecutions({})).items.map((e) => e.id)).toEqual(['3', '2', '1']);
+        expect((await storage.queryExecutions({ jobIds: ['a', 'b'] })).items.map((e) => e.id)).toEqual(['2', '1']);
+        expect((await storage.queryExecutions({ status: 'Failed' })).items.map((e) => e.id)).toEqual(['2']);
+        expect((await storage.queryExecutions({ since: new Date(2000) })).total).toBe(2);
+        expect(await storage.queryExecutions({ limit: 1, offset: 1 })).toMatchObject({ total: 3, items: [{ id: '2' }] });
     });
 });

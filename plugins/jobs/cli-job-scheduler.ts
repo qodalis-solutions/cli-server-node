@@ -8,6 +8,9 @@ import {
     JobState,
     JobStatus,
     JobExecutionStatus,
+    JobExecutionQuery,
+    mergeJobExecutions,
+    deleteJobExecution,
 } from '@qodalis/cli-server-abstractions';
 import { CliJobExecutionContext } from './cli-job-execution-context';
 import { parseInterval } from './interval-parser';
@@ -54,11 +57,38 @@ export interface JobDto {
 
 type BroadcastFn = (message: Record<string, unknown>) => void;
 
+/** Options of a job that `updateOptionsAsync` may change. */
+export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy'>>;
+
+/**
+ * The scheduler that runs the jobs registered in this process: their
+ * registrations and the actions on them. Use it (`jobsPlugin.scheduler`) to act on
+ * a job from the host's own code, e.g. run a job when something happened.
+ */
+export interface ICliJobScheduler {
+    /** The registered jobs keyed by job id, in registration order. */
+    readonly jobs: ReadonlyMap<string, JobRegistration>;
+    /** Runs the job now; throws a {@link JobError} (409) when it is running and may not overlap. */
+    triggerAsync(id: string): Promise<void>;
+    /** Pauses the job's schedule. */
+    pauseAsync(id: string): Promise<void>;
+    /** Resumes a paused job's schedule. */
+    resumeAsync(id: string): Promise<void>;
+    /** Stops the job: cancels a running execution and disables its schedule. */
+    stopJobAsync(id: string): Promise<void>;
+    /** Cancels the job's running execution. */
+    cancelCurrentAsync(id: string): Promise<void>;
+    /** Changes the job's options and restarts its schedule. */
+    updateOptionsAsync(id: string, updates: CliJobOptionsUpdate): Promise<void>;
+    /** The executions of several jobs (`query.jobIds`) or of every job, newest first. */
+    queryExecutions(query: JobExecutionQuery): Promise<{ items: JobExecution[]; total: number }>;
+}
+
 /**
  * Manages job registration, scheduling (cron / interval), execution with
  * retry logic, overlap policies, and state persistence.
  */
-export class CliJobScheduler {
+export class CliJobScheduler implements ICliJobScheduler {
     private readonly _registrations = new Map<string, JobRegistration>();
     private readonly _storage: ICliJobStorageProvider;
     private _broadcastFn: BroadcastFn | null = null;
@@ -78,15 +108,29 @@ export class CliJobScheduler {
      *
      * @param job - The job implementation.
      * @param options - Scheduling and retry configuration.
-     * @returns The generated job ID.
+     * @returns The job ID: `options.id`, else the name (`name-2`, `name-3`, ... for
+     *   further jobs of the same name). Stable across restarts, so saved state and
+     *   history find the job again.
+     * @throws {Error} When `options.id` is empty or already registered.
      */
     register(job: ICliJob, options: CliJobOptions): string {
-        const id = randomUUID();
+        const name = options.name ?? (job.constructor?.name && job.constructor.name !== 'Object' ? job.constructor.name : 'job');
+        let id: string;
+        if (options.id !== undefined) {
+            if (!options.id.trim()) throw new Error('A job id may not be empty');
+            if (this._registrations.has(options.id)) {
+                throw new Error(`A job with id '${options.id}' is already registered`);
+            }
+            id = options.id;
+        } else {
+            id = name;
+            for (let n = 2; this._registrations.has(id); n++) id = `${name}-${n}`;
+        }
         const enabled = options.enabled !== false;
         const reg: JobRegistration = {
             id,
             job,
-            options: { ...options, enabled },
+            options: { ...options, name, enabled },
             status: enabled ? 'active' : 'stopped',
             queue: [],
         };
@@ -108,7 +152,13 @@ export class CliJobScheduler {
             }
 
             if (reg.status === 'active') {
-                this._startTimer(reg);
+                // An interval job runs on start through its timer (due now), so the two never overlap
+                const runNow = !!reg.options.runOnStart && !reg.options.schedule && !!reg.options.interval;
+                this._startTimer(reg, runNow);
+
+                if (reg.options.runOnStart && !runNow) {
+                    this._handleTimerFire(reg).catch(() => undefined);
+                }
             }
         }
     }
@@ -132,6 +182,23 @@ export class CliJobScheduler {
                 updatedAt: new Date().toISOString(),
             });
         }
+    }
+
+    /** The registered jobs keyed by job id, in registration order. */
+    get jobs(): ReadonlyMap<string, JobRegistration> {
+        return this._registrations;
+    }
+
+    /**
+     * The executions of several jobs (`query.jobIds`) or of every registered job,
+     * newest first: the storage's own `queryExecutions`, else its per-job listings merged.
+     */
+    async queryExecutions(query: JobExecutionQuery): Promise<{ items: JobExecution[]; total: number }> {
+        if (this._storage.queryExecutions) return this._storage.queryExecutions(query);
+        const jobIds = query.jobIds ?? Array.from(this._registrations.keys());
+        return mergeJobExecutions(query, jobIds, (jobId, limit, status) =>
+            this._storage.getExecutions(jobId, { limit, offset: 0, status }),
+        );
     }
 
     /** Return DTOs for all registered jobs. */
@@ -229,10 +296,7 @@ export class CliJobScheduler {
     }
 
     /** Update mutable job options (schedule, retry policy, etc.) and restart timers if active. */
-    async updateOptionsAsync(
-        id: string,
-        updates: Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy'>>,
-    ): Promise<void> {
+    async updateOptionsAsync(id: string, updates: CliJobOptionsUpdate): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
 
@@ -319,11 +383,11 @@ export class CliJobScheduler {
         };
     }
 
-    private _startTimer(reg: JobRegistration): void {
+    private _startTimer(reg: JobRegistration, runNow = false): void {
         if (reg.options.schedule) {
             this._startCronTimer(reg);
         } else if (reg.options.interval) {
-            this._startIntervalTimer(reg);
+            this._startIntervalTimer(reg, runNow);
         }
     }
 
@@ -352,17 +416,30 @@ export class CliJobScheduler {
         scheduleNext();
     }
 
-    private _startIntervalTimer(reg: JobRegistration): void {
+    private _startIntervalTimer(reg: JobRegistration, runNow = false): void {
         const ms = parseInterval(reg.options.interval!);
         if (ms === null) return;
 
-        reg.nextRunAt = new Date(Date.now() + ms).toISOString();
-        reg.timer = setInterval(async () => {
+        // Keep the rhythm across restarts and pauses: due one interval after the last run
+        const now = Date.now();
+        const lastRun = reg.lastRunAt ? new Date(reg.lastRunAt).getTime() : NaN;
+        let due = Number.isNaN(lastRun) ? now + ms : lastRun + ms;
+        if (due < now || runNow) due = now;
+        reg.nextRunAt = new Date(due).toISOString();
+
+        const fire = async () => {
             if (reg.status !== 'active' || !this._running) return;
-            await this._handleTimerFire(reg);
             reg.nextRunAt = new Date(Date.now() + ms).toISOString();
-        }, ms);
-        reg.timerType = 'interval';
+            await this._handleTimerFire(reg);
+        };
+        reg.timer = setTimeout(() => {
+            if (reg.status !== 'active' || !this._running) return;
+            // Then every interval from this run on
+            reg.timer = setInterval(fire, ms);
+            reg.timerType = 'interval';
+            fire().catch(() => undefined);
+        }, due - now);
+        reg.timerType = 'cron'; // a one-off timeout until the first run
     }
 
     private async _handleTimerFire(reg: JobRegistration): Promise<void> {
@@ -398,6 +475,7 @@ export class CliJobScheduler {
             startedAt: new Date().toISOString(),
             logs: [],
             retryAttempt,
+            properties: {},
         };
 
         await this._storage.saveExecution(execution);
@@ -450,8 +528,14 @@ export class CliJobScheduler {
         execution.duration = duration;
         execution.error = error;
         execution.logs = context.logEntries;
+        execution.properties = { ...context.properties };
 
-        await this._storage.saveExecution(execution);
+        // A completed run the job discarded is deleted instead of saved (failed runs are kept)
+        const discarded =
+            context.discarded && finalStatus === 'completed' && (await deleteJobExecution(this._storage, execution.id));
+        if (!discarded) {
+            await this._storage.saveExecution(execution);
+        }
 
         reg.currentExecutionId = undefined;
         reg.currentAbortController = undefined;
