@@ -4,7 +4,9 @@ import request from 'supertest';
 import {
     ADMIN_THEME_TOKENS,
     CliAdminBuilder,
+    isBrandingIcon,
     isThemeColor,
+    validateAdminBranding,
     validateAdminTheme,
 } from '../../plugins/admin';
 import { CliCommandRegistry } from '../services/cli-command-registry';
@@ -91,5 +93,49 @@ describe('GET /qcli/admin/theme.json', () => {
 
     it('fails fast on an invalid theme', () => {
         expect(() => new CliAdminBuilder().setTheme({ dark: { error: 'url(x)' } })).toThrow();
+    });
+});
+
+describe('validateAdminBranding', () => {
+    it('is left out when nothing is set', () => {
+        expect(validateAdminBranding(undefined)).toBeUndefined();
+        expect(validateAdminBranding({ name: '  ', iconUrl: '' })).toBeUndefined();
+    });
+
+    it('keeps the name, icon and terminal name', () => {
+        expect(validateAdminBranding({ name: ' RateBell ', iconUrl: '/favicon.svg', cliName: 'RateBell CLI' })).toEqual({
+            name: 'RateBell',
+            icon: '/favicon.svg',
+            cli: { name: 'RateBell CLI' },
+        });
+    });
+
+    it.each(['/favicon.svg', 'https://ratebell.app/favicon.svg', 'data:image/png;base64,iVBORw0KGgo='])('accepts the icon %s', (icon) => {
+        expect(isBrandingIcon(icon)).toBe(true);
+    });
+
+    it.each([
+        '//evil.example/x.svg', 'javascript:alert(1)', 'data:text/html;base64,PHNjcmlwdD4=',
+        'data:image/svg+xml,<svg onload=alert(1)>', 'favicon.svg', '/a b.svg',
+    ])('rejects the icon %s', (icon) => {
+        expect(() => validateAdminBranding({ iconUrl: icon })).toThrow(/iconUrl/);
+    });
+
+    it('rejects long names and control characters', () => {
+        expect(() => validateAdminBranding({ name: 'a'.repeat(81) })).toThrow(/name/);
+        expect(() => validateAdminBranding({ cliName: 'a\u0007b' })).toThrow(/cliName/);
+    });
+
+    it('is served in theme.json', async () => {
+        const registry = new CliCommandRegistry();
+        const plugin = new CliAdminBuilder()
+            .setCredentials('admin', 'secret')
+            .setBranding({ name: 'RateBell', cliName: 'RateBell CLI' })
+            .build({ registry, eventSocketManager: new CliEventSocketManager(), builder: new CliBuilder(registry) });
+        const app = express();
+        app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+        const res = await request(app).get('/qcli/admin/theme.json');
+        plugin.dispose();
+        expect(res.body).toEqual({ mode: 'dark', dark: {}, light: {}, branding: { name: 'RateBell', cli: { name: 'RateBell CLI' } } });
     });
 });

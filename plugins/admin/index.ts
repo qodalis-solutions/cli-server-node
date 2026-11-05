@@ -16,3 +16,9 @@ export {
     isThemeColor,
     validateAdminTheme,
 } from './services/admin-theme';
+export {
+    AdminBranding,
+    AdminBrandingDocument,
+    isBrandingIcon,
+    validateAdminBranding,
+} from './services/admin-branding';
