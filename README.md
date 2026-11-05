@@ -229,13 +229,14 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | WS | `/ws/v1/qcli/logs` | Server log stream |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell (when `enableShell` is on) |
 
-Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plugins add their own routes: users (`/api/v1/qcli/sessions`, `/users`, `/groups`, `/tokens`, ...), jobs and admin; see their READMEs.
+Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plugins add their own routes: users (`/api/v1/qcli/sessions`, `/users`, `/groups`, `/tokens`, ...), audit (`/api/v1/qcli/audit`), jobs and admin; see their READMEs.
 
 ## Plugins
 
 | Package | Description |
 |---|---|
-| [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens, audit log; protects the whole server |
+| [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens; protects the whole server and adds the audit plugin |
+| [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
 | [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
 | [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management |
 | [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |

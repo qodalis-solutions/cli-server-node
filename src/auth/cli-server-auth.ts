@@ -115,6 +115,8 @@ export const CliServerPermissions = {
     JobsRead: 'jobs:read',
     JobsManage: 'jobs:manage',
     LogsRead: 'logs:read',
+    AuditRead: 'audit:read',
+    AuditClear: 'audit:clear',
     ShellExecute: 'shell:execute',
     AdminAccess: 'admin:access',
 } as const;

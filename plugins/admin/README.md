@@ -75,7 +75,7 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/status` | Server uptime, memory, platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the users plugin) |
+| GET | `/status` | Server uptime, memory, platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the audit plugin, which the users plugin adds) |
 
 ### Plugins
 

@@ -35,7 +35,9 @@ export { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 export { InMemoryUserStore } from './stores/in-memory-user-store';
 export { InMemorySessionStore } from './stores/in-memory-session-store';
 export { InMemoryCredentialStore } from './stores/in-memory-credential-store';
-export { InMemoryAuditStore } from './stores/in-memory-audit-store';
+// The audit log moved to @qodalis/cli-server-plugin-audit; re-exported for existing imports.
+export { InMemoryAuditStore, CliAuditBuilder } from '@qodalis/cli-server-plugin-audit';
+export type { CliAuditPluginResult } from '@qodalis/cli-server-plugin-audit';
 export { InMemoryGroupStore } from './stores/in-memory-group-store';
 export { AuthService, toUserJson, isApiToken, API_TOKEN_PREFIX, MAX_API_TOKENS_PER_USER } from './services/auth-service';
 export type { AuthContext, AuthServiceOptions, UsersSessionEvent } from './services/auth-service';

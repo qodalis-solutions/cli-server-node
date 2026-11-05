@@ -1,9 +1,9 @@
 import type { Request } from 'express';
+import type { CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import type {
     ICliUserStore,
     ICliSessionStore,
     ICliCredentialStore,
-    ICliAuditStore,
     ICliGroupStore,
     ICliApiTokenStore,
 } from './stores/interfaces';
@@ -148,46 +148,8 @@ export interface CreateApiTokenResult {
     apiToken: ApiTokenView;
 }
 
-export interface AuditEntry {
-    id?: string;
-    timestamp: number;
-    event: string;
-    /** The user the event is about. */
-    username: string;
-    details?: string;
-    /** Id of the user the event is about, when known. */
-    userId?: string;
-    /** The acting user, when different from / in addition to `username`. */
-    actor?: string;
-    /** Id of the acting user, when known. */
-    actorId?: string;
-    /**
-     * What the event is about when it is not a user: a group (`group:admins`), a job,
-     * or a host's own object such as a role or plan.
-     */
-    target?: string;
-    /**
-     * The host's own values for this entry (e.g. the old and new value of a setting),
-     * saved with it and returned by the audit API. Values must serialize to JSON.
-     */
-    properties?: Record<string, unknown>;
-    metadata?: {
-        remoteAddress?: string;
-        sessionId?: string;
-        [key: string]: unknown;
-    };
-}
-
-export interface AuditQueryOptions {
-    limit?: number;
-    /** Entries to skip, for paging (newest first). */
-    offset?: number;
-    event?: string;
-    /** The user the events are about (exact, case-insensitive). */
-    username?: string;
-    /** The user who performed the actions (exact, case-insensitive). */
-    actor?: string;
-}
+/** The audit log contract lives in `@qodalis/cli-server-abstractions` (re-exported by the audit plugin). */
+export type { AuditEntry, AuditQueryOptions } from '@qodalis/cli-server-plugin-audit';
 
 export interface Group {
     id: string;
@@ -242,7 +204,13 @@ export interface UsersModuleOptions {
     userStore?: ICliUserStore;
     sessionStore?: ICliSessionStore;
     credentialStore?: ICliCredentialStore;
+    /** Where the audit log is kept: the same as setting the audit plugin's store. */
     auditStore?: ICliAuditStore;
+    /**
+     * The audit plugin to record events in and serve at `/audit` (default: one built
+     * with `auditStore`, or in memory). Pass the host's own when it builds one.
+     */
+    auditPlugin?: CliAuditPluginResult;
     groupStore?: ICliGroupStore;
     /** API token storage (default in-memory). */
     apiTokenStore?: ICliApiTokenStore;
