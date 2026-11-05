@@ -47,6 +47,8 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliProcessCommand` | Parsed command input: command name, value, args, chain commands, raw input, data payload |
 | `CliPageRequest` | The rows a list command was asked for: `skip`, `take` |
 | `CliTablePage` | The `page` of a table output: `skip`, `take`, `total?`, `hasMore`, `truncated?` |
+| `ICliAuditStore` | Where the audit log is kept (`log`, `getEntries`, `clear`, optional `prune`); the audit plugin keeps it in memory by default |
+| `AuditEntry`, `AuditMetadata`, `AuditQueryOptions` | An audit log entry, its request details, and the filters/paging of a query |
 
 ### Classes
 
@@ -63,6 +65,12 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 |----------|-------------|
 | `DefaultLibraryAuthor` | Default `ICliCommandAuthor` instance used when no author is specified |
 | `DEFAULT_TAKE`, `MAX_TAKE` | Rows shown by default (50) and at most (500) |
+
+### Functions
+
+| Function | Description |
+|----------|-------------|
+| `pruneAudit(store, before)` | Deletes the audit entries recorded before `before` (`store.prune`); 0 for a store that keeps everything |
 
 ### `CliCommandProcessor` Members
 
