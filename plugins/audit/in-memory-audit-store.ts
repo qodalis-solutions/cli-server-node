@@ -1,9 +1,14 @@
 import { randomUUID } from 'crypto';
-import { AuditEntry, AuditQueryOptions } from '../models';
-import { ICliAuditStore } from './interfaces';
+import { AuditEntry, AuditQueryOptions, ICliAuditStore } from '@qodalis/cli-server-abstractions';
 
-const MAX_ENTRIES = 1000;
-const MAX_FAILED_LOGIN_ENTRIES = 200;
+/** The event of a failed sign-in (users plugin), kept apart so a flood of them keeps the rest. */
+export const FAILED_LOGIN_EVENT = 'login_failed';
+
+/** Entries kept by default, other than `login_failed`. */
+export const DEFAULT_MAX_AUDIT_ENTRIES = 1000;
+
+/** `login_failed` entries kept by default. */
+export const DEFAULT_MAX_FAILED_LOGIN_ENTRIES = 200;
 
 interface Stored {
     seq: number;
@@ -11,25 +16,28 @@ interface Stored {
 }
 
 /**
- * In-memory audit log. `login_failed` entries are capped separately (last 200)
- * so a flood of failed logins cannot evict the rest of the history (last 1000).
+ * In-memory audit log: the latest 1000 entries. `login_failed` entries are capped
+ * separately (latest 200) so a flood of failed sign-ins cannot evict the rest of
+ * the history.
  */
 export class InMemoryAuditStore implements ICliAuditStore {
     private entries: Stored[] = [];
     private failedLogins: Stored[] = [];
     private seq = 0;
+    readonly maxEntries: number;
+    readonly maxFailedLoginEntries: number;
 
-    constructor(
-        private readonly maxEntries: number = MAX_ENTRIES,
-        private readonly maxFailedLoginEntries: number = MAX_FAILED_LOGIN_ENTRIES,
-    ) {}
+    constructor(maxEntries: number = DEFAULT_MAX_AUDIT_ENTRIES, maxFailedLoginEntries: number = DEFAULT_MAX_FAILED_LOGIN_ENTRIES) {
+        this.maxEntries = maxEntries > 0 ? maxEntries : DEFAULT_MAX_AUDIT_ENTRIES;
+        this.maxFailedLoginEntries = maxFailedLoginEntries > 0 ? maxFailedLoginEntries : DEFAULT_MAX_FAILED_LOGIN_ENTRIES;
+    }
 
     async log(entry: AuditEntry): Promise<void> {
         const stored: Stored = {
             seq: this.seq++,
             entry: { id: entry.id ?? randomUUID(), ...entry, timestamp: entry.timestamp ?? Date.now() },
         };
-        if (entry.event === 'login_failed') {
+        if (entry.event === FAILED_LOGIN_EVENT) {
             this.failedLogins.push(stored);
             while (this.failedLogins.length > this.maxFailedLoginEntries) this.failedLogins.shift();
         } else {
@@ -39,7 +47,7 @@ export class InMemoryAuditStore implements ICliAuditStore {
     }
 
     async getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]> {
-        // Newest first
+        // Newest first (recording order)
         let result = [...this.entries, ...this.failedLogins].sort((a, b) => b.seq - a.seq).map((s) => s.entry);
 
         if (options?.event) {

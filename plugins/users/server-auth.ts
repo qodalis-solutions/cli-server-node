@@ -34,7 +34,7 @@ export interface UsersServerAttachment {
     serverOptions?: { externalAuthentication: boolean };
 }
 
-const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|audit|tokens)(\/.*)?$/;
+const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens)(\/.*)?$/;
 
 /**
  * The users plugin as the CLI server's auth provider (implements
@@ -59,7 +59,10 @@ export class UsersServerAuth {
         };
     }
 
-    /** The plugin authenticates its own routes (login, users, groups, sessions, audit). */
+    /**
+     * The plugin authenticates its own routes (login, users, groups, sessions, tokens). The
+     * audit API it serves is protected by the server's route policy (`audit:read` / `audit:clear`).
+     */
     handlesPath(path: string, _method: string): boolean {
         return OWN_ROUTES.test(path.toLowerCase());
     }

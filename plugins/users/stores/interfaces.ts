@@ -5,8 +5,6 @@ import {
     Session,
     SessionMetadata,
     Credentials,
-    AuditEntry,
-    AuditQueryOptions,
     Group,
     CreateGroupDto,
     UpdateGroupDto,
@@ -45,23 +43,8 @@ export interface ICliCredentialStore {
     deleteCredentials(userId: string): Promise<void>;
 }
 
-export interface ICliAuditStore {
-    log(entry: AuditEntry): Promise<void>;
-    /** Newest first. */
-    getEntries(options?: AuditQueryOptions): Promise<AuditEntry[]>;
-    clear(): Promise<void>;
-    /**
-     * Deletes the entries recorded before `before`; returns how many. Run it on a
-     * schedule to keep the log bounded. Optional: a store without it keeps everything
-     * (`pruneAudit` returns 0).
-     */
-    prune?(before: Date): Promise<number>;
-}
-
-/** Deletes the audit entries recorded before `before` (`store.prune`); 0 when the store keeps everything. */
-export async function pruneAudit(store: ICliAuditStore, before: Date): Promise<number> {
-    return store.prune ? store.prune(before) : 0;
-}
+/** The audit store contract is in `@qodalis/cli-server-abstractions`; re-exported here for existing imports. */
+export { ICliAuditStore, pruneAudit } from '@qodalis/cli-server-plugin-audit';
 
 export interface ICliGroupStore {
     getGroups(): Promise<Group[]>;

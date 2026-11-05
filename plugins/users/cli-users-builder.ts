@@ -1,22 +1,21 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
+import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { AuthAdapter, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
     ICliUserStore,
     ICliSessionStore,
     ICliCredentialStore,
-    ICliAuditStore,
     ICliGroupStore,
     ICliApiTokenStore,
 } from './stores/interfaces';
 import { InMemoryUserStore } from './stores/in-memory-user-store';
 import { InMemorySessionStore } from './stores/in-memory-session-store';
 import { InMemoryCredentialStore } from './stores/in-memory-credential-store';
-import { InMemoryAuditStore } from './stores/in-memory-audit-store';
 import { InMemoryGroupStore } from './stores/in-memory-group-store';
 import { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 import { AuthService } from './services/auth-service';
 import { DirectoryService } from './services/directory-service';
-import { createAuthMiddleware, RequestAuthenticator } from './middleware/auth-middleware';
+import { createAuthMiddleware, getAuth, requirePermission, RequestAuthenticator } from './middleware/auth-middleware';
 import { createReadOnlyStoresGuard } from './middleware/read-only-stores';
 import { UsersServerAuth } from './server-auth';
 import { RateLimiter, clientIp } from './security';
@@ -24,7 +23,6 @@ import { randomInt } from 'crypto';
 import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
-import { createAuditController } from './controllers/audit-controller';
 import { createTokensController } from './controllers/tokens-controller';
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
@@ -44,7 +42,15 @@ export interface UsersPluginResult {
     sessionStore: ICliSessionStore;
     credentialStore: ICliCredentialStore;
     groupStore: ICliGroupStore;
+    /** Where the audit log is kept (`auditPlugin.store`). */
     auditStore: ICliAuditStore;
+    /**
+     * The audit plugin the users plugin records its events in. Its API is served by this
+     * plugin's router at `/audit`, protected by the users sign-in.
+     */
+    auditPlugin: CliAuditPluginResult;
+    /** Packages listed among the server's installed plugins with this one (the audit plugin). */
+    installedPlugins: CliInstalledPlugin[];
     apiTokenStore: ICliApiTokenStore;
     /**
      * Auth provider for the CLI server and the admin dashboard. Installed by
@@ -108,8 +114,18 @@ export class CliUsersBuilder {
         return this;
     }
 
+    /** Keeps the audit log in `store`: the same as setting the store of the audit plugin this plugin adds. */
     setAuditStore(store: ICliAuditStore): this {
         this.options.auditStore = store;
+        return this;
+    }
+
+    /**
+     * Records events in, and serves, the host's own audit plugin (`new CliAuditBuilder()...build()`)
+     * instead of one the users plugin builds. Use it when the host builds the audit plugin itself.
+     */
+    setAuditPlugin(plugin: CliAuditPluginResult): this {
+        this.options.auditPlugin = plugin;
         return this;
     }
 
@@ -243,7 +259,12 @@ export class CliUsersBuilder {
         const userStore = options.userStore ?? new InMemoryUserStore();
         const sessionStore = options.sessionStore ?? new InMemorySessionStore();
         const credentialStore = options.credentialStore ?? new InMemoryCredentialStore();
-        const auditStore = options.auditStore ?? new InMemoryAuditStore();
+        // The audit log is the audit plugin's: the users plugin records its events there and serves its API.
+        if (options.auditPlugin && options.auditStore && options.auditPlugin.store !== options.auditStore) {
+            throw new Error('[users] auditStore and auditPlugin disagree: set the store on the audit plugin');
+        }
+        const auditPlugin = options.auditPlugin ?? buildAuditPlugin(options.auditStore);
+        const auditStore = auditPlugin.store;
         const groupStore = options.groupStore ?? new InMemoryGroupStore();
         const apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
 
@@ -310,7 +331,19 @@ export class CliUsersBuilder {
         router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
         router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
         router.use('/groups', authMiddleware, createGroupsController(directory));
-        router.use('/audit', authMiddleware, createAuditController(auditStore, authService));
+        // The audit API is protected by the users sign-in and permissions (and by the
+        // server's route policy on a protected server).
+        const auditGuard: CliAuditGuard = (permission) => [
+            authMiddleware,
+            requirePermission(permission),
+            (req, _res, next) => {
+                const request = req as Request & { qcliServerAuth?: unknown };
+                request.qcliServerAuth ??= UsersServerAuth.toServerContext(getAuth(req));
+                next();
+            },
+        ];
+        auditPlugin.protect(auditGuard);
+        router.use('/audit', auditPlugin.router);
         router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
         router.use(scoped, errorHandler);
 
@@ -332,6 +365,7 @@ export class CliUsersBuilder {
             credentialStore,
             groupStore,
             auditStore,
+            auditPlugin,
             apiTokenStore,
             serverAuth,
             protectServer,
@@ -339,8 +373,15 @@ export class CliUsersBuilder {
             requirePermission: (...permissions: string[]) => serverAuth.requirePermission(...permissions),
             dispose: () => clearInterval(cleanupInterval),
             installedPlugin: usersInstalledPlugin,
+            installedPlugins: [auditPlugin.installedPlugin],
         };
     }
+}
+
+function buildAuditPlugin(store: ICliAuditStore | undefined): CliAuditPluginResult {
+    const builder = new CliAuditBuilder();
+    if (store) builder.setStore(store);
+    return builder.build();
 }
 
 const WEAK_PASSWORDS = new Set(['root', 'admin', 'password']);
