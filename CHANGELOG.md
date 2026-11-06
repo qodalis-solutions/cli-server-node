@@ -3,8 +3,10 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
-## Unreleased
+## 1.0.0-beta.21
 
+- The admin plugin embeds dashboard 1.0.0-beta.16: delete job runs (one, a result's or every finished one), older log
+  entries load when scrolling up with stable paging, and themed dropdown arrows.
 - **Jobs:** delete runs, the same on the .NET and Python servers. `DELETE /api/v1/qcli/jobs/{id}/history/{execId}`
   deletes one run and its logs (`{ "message": "Run deleted" }`; 404 `JOB_NOT_FOUND` or `EXECUTION_NOT_FOUND` when the
   run is missing or another job's, 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED` when the storage has no
