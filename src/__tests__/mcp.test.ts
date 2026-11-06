@@ -542,7 +542,7 @@ describe('MCP: tool providers', () => {
         s.mountPlugin(new CliJobsBuilder().build());
         const tools = Object.fromEntries((await listTools(s.app)).map((t) => [t.name, t.annotations]));
         for (const n of ['server_info', 'fs_list', 'fs_stat', 'fs_read', 'jobs_list', 'jobs_get', 'jobs_history']) expect(tools[n], n).toEqual({ readOnlyHint: true });
-        for (const n of ['fs_delete', 'jobs_stop', 'jobs_cancel']) expect(tools[n], n).toEqual({ destructiveHint: true });
+        for (const n of ['fs_delete', 'jobs_stop', 'jobs_cancel', 'jobs_delete_runs']) expect(tools[n], n).toEqual({ destructiveHint: true });
         for (const n of ['fs_write', 'fs_mkdir', 'jobs_trigger', 'jobs_pause', 'jobs_resume', 'echo']) expect(tools[n], n).toBeUndefined();
     });
 
@@ -588,7 +588,7 @@ describe('MCP: tool providers', () => {
             .build();
         s.mountPlugin(jobs);
         const names = (await listTools(s.app)).map((t) => t.name);
-        expect(names).toEqual(expect.arrayContaining(['jobs_list', 'jobs_get', 'jobs_history', 'jobs_trigger', 'jobs_pause', 'jobs_resume', 'jobs_stop', 'jobs_cancel']));
+        expect(names).toEqual(expect.arrayContaining(['jobs_list', 'jobs_get', 'jobs_history', 'jobs_trigger', 'jobs_pause', 'jobs_resume', 'jobs_stop', 'jobs_cancel', 'jobs_delete_runs']));
         const list = await call(s.app, 'jobs_list');
         const id = list.result.structuredContent.jobs[0].id;
         expect((await call(s.app, 'jobs_get', { id })).result.structuredContent.name).toBe('tick');
@@ -599,6 +599,10 @@ describe('MCP: tool providers', () => {
         expect(runs).toBe(1);
         const history = await call(s.app, 'jobs_history', { id, limit: 5 });
         expect(history.result.structuredContent.limit).toBe(5);
+        const execId = history.result.structuredContent.items[0].id;
+        expect((await call(s.app, 'jobs_delete_runs', { id, executionId: 'missing' })).result.isError).toBe(true);
+        expect((await call(s.app, 'jobs_delete_runs', { id, executionId: execId })).result.structuredContent.deleted).toBe(1);
+        expect((await call(s.app, 'jobs_delete_runs', { id, status: 'failed' })).result.structuredContent.deleted).toBe(0);
         await jobs.scheduler.stop();
     });
 

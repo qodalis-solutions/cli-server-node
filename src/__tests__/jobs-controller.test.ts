@@ -5,7 +5,10 @@ import {
     ICliJob,
     ICliJobExecutionContext,
     CliJobOptions,
+    JobExecution,
+    JobExecutionStatus,
 } from '@qodalis/cli-server-abstractions';
+import { InMemoryJobStorageProvider } from '../../plugins/jobs/in-memory-job-storage-provider';
 import { CliJobsBuilder, CliJobsPluginResult } from '../../plugins/jobs/cli-jobs-builder';
 import { createCliJobsController } from '../../plugins/jobs/cli-jobs-controller';
 
@@ -289,5 +292,116 @@ describe('GET /api/v1/qcli/jobs/executions', () => {
         expect(history.body.items[0].properties).toEqual({ calls: 1 });
         const detail = await request(app).get(`/api/v1/qcli/jobs/${jobIds['quick']}/history/${history.body.items[0].id}`);
         expect(detail.body.properties).toEqual({ calls: 1 });
+    });
+});
+
+describe('DELETE /api/v1/qcli/jobs/:id/history', () => {
+    let storage: InMemoryJobStorageProvider;
+    let deleteApp: express.Express;
+    let deletePlugin: CliJobsPluginResult;
+
+    const run = (id: string, jobId: string, status: JobExecutionStatus): JobExecution => ({
+        id,
+        jobId,
+        jobName: jobId,
+        status,
+        startedAt: new Date(Date.now() - 1000).toISOString(),
+        logs: [{ timestamp: new Date().toISOString(), level: 'info', message: 'ran' }],
+        retryAttempt: 0,
+    });
+
+    beforeEach(async () => {
+        storage = new InMemoryJobStorageProvider();
+        deletePlugin = new CliJobsBuilder()
+            .addJob(new QuickJob(), { id: 'a', name: 'a', interval: '999s' })
+            .addJob(new QuickJob(), { id: 'b', name: 'b', interval: '999s' })
+            .setStorageProvider(storage)
+            .build();
+        deleteApp = express();
+        deleteApp.use(express.json());
+        deleteApp.use(deletePlugin.prefix, deletePlugin.router);
+        await storage.saveExecution(run('a1', 'a', 'completed'));
+        await storage.saveExecution(run('a2', 'a', 'failed'));
+        await storage.saveExecution(run('a3', 'a', 'failed'));
+        await storage.saveExecution(run('a4', 'a', 'running'));
+        await storage.saveExecution(run('b1', 'b', 'completed'));
+    });
+
+    it('deletes one run and its logs', async () => {
+        const res = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history/a1');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ message: 'Run deleted' });
+        expect(await storage.getExecution('a1')).toBeNull();
+        const detail = await request(deleteApp).get('/api/v1/qcli/jobs/a/history/a1');
+        expect(detail.status).toBe(404);
+    });
+
+    it('404 JOB_NOT_FOUND for an unknown job', async () => {
+        const one = await request(deleteApp).delete('/api/v1/qcli/jobs/missing/history/a1');
+        expect(one.status).toBe(404);
+        expect(one.body.code).toBe('JOB_NOT_FOUND');
+        const many = await request(deleteApp).delete('/api/v1/qcli/jobs/missing/history');
+        expect(many.status).toBe(404);
+        expect(many.body.code).toBe('JOB_NOT_FOUND');
+    });
+
+    it('404 EXECUTION_NOT_FOUND for a missing run or another job\'s run', async () => {
+        const missing = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history/nope');
+        expect(missing.status).toBe(404);
+        expect(missing.body.code).toBe('EXECUTION_NOT_FOUND');
+        const other = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history/b1');
+        expect(other.status).toBe(404);
+        expect(other.body.code).toBe('EXECUTION_NOT_FOUND');
+        expect(await storage.getExecution('b1')).not.toBeNull();
+    });
+
+    it('409 EXECUTION_RUNNING for a running run', async () => {
+        const res = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history/a4');
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe('EXECUTION_RUNNING');
+        expect(await storage.getExecution('a4')).not.toBeNull();
+    });
+
+    it('deletes every finished run of the job, never running ones', async () => {
+        const res = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ deleted: 3 });
+        const left = await storage.getExecutions('a', { limit: 100 });
+        expect(left.items.map((e) => e.id)).toEqual(['a4']);
+        expect(await storage.getExecution('b1')).not.toBeNull();
+    });
+
+    it('deletes only the runs with the status', async () => {
+        const res = await request(deleteApp).delete('/api/v1/qcli/jobs/a/history?status=failed');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ deleted: 2 });
+        const left = await storage.getExecutions('a', { limit: 100 });
+        expect(left.items.map((e) => e.id).sort()).toEqual(['a1', 'a4']);
+    });
+
+    it('deletes more runs than one page', async () => {
+        for (let i = 0; i < 250; i++) await storage.saveExecution(run(`bulk-${i}`, 'b', 'completed'));
+        const res = await request(deleteApp).delete('/api/v1/qcli/jobs/b/history');
+        expect(res.body).toEqual({ deleted: 251 });
+        expect((await storage.getExecutions('b')).total).toBe(0);
+    });
+
+    it('501 NOT_SUPPORTED when the storage cannot delete runs', async () => {
+        const keepAll = new InMemoryJobStorageProvider();
+        (keepAll as any).deleteExecution = undefined;
+        await keepAll.saveExecution(run('k1', 'k', 'completed'));
+        const p = new CliJobsBuilder()
+            .addJob(new QuickJob(), { id: 'k', name: 'k', interval: '999s' })
+            .setStorageProvider(keepAll)
+            .build();
+        const a = express();
+        a.use(p.prefix, p.router);
+        const one = await request(a).delete('/api/v1/qcli/jobs/k/history/k1');
+        expect(one.status).toBe(501);
+        expect(one.body.code).toBe('NOT_SUPPORTED');
+        const many = await request(a).delete('/api/v1/qcli/jobs/k/history');
+        expect(many.status).toBe(501);
+        expect(many.body.code).toBe('NOT_SUPPORTED');
+        expect(await keepAll.getExecution('k1')).not.toBeNull();
     });
 });

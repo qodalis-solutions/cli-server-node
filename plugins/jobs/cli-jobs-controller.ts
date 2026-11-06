@@ -19,6 +19,8 @@ import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli
  * - PUT    /:id         - update job options
  * - GET    /:id/history - paginated execution history
  * - GET    /:id/history/:execId - single execution with full logs
+ * - DELETE /:id/history/:execId - delete one finished run and its logs
+ * - DELETE /:id/history - delete every finished run (?status= for only those with that status)
  *
  * @param scheduler - The job scheduler managing registrations and execution.
  * @param storage - Storage provider for execution history lookups.
@@ -191,6 +193,25 @@ export function createCliJobsController(
         }
 
         res.json({ ...execution, properties: execution.properties ?? {} });
+    });
+
+    router.delete('/:id/history/:execId', async (req, res) => {
+        try {
+            await scheduler.deleteExecutionAsync(req.params.id, req.params.execId);
+            res.json({ message: 'Run deleted' });
+        } catch (err) {
+            handleError(res, err);
+        }
+    });
+
+    router.delete('/:id/history', async (req, res) => {
+        const status = typeof req.query.status === 'string' && req.query.status ? req.query.status : undefined;
+        try {
+            const deleted = await scheduler.deleteExecutionsAsync(req.params.id, status);
+            res.json({ deleted });
+        } catch (err) {
+            handleError(res, err);
+        }
     });
 
     return router;

@@ -85,6 +85,49 @@ export interface ICliJobScheduler {
     updateOptionsAsync(id: string, updates: CliJobOptionsUpdate): Promise<void>;
     /** The executions of several jobs (`query.jobIds`) or of every job, newest first. */
     queryExecutions(query: JobExecutionQuery): Promise<{ items: JobExecution[]; total: number }>;
+    /**
+     * Deletes one finished run of the job and its logs. Throws a {@link JobError}: 404 `JOB_NOT_FOUND`,
+     * 404 `EXECUTION_NOT_FOUND` (missing or another job's run), 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED`
+     * (the storage cannot delete runs).
+     */
+    deleteExecutionAsync(jobId: string, executionId: string): Promise<void>;
+    /**
+     * Deletes every finished run of the job, or only those with `status` (matched like the history filter);
+     * running runs are never deleted. Returns how many were deleted. Throws like {@link deleteExecutionAsync}.
+     */
+    deleteExecutionsAsync(jobId: string, status?: string): Promise<number>;
+}
+
+/** A job's runs read per page by {@link deleteFinishedJobExecutions}. */
+const DELETE_PAGE_SIZE = 100;
+
+/**
+ * The default bulk delete of a job scheduler: lists the job's runs page by page (with `status`), then deletes each
+ * finished one through `deleteOne`, skipping runs that are running (or started running since they were listed).
+ * Returns how many were deleted.
+ */
+export async function deleteFinishedJobExecutions(
+    listPage: (offset: number, limit: number) => Promise<{ items: JobExecution[]; total: number }>,
+    deleteOne: (executionId: string) => Promise<void>,
+): Promise<number> {
+    const ids: string[] = [];
+    for (let offset = 0; ; offset += DELETE_PAGE_SIZE) {
+        const page = await listPage(offset, DELETE_PAGE_SIZE);
+        ids.push(...page.items.filter((e) => e.status !== 'running').map((e) => e.id));
+        if (page.items.length < DELETE_PAGE_SIZE || offset + DELETE_PAGE_SIZE >= page.total) break;
+    }
+    let deleted = 0;
+    for (const id of ids) {
+        try {
+            await deleteOne(id);
+            deleted++;
+        } catch (err) {
+            // Started running, or deleted by someone else, since it was listed
+            if (err instanceof JobError && (err.code === 'EXECUTION_RUNNING' || err.code === 'EXECUTION_NOT_FOUND')) continue;
+            throw err;
+        }
+    }
+    return deleted;
 }
 
 /**
@@ -304,6 +347,38 @@ export class CliJobScheduler implements ICliJobScheduler {
         if (!reg.currentExecutionId) throw new JobError('No execution is running', 'JOB_NOT_RUNNING', 409);
 
         reg.currentAbortController?.abort();
+    }
+
+    /** Delete one finished run of a job and its logs (see {@link ICliJobScheduler.deleteExecutionAsync}). */
+    async deleteExecutionAsync(jobId: string, executionId: string): Promise<void> {
+        const reg = this._registrations.get(jobId);
+        if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
+        if (!this._storage.deleteExecution) {
+            throw new JobError('The job storage cannot delete runs', 'NOT_SUPPORTED', 501);
+        }
+        const execution = await this._storage.getExecution(executionId);
+        if (!execution || execution.jobId !== jobId) {
+            throw new JobError('Execution not found', 'EXECUTION_NOT_FOUND', 404);
+        }
+        if (execution.status === 'running' || reg.currentExecutionId === executionId) {
+            throw new JobError('The run is still running', 'EXECUTION_RUNNING', 409);
+        }
+        if (!(await this._storage.deleteExecution(executionId))) {
+            throw new JobError('Execution not found', 'EXECUTION_NOT_FOUND', 404);
+        }
+    }
+
+    /** Delete every finished run of a job, or those with `status` (see {@link ICliJobScheduler.deleteExecutionsAsync}). */
+    async deleteExecutionsAsync(jobId: string, status?: string): Promise<number> {
+        if (!this._registrations.has(jobId)) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
+        if (!this._storage.deleteExecution) {
+            throw new JobError('The job storage cannot delete runs', 'NOT_SUPPORTED', 501);
+        }
+        return deleteFinishedJobExecutions(
+            (offset, limit) =>
+                this._storage.getExecutions(jobId, { offset, limit, status: status as JobExecutionStatus | undefined }),
+            (executionId) => this.deleteExecutionAsync(jobId, executionId),
+        );
     }
 
     /** Update mutable job options (schedule, retry policy, etc.) and restart timers if active. */
