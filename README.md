@@ -202,6 +202,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `app` | The Express app |
 | `registry`, `builder`, `executor` | Processor registry, registration builder, command executor |
 | `eventSocketManager` | `attach(server)` for the WebSockets, `broadcastMessage`, `broadcastDisconnect` |
+| `eventBus` | The server's event bus: `publish(type, data, audience)`, `subscribe(pattern, handler)` (see [Server events](#server-events)) |
 | `logSocketManager` | Server log stream socket |
 | `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth) |
 | `setAuth(auth)` | Installs or removes the server auth provider |
@@ -226,7 +227,7 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | GET | `/api/qcli/data-explorer/sources`, `schema` | Data sources and their schema (when sources are registered) |
 | POST | `/api/qcli/data-explorer/execute` | Run a query against a source |
 | POST | `/api/qcli/mcp` | MCP endpoint (when `mcp` is enabled) |
-| WS | `/ws/v1/qcli/events` | Server-push events |
+| WS | `/ws/v1/qcli/events` | Server-push events ([Server events](#server-events)) |
 | WS | `/ws/v1/qcli/logs` | Server log stream |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell (when `enableShell` is on) |
 
@@ -239,7 +240,7 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens; protects the whole server and adds the audit plugin |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
 | [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
-| [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management |
+| [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management; `maxConcurrentRuns` per job and an overlap policy, never a job started twice |
 | [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |
 | [`-filesystem-json`](plugins/filesystem-json/README.md), [`-filesystem-sqlite`](plugins/filesystem-sqlite/README.md), [`-filesystem-s3`](plugins/filesystem-s3/README.md) | JSON file, SQLite and Amazon S3 storage providers |
 | [`@qodalis/cli-server-plugin-data-explorer`](plugins/data-explorer/README.md) | Data explorer core |
@@ -253,12 +254,80 @@ Builder-based plugins are mounted with `mountPlugin`:
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 
-const { app, eventSocketManager, mountPlugin } = createCliServer({ /* ... */ });
-const broadcast = (msg: Record<string, unknown>) => eventSocketManager.broadcastMessage(msg);
+const { app, mountPlugin } = createCliServer({ /* ... */ });
 
-mountPlugin(new CliJobsBuilder().addJob(new HealthCheckJob(), { name: 'health', interval: '30s' }).build(broadcast));
-mountPlugin(new CliUsersBuilder().setDefaultAdminPassword(process.env.ADMIN_PASSWORD!).build(broadcast));
+// mountPlugin hands each plugin the server's event bus
+mountPlugin(new CliJobsBuilder().addJob(new HealthCheckJob(), { name: 'health', interval: '30s' }).build());
+mountPlugin(new CliUsersBuilder().setDefaultAdminPassword(process.env.ADMIN_PASSWORD!).build());
 ```
+
+`build()` also takes the bus (`build(eventBus)`) or, as before, a function broadcasting raw messages
+(`build((msg) => eventSocketManager.broadcastMessage(msg))`). A plugin given a function keeps it; one given nothing
+receives the server's bus when mounted.
+
+## Server events
+
+`createCliServer` creates one event bus (`eventBus`). Everything that changes something publishes on it, and the
+events WebSocket (`/ws/v1/qcli/events`) is one subscriber of `*` that sends each event to the sockets its audience
+allows. The .NET and Python servers publish the same events.
+
+```typescript
+import { createCliServer } from '@qodalis/cli-server-node';
+
+const { eventBus } = createCliServer({ /* ... */ });
+
+// React in code: '*', 'job:*' or an exact type
+const unsubscribe = eventBus.subscribe('job:failed', async (event) => {
+    await alerts.send(`Job ${event.data.jobId} failed: ${event.data.error}`);
+});
+
+// Publish your own: data is merged into the message, the audience is never sent
+await eventBus.publish('invoice:paid', { invoiceId: 'inv-42', actor: 'alice' }, { permission: 'billing:read' });
+```
+
+Each WebSocket message is one flat JSON object: `type`, `timestamp` (ISO 8601 UTC, added unless the publisher set
+one) and the publisher's fields (`type` and `timestamp` are reserved). `actor` is the user who caused the change,
+when known.
+
+```json
+{ "type": "job:completed", "timestamp": "2026-11-06T10:15:00.000Z", "jobId": "cleanup", "executionId": "…", "duration": 1520 }
+```
+
+| Audience | Delivered to |
+|---|---|
+| none (default) | every connected event socket |
+| `{ permission: 'jobs:read' }` | sockets whose user has the permission |
+| `{ userId: 'u1' }` | sockets of that user |
+| both | the user **or** anyone with the permission |
+
+On a server without the users plugin (sockets have no user) every event reaches every socket. In-process
+subscribers receive every event. Handlers run in subscription order and `publish` resolves once they all finished;
+a handler that throws is logged and never fails the action that published.
+
+| Type | Fields | Audience | Published by |
+|---|---|---|---|
+| `job:started` | jobId, executionId | `jobs:read` | scheduler |
+| `job:completed` | jobId, executionId, duration | `jobs:read` | scheduler |
+| `job:failed` | jobId, executionId, error | `jobs:read` | scheduler |
+| `job:cancelled`, `job:timed_out` | jobId, executionId | `jobs:read` | scheduler |
+| `job:retrying` | jobId, executionId, attempt, maxRetries, delayMs | `jobs:read` | scheduler |
+| `job:paused`, `job:resumed`, `job:stopped` | jobId, status (`paused`, `active`, `stopped`) | `jobs:read` | scheduler |
+| `job:triggered` | jobId | `jobs:read` | jobs API, MCP `jobs_trigger` |
+| `job:updated` | jobId | `jobs:read` | jobs API (`PUT /jobs/{id}`, `maxConcurrentRuns` included) |
+| `job:runs-deleted` | jobId, executionId (one run) or count (bulk) | `jobs:read` | jobs API, MCP `jobs_delete_runs` |
+| `user:created`, `user:updated`, `user:deleted` | userId, username | `users:read` | users plugin |
+| `group:created`, `group:updated`, `group:deleted` | group (its name) | `groups:read` | users plugin |
+| `token:created`, `token:revoked` | tokenId, name, userId | `tokens:read` or the owner | users plugin |
+| `session:opened`, `session:closed` | userId, username, sessionId | `sessions:read` | users plugin |
+| `fs:changed` | action (`upload`, `mkdir`, `delete`, `write`, `move`, `copy`), path, newPath (move/copy) | `files:read` | file storage provider (filesystem API and MCP `fs_*`) |
+| `command:executed` | command (the processor name only), success, durationMs, userId | `audit:read` | `/execute`, `/execute/stream`, MCP command tools |
+| `audit:recorded` | the audit entry as `GET /audit` returns it | `audit:read` | audit plugin store |
+| `log:entry` | the log entry | `logs:read` | admin plugin (with `eventBus`) |
+
+`user:updated` covers profile, password, enabled/disabled and group membership changes; `session:closed` covers
+sign-out, expiry and kicks. The control messages `connected`, `disconnect` and `session-kicked` are unchanged.
+`eventSocketManager.broadcastMessage(msg)` still sends a raw message; on a protected server a namespaced message
+reaches the holders of its namespace's read permission (`job:*` → `jobs:read`, `user:*` → `users:read`, ...).
 
 ### File storage
 
@@ -369,7 +438,7 @@ import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 
 // Your app's origin: the browser terminal and the dashboard call the API and open sockets from it
 const cli = createCliServer({ allowedOrigins: ['https://app.example.com'] });
-const { registry, builder, eventSocketManager, logSocketManager } = cli;
+const { registry, builder, eventSocketManager, logSocketManager, eventBus } = cli;
 
 const usersPlugin = new CliUsersBuilder()
     // Runs on every CLI request and WebSocket ticket, and again on open sockets (see below)
@@ -387,12 +456,12 @@ const usersPlugin = new CliUsersBuilder()
     // Your app owns accounts and roles: the CLI's user and group endpoints answer 501
     .setReadOnlyUsers()
     .setReadOnlyGroups()
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
+    .build(eventBus);
 
 const adminPlugin = new CliAdminBuilder()
     .setAuthProvider(usersPlugin.serverAuth)
     .setSignInUrl('https://app.example.com/sign-in')
-    .build({ registry, eventSocketManager, builder });
+    .build({ registry, eventSocketManager, builder, eventBus });
 
 cli.mountPlugin(adminPlugin);
 cli.mountPlugin(usersPlugin); // protects every CLI route and socket
@@ -491,7 +560,7 @@ The image runs the standalone server and accepts the same environment variables.
 
 ## Versioning
 
-Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.22` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
+Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.23` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
 
 ## Development
 

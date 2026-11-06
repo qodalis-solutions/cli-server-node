@@ -49,6 +49,8 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliTablePage` | The `page` of a table output: `skip`, `take`, `total?`, `hasMore`, `truncated?` |
 | `ICliAuditStore` | Where the audit log is kept (`log`, `getEntries`, `clear`, optional `prune`); the audit plugin keeps it in memory by default |
 | `AuditEntry`, `AuditMetadata`, `AuditQueryOptions` | An audit log entry, its request details, and the filters/paging of a query |
+| `ICliEventBus` | The server's event bus: `publish(type, data?, audience?)` (never rejects) and `subscribe(pattern, handler)` → unsubscribe |
+| `CliEvent`, `CliEventAudience` | An event (`type`, `timestamp`, `data`, `audience`) and who receives it over the events WebSocket (`permission`, `userId`) |
 
 ### Classes
 
@@ -65,12 +67,16 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 |----------|-------------|
 | `DefaultLibraryAuthor` | Default `ICliCommandAuthor` instance used when no author is specified |
 | `DEFAULT_TAKE`, `MAX_TAKE` | Rows shown by default (50) and at most (500) |
+| `CliEventPermissions` | The read permissions of the server events' audiences (`jobs:read`, `users:read`, ...) |
 
 ### Functions
 
 | Function | Description |
 |----------|-------------|
 | `pruneAudit(store, before)` | Deletes the audit entries recorded before `before` (`store.prune`); 0 for a store that keeps everything |
+| `cliEventPatternMatches(type, pattern)` | `*` matches everything, `ns:*` every type starting with `ns:`, else exact |
+| `toCliEventMessage(event)` | The flat wire message `{ type, timestamp, ...data }` |
+| `cliEventBusFromBroadcast(fn)`, `resolveCliEventBus(busOrFn)` | A bus over a raw broadcast function (for plugins built with one) |
 
 ### `CliCommandProcessor` Members
 

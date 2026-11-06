@@ -30,6 +30,8 @@ export interface UsersServerAuthContext {
 export interface UsersServerAttachment {
     allowedOrigins?: string[];
     broadcast: (msg: Record<string, unknown>) => void;
+    /** The server's event bus (structurally `ICliEventBus`). */
+    eventBus?: import('@qodalis/cli-server-abstractions').ICliEventBus;
     /** The server's runtime options (`externalAuthentication` is set from the auth adapter). */
     serverOptions?: { externalAuthentication: boolean };
 }

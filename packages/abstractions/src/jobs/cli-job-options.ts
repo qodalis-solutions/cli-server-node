@@ -28,8 +28,10 @@ export interface CliJobOptions {
      */
     interval?: string;
     /**
-     * Runs the job once right after the scheduler starts, whatever its schedule (also
-     * for jobs that only run on demand). Not for paused or stopped jobs. Default false.
+     * Runs the job when the scheduler starts, unless it ran recently: an interval job when it
+     * never ran or its next run is due, a cron job when it never ran or missed an occurrence
+     * since its last run, a job without a schedule on every start. Not for paused or stopped
+     * jobs. Default false.
      */
     runOnStart?: boolean;
     /** Whether the job starts in active state. Default true. */
@@ -42,6 +44,15 @@ export interface CliJobOptions {
     retryStrategy?: JobRetryStrategy;
     /** Maximum execution time before cancellation (e.g., "5m"). */
     timeout?: string;
-    /** Behavior when timer fires while job is already running. Default 'skip'. */
+    /**
+     * What happens when a run is due (timer, trigger, run on start) while `maxConcurrentRuns`
+     * runs are going: 'skip' drops it (a trigger answers 409), 'queue' queues one run (at most
+     * one is pending per job), 'cancel' cancels the oldest run. Default 'skip'.
+     */
     overlapPolicy?: JobOverlapPolicy;
+    /**
+     * Up to this many runs of the job at the same time (integer >= 1). A run holds its slot
+     * from its start until it ends, its retries and the delays between them included. Default 1.
+     */
+    maxConcurrentRuns?: number;
 }

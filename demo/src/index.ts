@@ -47,7 +47,7 @@ const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
           'http://127.0.0.1:*',
       ];
 
-const { app, registry, builder, executor, eventSocketManager, logSocketManager, mountPlugin } = createCliServer({
+const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin } = createCliServer({
     allowedOrigins,
     // The demo exposes the interactive shell. The users plugin is mounted below, so
     // the shell runs in "users" mode: a WS ticket from a session holding
@@ -278,7 +278,7 @@ const jobsPlugin = new CliJobsBuilder()
         group: 'monitoring',
         interval: '30s',
     })
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
+    .build(eventBus);
 
 mountPlugin(jobsPlugin);
 
@@ -291,7 +291,7 @@ const usersPlugin = new CliUsersBuilder()
     // Demo-only well-known password (a startup warning is logged).
     .setDefaultAdminPassword('admin')
     .setAllowedOrigins(allowedOrigins)
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
+    .build(eventBus);
 
 // -----------------------------------------------------------
 // Admin Dashboard (via plugin) — authenticates through the users plugin

@@ -15,3 +15,4 @@ export {
 } from './in-memory-audit-store';
 export { auditInstalledPlugin, AUDIT_PLUGIN_ID } from './package-info';
 export { AuditEntry, AuditMetadata, AuditQueryOptions, ICliAuditStore, pruneAudit } from '@qodalis/cli-server-abstractions';
+export { publishAuditEntries } from './cli-audit-event-store';

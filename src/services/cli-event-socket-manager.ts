@@ -4,9 +4,10 @@ import { URL } from 'url';
 import { CliShellSessionManager } from './cli-shell-session-manager';
 import { CliShellAuthMode, CliShellOptions } from './cli-shell-options';
 import { createLogger } from '../utils/logger';
-import { CliServerAuthContext, CliServerPermissions, ICliServerAuth } from '../auth/cli-server-auth';
+import { CliServerAuthContext, ICliServerAuth } from '../auth/cli-server-auth';
 import { authorizeWsUpgrade, rejectUpgrade } from '../auth/ws-upgrade-auth';
 import { SessionBoundSockets } from './session-bound-sockets';
+import { CliEvent, CliEventAudience, CliEventPermissions, toCliEventMessage } from '@qodalis/cli-server-abstractions';
 
 const logger = createLogger('EventSocket');
 
@@ -42,6 +43,30 @@ export interface CliEventSocketManagerOptions {
 
 /** Events delivered only to sockets authenticated as the event's user. */
 const USER_SCOPED_EVENTS = new Set(['session-kicked']);
+
+/** Read permission per event namespace, for raw messages sent with {@link CliEventSocketManager.broadcastMessage}. */
+const NAMESPACE_PERMISSIONS: Record<string, string> = {
+    log: CliEventPermissions.LogsRead,
+    job: CliEventPermissions.JobsRead,
+    user: CliEventPermissions.UsersRead,
+    group: CliEventPermissions.GroupsRead,
+    token: CliEventPermissions.TokensRead,
+    session: CliEventPermissions.SessionsRead,
+    fs: CliEventPermissions.FilesRead,
+    command: CliEventPermissions.AuditRead,
+    audit: CliEventPermissions.AuditRead,
+};
+
+/** The audience of a raw message: by its namespace (`token:*` also reaches the token's owner). */
+function defaultAudience(type: string, message: Record<string, unknown>): CliEventAudience {
+    const namespace = type === 'log' ? 'log' : type.split(':', 1)[0];
+    const permission = type.includes(':') || type === 'log' ? NAMESPACE_PERMISSIONS[namespace] : undefined;
+    if (!permission) return {};
+    if (namespace === 'token' && typeof message.userId === 'string') {
+        return { permission, userId: message.userId };
+    }
+    return { permission };
+}
 
 /**
  * Manages WebSocket connections for server-push events and interactive shell sessions.
@@ -203,12 +228,16 @@ export class CliEventSocketManager {
     }
 
     /**
-     * Broadcast an arbitrary message to all connected event clients.
+     * Broadcast a raw message to the connected event clients (kept for compatibility;
+     * publish on the event bus instead). On a protected server a namespaced message
+     * reaches the sockets holding its namespace's read permission (`job:*` → `jobs:read`,
+     * `user:*` → `users:read`, ...; `token:*` also its owner); others reach every socket.
      */
     broadcastMessage(message: Record<string, unknown>): void {
         const data = JSON.stringify(message);
         const type = typeof message.type === 'string' ? message.type : '';
         const payload = (message.data ?? {}) as Record<string, unknown>;
+        const audience = defaultAudience(type, message);
         const toClose: WebSocket[] = [];
 
         for (const ws of this._clients) {
@@ -228,15 +257,8 @@ export class CliEventSocketManager {
             // A socket whose session ended only waits for its session-kicked
             if (this._sessionBound.isEnding(ws)) continue;
 
-            if (this._auth?.protectServer) {
-                // Server-wide events need the matching read permission
-                const needed = type === 'log' || type.startsWith('log:')
-                    ? CliServerPermissions.LogsRead
-                    : type.startsWith('job:')
-                        ? CliServerPermissions.JobsRead
-                        : undefined;
-                if (needed && (!auth || !this._auth.hasPermission(auth, needed))) continue;
-            }
+            // Server-wide events need the matching read permission
+            if (!this._allows(auth, audience)) continue;
 
             ws.send(data);
         }
@@ -244,6 +266,46 @@ export class CliEventSocketManager {
         for (const ws of toClose) {
             this._sessionBound.kicked(ws);
         }
+    }
+
+    /**
+     * Sends a bus event to the sockets its audience allows (the subscriber of `*`
+     * that `createCliServer` installs). Without an auth provider protecting the
+     * server, every socket receives every event.
+     */
+    deliverEvent(event: CliEvent): void {
+        const message = toCliEventMessage(event);
+        if (USER_SCOPED_EVENTS.has(event.type)) {
+            // Control message with its own delivery rules (and socket closing)
+            this.broadcastMessage(message);
+            return;
+        }
+        this._send(message, event.audience);
+    }
+
+    /** Sends `message` to every open socket the audience allows (sockets of ended sessions excepted). */
+    private _send(message: Record<string, unknown>, audience: CliEventAudience): void {
+        const data = JSON.stringify(message);
+        for (const ws of this._clients) {
+            if (ws.readyState !== WebSocket.OPEN) continue;
+            // A socket whose session ended only waits for its session-kicked
+            if (this._sessionBound.isEnding(ws)) continue;
+            if (!this._allows(this._clientMeta.get(ws)?.auth, audience)) continue;
+            try {
+                ws.send(data);
+            } catch {
+                // A closing socket: never log here (log entries are events too)
+            }
+        }
+    }
+
+    /** Audience check: everyone on an unprotected server; else the user, or anyone holding the permission. */
+    private _allows(auth: CliServerAuthContext | undefined, audience: CliEventAudience): boolean {
+        if (!this._auth?.protectServer) return true;
+        if (!audience.permission && !audience.userId) return true;
+        if (!auth) return false;
+        if (audience.userId && auth.userId === audience.userId) return true;
+        return !!audience.permission && this._auth.hasPermission(auth, audience.permission);
     }
 
     /**

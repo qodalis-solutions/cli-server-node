@@ -14,7 +14,7 @@ npm install @qodalis/cli-server-plugin-admin
 import { createCliServer } from '@qodalis/cli-server-node';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 
-const { app, registry, builder, eventSocketManager } = createCliServer({
+const { app, registry, builder, eventSocketManager, eventBus } = createCliServer({
     configure: (builder) => {
         // register your modules...
     },
@@ -23,7 +23,8 @@ const { app, registry, builder, eventSocketManager } = createCliServer({
 const adminPlugin = new CliAdminBuilder()
     .setCredentials('admin', 'my-secret-password')
     .setJwtSecret('my-jwt-secret')
-    .build({ registry, eventSocketManager, builder });
+    // eventBus: log entries are published as `log:entry` (audience `logs:read`)
+    .build({ registry, eventSocketManager, builder, eventBus });
 
 // Using createCliServer:
 mountPlugin(adminPlugin);

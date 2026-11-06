@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import { CliJobScheduler, JobError } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli-jobs-stats';
@@ -11,12 +11,12 @@ import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli
  * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
  * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=)
  * - GET    /:id         - single job details
- * - POST   /:id/trigger - trigger immediate execution
+ * - POST   /:id/trigger - trigger a run ({ message, queued })
  * - POST   /:id/pause   - pause scheduled execution
  * - POST   /:id/resume  - resume a paused job
  * - POST   /:id/stop    - stop job and cancel if running
- * - POST   /:id/cancel  - cancel current execution only
- * - PUT    /:id         - update job options
+ * - POST   /:id/cancel  - cancel every running run (and a queued one)
+ * - PUT    /:id         - update job options (incl. maxConcurrentRuns)
  * - GET    /:id/history - paginated execution history
  * - GET    /:id/history/:execId - single execution with full logs
  * - DELETE /:id/history/:execId - delete one finished run and its logs
@@ -94,8 +94,10 @@ export function createCliJobsController(
 
     router.post('/:id/trigger', async (req, res) => {
         try {
-            await scheduler.triggerAsync(req.params.id);
-            res.json({ ok: true });
+            const result = await scheduler.triggerAsync(req.params.id);
+            await scheduler.publishEvent('job:triggered', { jobId: req.params.id, ...actorOf(req) });
+            // Queued: accepted, the run starts when a slot frees
+            res.json(result.queued ? { ok: true, message: 'Job queued', queued: true } : { ok: true, message: 'Job triggered', queued: false });
         } catch (err) {
             handleError(res, err);
         }
@@ -139,7 +141,7 @@ export function createCliJobsController(
 
     router.put('/:id', async (req, res) => {
         try {
-            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy } = req.body ?? {};
+            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy, maxConcurrentRuns } = req.body ?? {};
             await scheduler.updateOptionsAsync(req.params.id, {
                 description,
                 group,
@@ -150,7 +152,9 @@ export function createCliJobsController(
                 retryStrategy,
                 timeout,
                 overlapPolicy,
+                maxConcurrentRuns,
             });
+            await scheduler.publishEvent('job:updated', { jobId: req.params.id, ...actorOf(req) });
             const updated = scheduler.get(req.params.id);
             res.json(updated);
         } catch (err) {
@@ -198,6 +202,7 @@ export function createCliJobsController(
     router.delete('/:id/history/:execId', async (req, res) => {
         try {
             await scheduler.deleteExecutionAsync(req.params.id, req.params.execId);
+            await scheduler.publishEvent('job:runs-deleted', { jobId: req.params.id, executionId: req.params.execId, ...actorOf(req) });
             res.json({ message: 'Run deleted' });
         } catch (err) {
             handleError(res, err);
@@ -208,6 +213,7 @@ export function createCliJobsController(
         const status = typeof req.query.status === 'string' && req.query.status ? req.query.status : undefined;
         try {
             const deleted = await scheduler.deleteExecutionsAsync(req.params.id, status);
+            await scheduler.publishEvent('job:runs-deleted', { jobId: req.params.id, count: deleted, ...actorOf(req) });
             res.json({ deleted });
         } catch (err) {
             handleError(res, err);
@@ -215,6 +221,12 @@ export function createCliJobsController(
     });
 
     return router;
+}
+
+/** `{ actor }`: the signed-in caller's name (set by the server's auth gate), when known. */
+function actorOf(req: Request): { actor?: string } {
+    const name = (req as Request & { qcliServerAuth?: { userName?: string } }).qcliServerAuth?.userName;
+    return name ? { actor: name } : {};
 }
 
 /** An execution in a list: without its logs, with their count and the run's properties. */

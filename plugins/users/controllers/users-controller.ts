@@ -143,6 +143,7 @@ export function createUsersController(
         const mustChangePassword = isSelf ? false : temporary !== false;
         await directory.setMustChangePassword(target, mustChangePassword);
         await authService.audit({ event: 'password_changed', username: target.name, userId: target.id, actor: caller.name, actorId: caller.id });
+        await directory.publishUserEvent('user:updated', target, caller);
 
         if (isSelf) {
             await authService.revokeUserSessions(target.id, 'password changed', {
