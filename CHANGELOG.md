@@ -3,6 +3,34 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## 1.0.0-beta.23
+
+- **Server events**, the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-06-server-events-design.md`):
+  - `createCliServer` returns `eventBus` (`CliEventBus`, typed `ICliEventBus` in `@qodalis/cli-server-abstractions`):
+    `publish(type, data?, audience?)` and `subscribe(pattern, handler)` (`*`, `ns:*` or an exact type;
+    `cliEventPatternMatches`). Handlers run in subscription order; one that throws is logged and never fails the
+    publishing action. The events WebSocket is the bus's subscriber of `*`.
+  - Each message is one flat JSON object: `type`, `timestamp` (ISO 8601 UTC, added unless set), the publisher's
+    fields and, when known, `actor`.
+  - Audience: an event goes to every socket, to the sockets holding a `permission`, to a `userId`'s sockets, or with
+    both to the user or the permission holders. Servers without the users plugin deliver everything to everyone;
+    in-process subscribers receive every event. `eventSocketManager.broadcastMessage` still works: on a protected
+    server namespaced raw messages need their namespace's read permission (`job:*` → `jobs:read`, `user:*` →
+    `users:read`, ...).
+  - New events: `job:triggered`, `job:updated`, `job:runs-deleted` (jobs API and MCP); `job:paused`, `job:resumed`
+    and `job:stopped` carry `status`; `user:created|updated|deleted`, `group:created|updated|deleted`,
+    `token:created|revoked`, `session:opened|closed` (users plugin); `fs:changed` (`upload`, `mkdir`, `delete`,
+    `write`, `move`, `copy`: the file storage provider shared by the filesystem API and the MCP `fs_*` tools);
+    `command:executed` (`/execute`, `/execute/stream` and MCP command tools: the processor name, success, duration,
+    caller; never arguments); `audit:recorded` (every entry the audit plugin's store keeps). Job events need
+    `jobs:read`, user/group/session events `users:read`/`groups:read`/`sessions:read`, token events `tokens:read` or
+    the owner, `fs:changed` `files:read`, `command:executed` and `audit:recorded` `audit:read`.
+  - The jobs and users builders take the bus (`build(eventBus)`); the broadcast-function parameter keeps working.
+    Built with neither, `mountPlugin` hands them the server's bus (new optional `MountablePlugin.setEventBus`, also on
+    the jobs and audit plugin results; auth providers get `eventBus` in `attachToServer`). The admin plugin takes
+    `eventBus` in `build()` and publishes `log:entry` with audience `logs:read`.
+
 ## 1.0.0-beta.22
 
 - The admin plugin embeds dashboard 1.0.0-beta.17: logs jump to newest, pause, copy an entry and collapsed exceptions; jobs run again and delete runs from the recent runs table.
