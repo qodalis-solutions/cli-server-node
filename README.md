@@ -240,7 +240,7 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens; protects the whole server and adds the audit plugin |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
 | [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
-| [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management |
+| [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management; `maxConcurrentRuns` per job and an overlap policy, never a job started twice |
 | [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |
 | [`-filesystem-json`](plugins/filesystem-json/README.md), [`-filesystem-sqlite`](plugins/filesystem-sqlite/README.md), [`-filesystem-s3`](plugins/filesystem-s3/README.md) | JSON file, SQLite and Amazon S3 storage providers |
 | [`@qodalis/cli-server-plugin-data-explorer`](plugins/data-explorer/README.md) | Data explorer core |
@@ -313,7 +313,7 @@ a handler that throws is logged and never fails the action that published.
 | `job:retrying` | jobId, executionId, attempt, maxRetries, delayMs | `jobs:read` | scheduler |
 | `job:paused`, `job:resumed`, `job:stopped` | jobId, status (`paused`, `active`, `stopped`) | `jobs:read` | scheduler |
 | `job:triggered` | jobId | `jobs:read` | jobs API, MCP `jobs_trigger` |
-| `job:updated` | jobId | `jobs:read` | jobs API (`PUT /jobs/{id}`) |
+| `job:updated` | jobId | `jobs:read` | jobs API (`PUT /jobs/{id}`, `maxConcurrentRuns` included) |
 | `job:runs-deleted` | jobId, executionId (one run) or count (bulk) | `jobs:read` | jobs API, MCP `jobs_delete_runs` |
 | `user:created`, `user:updated`, `user:deleted` | userId, username | `users:read` | users plugin |
 | `group:created`, `group:updated`, `group:deleted` | group (its name) | `groups:read` | users plugin |
