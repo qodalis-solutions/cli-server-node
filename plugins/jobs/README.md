@@ -102,7 +102,7 @@ Lowering `maxConcurrentRuns` cancels nothing: new runs start once the count is b
 queued run. `POST /:id/cancel` cancels every running run and drops a queued one; `stop` does the same and disables
 the schedule; a run cancelled by hand ends as `cancelled`, never `timed_out`. Job info carries `maxConcurrentRuns`,
 `runningExecutionIds` (the attempts executing now, oldest first; a run in its retry delay keeps its slot without an
-entry), `currentExecutionId` (the newest of them) and `queued`.
+entry), `currentExecutionId` (the newest of them, `null` when nothing is executing) and `queued`.
 
 A cron job computes its next occurrence from the one that just fired, so a timer that fires a few milliseconds
 early never runs an occurrence twice. On start, runs a previous process left `running` in the store are finished as
@@ -119,7 +119,7 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 | GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
 | GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
 | GET | `/:id` | Get job details |
-| POST | `/:id/trigger` | Trigger a run → `{ "message": "Job triggered", "queued": false }` once it ran, `{ "message": "Job queued", "queued": true }` when queued; 409 `JOB_ALREADY_RUNNING` when every slot is taken and the policy is `skip` |
+| POST | `/:id/trigger` | Trigger a run; answers at once, without waiting for it to finish: `{ "ok": true, "message": "Job triggered", "queued": false }`, or `{ "ok": true, "message": "Job queued", "queued": true }` when queued; 409 `JOB_ALREADY_RUNNING` when every slot is taken and the policy is `skip` |
 | POST | `/:id/pause` | Pause scheduled execution |
 | POST | `/:id/resume` | Resume a paused job |
 | POST | `/:id/stop` | Stop job: cancel its runs, drop a queued one, disable the schedule |

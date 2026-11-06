@@ -321,10 +321,14 @@ describe('event catalog', () => {
         afterEach(() => r.clear());
         afterAll(() => jobs.scheduler.stop());
 
+        /** The trigger answers once the run started: wait for the job's runs to end. */
+        const idle = (id: string) => waitFor(() => jobs.scheduler.jobs.get(id)!.runs.size === 0, 5000);
+
         it('trigger: job:started, job:completed (scheduler) and job:triggered (API)', async () => {
             await request(cli.app).post(`${V1}/jobs/quick/trigger`).expect(200);
-            expect(r.events.map((e) => e.type)).toEqual(['job:started', 'job:completed', 'job:triggered']);
-            const [started, completed, triggered] = r.events;
+            await idle('quick');
+            expect(r.events.map((e) => e.type).sort()).toEqual(['job:completed', 'job:started', 'job:triggered']);
+            const [started, completed, triggered] = ['job:started', 'job:completed', 'job:triggered'].map((t) => r.of(t)[0]);
             expect(started.data).toEqual({ jobId: 'quick', executionId: expect.any(String) });
             expect(started.audience).toEqual({ permission: 'jobs:read' });
             expect(completed.data).toEqual({ jobId: 'quick', executionId: started.data.executionId, duration: expect.any(Number) });
@@ -336,6 +340,7 @@ describe('event catalog', () => {
             fail = true;
             try {
                 await request(cli.app).post(`${V1}/jobs/quick/trigger`).expect(200);
+                await waitFor(() => r.of('job:failed').length === 2, 5000);
             } finally {
                 fail = false;
             }
@@ -345,13 +350,14 @@ describe('event catalog', () => {
         });
 
         it('cancel: job:cancelled; timeout: job:timed_out', async () => {
-            const run = request(cli.app).post(`${V1}/jobs/slow/trigger`).then((res) => res);
+            await request(cli.app).post(`${V1}/jobs/slow/trigger`).expect(200);
             await waitFor(() => r.of('job:started').length === 1);
             await request(cli.app).post(`${V1}/jobs/slow/cancel`).expect(200);
-            expect((await run).status).toBe(200);
+            await idle('slow');
             expect(r.of('job:cancelled')[0].data).toEqual({ jobId: 'slow', executionId: expect.any(String) });
 
             await request(cli.app).post(`${V1}/jobs/bounded/trigger`).expect(200);
+            await idle('bounded');
             expect(r.of('job:timed_out')[0].data).toMatchObject({ jobId: 'bounded', executionId: expect.any(String) });
         });
 
@@ -386,6 +392,7 @@ describe('event catalog', () => {
         it('MCP: jobs_trigger publishes job:triggered, jobs_delete_runs job:runs-deleted', async () => {
             await request(cli.app).post(`${V1}/jobs/quick/resume`).send();
             await callTool(cli.app, 'jobs_trigger', { id: 'quick' });
+            await idle('quick');
             expect(r.of('job:triggered').map((e) => e.data)).toEqual([{ jobId: 'quick' }]);
             await callTool(cli.app, 'jobs_delete_runs', { id: 'quick' });
             expect(r.of('job:runs-deleted')[0].data).toEqual({ jobId: 'quick', count: expect.any(Number) });

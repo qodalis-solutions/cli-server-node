@@ -13,10 +13,11 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
   - When full: `skip` drops the due run (a trigger answers 409 `JOB_ALREADY_RUNNING`), `queue` queues one coalesced
     run, `cancel` cancels the oldest run and starts the new one once it ended (queued meanwhile). Lowering the limit
     cancels nothing.
-  - `POST /trigger` answers `{ "message": "Job triggered", "queued": false }` or `{ "message": "Job queued",
-    "queued": true }` (was `{ "ok": true }`); MCP `jobs_trigger` says `Job queued` when queued.
+  - `POST /trigger` answers at once, no longer waiting for the run to finish: `{ "ok": true, "message": "Job
+    triggered", "queued": false }` or `{ "ok": true, "message": "Job queued", "queued": true }`; MCP `jobs_trigger`
+    says `Job queued` when queued. `triggerAsync` resolves `{ queued }` once the run started or was queued.
   - Job info adds `maxConcurrentRuns`, `runningExecutionIds` (the executing attempts, oldest first; a run in its
-    retry delay has none) and `queued`; `currentExecutionId` is the newest executing run. `POST /cancel` cancels
+    retry delay has none) and `queued`; `currentExecutionId` is the newest executing run, `null` when none. `POST /cancel` cancels
     every running run and drops a queued one, as does `stop`.
   - `runOnStart` runs only when the job is due: an interval job that never ran or whose next run is due, a cron job
     that never ran or missed an occurrence; a job without a schedule still runs on every start.
@@ -25,7 +26,7 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
   - On start, runs a previous process left `running` are finished as `cancelled` with
     `Interrupted: the server stopped during the run`, completed at their last log entry (or their start).
   - Fixed: a job with a `timeout` cancelled by hand reported `job:timed_out` (and `timed_out`); it is `cancelled`.
-  - `CliJobScheduler.triggerAsync` resolves `{ queued }`; `JobRegistration.queue` is replaced by `runs` and `queued`.
+  - `JobRegistration.queue` is replaced by `runs` and `queued`.
 - **Server events**, the same on the .NET and Python servers
   (spec: web-cli `docs/superpowers/specs/2026-11-06-server-events-design.md`):
   - `createCliServer` returns `eventBus` (`CliEventBus`, typed `ICliEventBus` in `@qodalis/cli-server-abstractions`):
