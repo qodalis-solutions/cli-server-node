@@ -120,7 +120,9 @@ export class JobsMcpToolProvider implements McpToolProvider {
                     }
                 },
             },
-            action('jobs_trigger', 'Run a job now', (id) => s.triggerAsync(id), undefined, 'job:triggered'),
+            action('jobs_trigger', 'Run a job now (queued when the job is full and its overlap policy is queue)', async (id) => {
+                await s.triggerAsync(id);
+            }, undefined, 'job:triggered'),
             action('jobs_pause', 'Pause a job schedule', (id) => s.pauseAsync(id)),
             action('jobs_resume', 'Resume a paused job', (id) => s.resumeAsync(id)),
             action('jobs_stop', 'Stop a job (and cancel its current run)', (id) => s.stopJobAsync(id), { destructiveHint: true }),

@@ -21,22 +21,35 @@ import { parseInterval } from './interval-parser';
 /** Characters a job id may not have: it is part of the jobs API's URLs. */
 const UNSAFE_ID_CHARS = /[/\\?#]/;
 
-/** Internal state for a registered job, including timers and execution queue. */
+/** A run of a job: it holds one of the job's `maxConcurrentRuns` slots, across its retries. */
+export interface JobRun {
+    id: string;
+    /** The execution of the run's current (or latest) attempt. */
+    executionId: string;
+    /** Aborting it cancels the run (its current attempt and any further retry). */
+    controller: AbortController;
+}
+
+/** Internal state for a registered job, including timers and its running runs. */
 export interface JobRegistration {
     id: string;
     job: ICliJob;
     options: CliJobOptions;
     status: JobStatus;
+    /** The newest running run's execution. */
     currentExecutionId?: string;
+    /** The newest running run's controller. */
     currentAbortController?: AbortController;
+    /** The running runs, oldest first. */
+    runs: Map<string, JobRun>;
+    /** A run is queued (overlap policy `queue`; at most one per job). */
+    queued: boolean;
     nextRunAt?: string;
     lastRunAt?: string;
     lastRunStatus?: string;
     lastRunDuration?: number;
     timer?: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>;
     timerType?: 'cron' | 'interval';
-    /** Queued executions for overlap policy 'queue' */
-    queue: Array<{ resolve: () => void }>;
 }
 
 /** Data transfer object exposing job metadata and current state to API consumers. */
@@ -54,7 +67,14 @@ export interface JobDto {
     retryStrategy: string;
     timeout?: string;
     overlapPolicy: string;
+    /** Up to this many runs of the job at the same time (default 1). */
+    maxConcurrentRuns: number;
+    /** The newest running run's execution. */
     currentExecutionId?: string;
+    /** The running runs' executions, oldest first (empty when idle). */
+    runningExecutionIds: string[];
+    /** A run is queued and starts when a slot frees. */
+    queued: boolean;
     nextRunAt?: string;
     lastRunAt?: string;
     lastRunStatus?: string;
@@ -64,7 +84,47 @@ export interface JobDto {
 type BroadcastFn = (message: Record<string, unknown>) => void;
 
 /** Options of a job that `updateOptionsAsync` may change. */
-export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy'>>;
+export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy' | 'maxConcurrentRuns'>>;
+
+/** The interrupted-run error: runs a previous process left `running` are finished with it on start. */
+export const INTERRUPTED_RUN_ERROR = 'Interrupted: the server stopped during the run';
+
+/** A job's `maxConcurrentRuns` (default 1). */
+function maxConcurrentRunsOf(options: CliJobOptions): number {
+    return options.maxConcurrentRuns ?? 1;
+}
+
+function isValidMaxConcurrentRuns(value: unknown): value is number {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+/**
+ * The cron occurrence after `fired` (exclusive), or after `now` when there is no fired
+ * occurrence or the next one is already past (the process was busy or the clock jumped).
+ */
+export function nextCronOccurrence(schedule: string, fired: Date | undefined, now: number): Date {
+    if (fired) {
+        const next = CronExpressionParser.parse(schedule, { currentDate: fired }).next().toDate();
+        if (next.getTime() > now) return next;
+    }
+    return CronExpressionParser.parse(schedule, { currentDate: new Date(now) }).next().toDate();
+}
+
+/** Waits `ms` unless `signal` aborts first; resolves true when the wait completed. */
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            resolve(false);
+        };
+        const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(true);
+        }, ms);
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
 
 /**
  * The scheduler that runs the jobs registered in this process: their
@@ -74,8 +134,12 @@ export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'g
 export interface ICliJobScheduler {
     /** The registered jobs keyed by job id, in registration order. */
     readonly jobs: ReadonlyMap<string, JobRegistration>;
-    /** Runs the job now; throws a {@link JobError} (409) when it is running and may not overlap. */
-    triggerAsync(id: string): Promise<void>;
+    /**
+     * Runs the job now, through its run slots: resolves when the run ended, or at once with
+     * `{ queued: true }` when the job is full and its overlap policy is `queue`. Throws a
+     * {@link JobError} (409 `JOB_ALREADY_RUNNING`) when it is full and the policy is `skip`.
+     */
+    triggerAsync(id: string): Promise<{ queued: boolean } | void>;
     /** Pauses the job's schedule. */
     pauseAsync(id: string): Promise<void>;
     /** Resumes a paused job's schedule. */
@@ -202,13 +266,17 @@ export class CliJobScheduler implements ICliJobScheduler {
             id = baseId;
             for (let n = 2; this._registrations.has(id); n++) id = `${baseId}-${n}`;
         }
+        if (options.maxConcurrentRuns !== undefined && !isValidMaxConcurrentRuns(options.maxConcurrentRuns)) {
+            throw new Error(`Job '${id}': maxConcurrentRuns must be an integer >= 1`);
+        }
         const enabled = options.enabled !== false;
         const reg: JobRegistration = {
             id,
             job,
             options: { ...options, name, enabled },
             status: enabled ? 'active' : 'stopped',
-            queue: [],
+            runs: new Map(),
+            queued: false,
         };
         this._registrations.set(id, reg);
         return id;
@@ -228,15 +296,76 @@ export class CliJobScheduler implements ICliJobScheduler {
                 reg.lastRunAt = persisted.lastRunAt;
                 if (reg.options.enabled !== false) reg.status = persisted.status;
             }
+            await this._finishInterruptedRuns(reg);
 
             if (reg.status === 'active') {
-                // An interval job runs on start through its timer (due now), so the two never overlap
-                const runNow = !!reg.options.runOnStart && !reg.options.schedule && !!reg.options.interval;
-                this._startTimer(reg, runNow);
-
-                if (reg.options.runOnStart && !runNow) {
-                    this._handleTimerFire(reg).catch(() => undefined);
+                const runOnStart = !!reg.options.runOnStart && this._dueOnStart(reg);
+                if (reg.options.interval && !reg.options.schedule) {
+                    // An interval job runs on start through its timer (due now), so the two never overlap
+                    this._startTimer(reg, runOnStart);
+                } else {
+                    this._startTimer(reg);
+                    if (runOnStart) this._handleTimerFire(reg);
                 }
+            }
+        }
+    }
+
+    /**
+     * Run on start, unless the job ran recently: an interval job when it never ran or its next
+     * run is due, a cron job when it never ran or missed an occurrence since its last run, a job
+     * without a schedule always.
+     */
+    private _dueOnStart(reg: JobRegistration): boolean {
+        const lastRun = reg.lastRunAt ? new Date(reg.lastRunAt).getTime() : NaN;
+        if (Number.isNaN(lastRun)) return true;
+        const now = Date.now();
+        if (reg.options.schedule) {
+            try {
+                const missed = CronExpressionParser.parse(reg.options.schedule, { currentDate: new Date(lastRun) }).next().toDate();
+                return missed.getTime() <= now;
+            } catch {
+                return false;
+            }
+        }
+        if (reg.options.interval) {
+            const ms = parseInterval(reg.options.interval);
+            return ms !== null && lastRun + ms <= now;
+        }
+        return true;
+    }
+
+    /**
+     * Finishes the runs a previous process left `running` in the store as `cancelled` with
+     * {@link INTERRUPTED_RUN_ERROR}, completed at their start time. Publishes nothing.
+     */
+    private async _finishInterruptedRuns(reg: JobRegistration): Promise<void> {
+        let interrupted: JobExecution[];
+        try {
+            const pageSize = 100;
+            interrupted = [];
+            for (let offset = 0; ; offset += pageSize) {
+                const page = await this._storage.getExecutions(reg.id, { limit: pageSize, offset, status: 'running' });
+                interrupted.push(...page.items.filter((e) => e.status === 'running'));
+                if (page.items.length < pageSize || offset + pageSize >= page.total) break;
+            }
+        } catch (err) {
+            console.error(`Reading the running runs of job ${reg.id} failed:`, err);
+            return;
+        }
+        for (const execution of interrupted) {
+            if (reg.runs.size > 0 && Array.from(reg.runs.values()).some((r) => r.executionId === execution.id)) continue;
+            const completedAt = execution.startedAt || new Date().toISOString();
+            try {
+                await this._storage.saveExecution({
+                    ...execution,
+                    status: 'cancelled',
+                    error: INTERRUPTED_RUN_ERROR,
+                    completedAt,
+                    duration: Math.max(0, new Date(completedAt).getTime() - new Date(execution.startedAt).getTime()) || 0,
+                });
+            } catch (err) {
+                console.error(`Finishing the interrupted run ${execution.id} of job ${reg.id} failed:`, err);
             }
         }
     }
@@ -248,10 +377,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         // Cancel all running executions and stop timers
         for (const reg of this._registrations.values()) {
             this._stopTimer(reg);
-
-            if (reg.currentAbortController) {
-                reg.currentAbortController.abort();
-            }
+            this._cancelAll(reg);
 
             // Persist state
             await this._storage.saveJobState(reg.id, {
@@ -300,28 +426,18 @@ export class CliJobScheduler implements ICliJobScheduler {
      *
      * @throws {JobError} If the job is not found or is already running with a 'skip' policy.
      */
-    async triggerAsync(id: string): Promise<void> {
+    async triggerAsync(id: string): Promise<{ queued: boolean }> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
 
-        if (reg.currentExecutionId) {
-            const policy = reg.options.overlapPolicy ?? 'skip';
-            if (policy === 'skip') {
-                throw new JobError('Job is already running', 'JOB_ALREADY_RUNNING', 409);
-            }
-            if (policy === 'cancel') {
-                reg.currentAbortController?.abort();
-                // Wait briefly for cancellation
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            if (policy === 'queue') {
-                return new Promise<void>((resolve) => {
-                    reg.queue.push({ resolve });
-                });
-            }
+        const attempt = this._tryStart(reg);
+        if (attempt.state === 'skipped') {
+            throw new JobError('Job is already running', 'JOB_ALREADY_RUNNING', 409);
         }
-
-        await this._executeJobAsync(reg, 0);
+        // A queued run starts when a slot frees; the trigger is accepted now
+        if (attempt.state !== 'started') return { queued: true };
+        await attempt.done;
+        return { queued: false };
     }
 
     /** Pause a running job's schedule without cancelling the current execution. */
@@ -355,22 +471,19 @@ export class CliJobScheduler implements ICliJobScheduler {
 
         reg.status = 'stopped';
         this._stopTimer(reg);
-
-        if (reg.currentAbortController) {
-            reg.currentAbortController.abort();
-        }
+        this._cancelAll(reg);
 
         await this._persistState(reg);
         this._broadcast({ type: 'job:stopped', jobId: reg.id, status: reg.status });
     }
 
-    /** Cancel the currently running execution of a job without changing its schedule. */
+    /** Cancel every running run of a job and drop a queued one, without changing its schedule. */
     async cancelCurrentAsync(id: string): Promise<void> {
         const reg = this._registrations.get(id);
         if (!reg) throw new JobError('Job not found', 'JOB_NOT_FOUND', 404);
-        if (!reg.currentExecutionId) throw new JobError('No execution is running', 'JOB_NOT_RUNNING', 409);
+        if (reg.runs.size === 0 && !reg.queued) throw new JobError('No execution is running', 'JOB_NOT_RUNNING', 409);
 
-        reg.currentAbortController?.abort();
+        this._cancelAll(reg);
     }
 
     /** Delete one finished run of a job and its logs (see {@link ICliJobScheduler.deleteExecutionAsync}). */
@@ -384,7 +497,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         if (!execution || execution.jobId !== jobId) {
             throw new JobError('Execution not found', 'EXECUTION_NOT_FOUND', 404);
         }
-        if (execution.status === 'running' || reg.currentExecutionId === executionId) {
+        if (execution.status === 'running' || Array.from(reg.runs.values()).some((r) => r.executionId === executionId)) {
             throw new JobError('The run is still running', 'EXECUTION_RUNNING', 409);
         }
         if (!(await this._storage.deleteExecution(executionId))) {
@@ -432,6 +545,10 @@ export class CliJobScheduler implements ICliJobScheduler {
             }
         }
 
+        if (updates.maxConcurrentRuns !== undefined && !isValidMaxConcurrentRuns(updates.maxConcurrentRuns)) {
+            throw new JobError('maxConcurrentRuns must be an integer >= 1', 'INVALID_MAX_CONCURRENT_RUNS', 400);
+        }
+
         // Apply updates
         if (updates.description !== undefined) reg.options.description = updates.description;
         if (updates.group !== undefined) reg.options.group = updates.group;
@@ -440,6 +557,8 @@ export class CliJobScheduler implements ICliJobScheduler {
         if (updates.retryStrategy !== undefined) reg.options.retryStrategy = updates.retryStrategy;
         if (updates.timeout !== undefined) reg.options.timeout = updates.timeout;
         if (updates.overlapPolicy !== undefined) reg.options.overlapPolicy = updates.overlapPolicy;
+        // Lowering it cancels nothing: new runs start once the count is below the limit
+        if (updates.maxConcurrentRuns !== undefined) reg.options.maxConcurrentRuns = updates.maxConcurrentRuns;
 
         // Handle schedule/interval changes (setting one clears the other)
         if (updates.schedule !== undefined) {
@@ -464,6 +583,8 @@ export class CliJobScheduler implements ICliJobScheduler {
             this._stopTimer(reg);
             this._startTimer(reg);
         }
+        // A raised limit frees a slot for a queued run
+        this._drainQueue(reg);
     }
 
     get storage(): ICliJobStorageProvider {
@@ -485,7 +606,10 @@ export class CliJobScheduler implements ICliJobScheduler {
             retryStrategy: reg.options.retryStrategy ?? 'exponential',
             timeout: reg.options.timeout,
             overlapPolicy: reg.options.overlapPolicy ?? 'skip',
+            maxConcurrentRuns: maxConcurrentRunsOf(reg.options),
             currentExecutionId: reg.currentExecutionId,
+            runningExecutionIds: Array.from(reg.runs.values()).map((r) => r.executionId).filter(Boolean),
+            queued: reg.queued,
             nextRunAt: reg.nextRunAt,
             lastRunAt: reg.lastRunAt,
             lastRunStatus: reg.lastRunStatus,
@@ -502,20 +626,19 @@ export class CliJobScheduler implements ICliJobScheduler {
     }
 
     private _startCronTimer(reg: JobRegistration): void {
-        const scheduleNext = () => {
+        const scheduleNext = (fired?: Date) => {
             if (!this._running || reg.status !== 'active') return;
 
             try {
-                const expr = CronExpressionParser.parse(reg.options.schedule!);
-                const next = expr.next();
-                const nextDate = next.toDate();
+                const nextDate = nextCronOccurrence(reg.options.schedule!, fired, Date.now());
                 reg.nextRunAt = nextDate.toISOString();
 
                 const delay = nextDate.getTime() - Date.now();
-                reg.timer = setTimeout(async () => {
+                reg.timer = setTimeout(() => {
                     if (reg.status !== 'active' || !this._running) return;
-                    await this._handleTimerFire(reg);
-                    scheduleNext();
+                    // The next occurrence is computed from this one, before the run, so an early tick never repeats it
+                    scheduleNext(nextDate);
+                    this._handleTimerFire(reg);
                 }, Math.max(delay, 0));
                 reg.timerType = 'cron';
             } catch {
@@ -534,48 +657,128 @@ export class CliJobScheduler implements ICliJobScheduler {
         const now = Date.now();
         const lastRun = reg.lastRunAt ? new Date(reg.lastRunAt).getTime() : NaN;
         let due = Number.isNaN(lastRun) ? now + ms : lastRun + ms;
-        if (due < now || runNow) due = now;
+        if (due <= now || runNow) due = now;
         reg.nextRunAt = new Date(due).toISOString();
 
-        const fire = async () => {
+        const fire = () => {
             if (reg.status !== 'active' || !this._running) return;
             reg.nextRunAt = new Date(Date.now() + ms).toISOString();
-            await this._handleTimerFire(reg);
+            this._handleTimerFire(reg);
         };
         reg.timer = setTimeout(() => {
             if (reg.status !== 'active' || !this._running) return;
             // Then every interval from this run on
             reg.timer = setInterval(fire, ms);
             reg.timerType = 'interval';
-            fire().catch(() => undefined);
+            fire();
         }, due - now);
         reg.timerType = 'cron'; // a one-off timeout until the first run
     }
 
-    private async _handleTimerFire(reg: JobRegistration): Promise<void> {
-        if (reg.currentExecutionId) {
-            const policy = reg.options.overlapPolicy ?? 'skip';
-            if (policy === 'skip') return;
-            if (policy === 'cancel') {
-                reg.currentAbortController?.abort();
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            if (policy === 'queue') {
-                return new Promise<void>((resolve) => {
-                    reg.queue.push({ resolve });
-                });
-            }
-        }
-
-        await this._executeJobAsync(reg, 0);
+    /** A due run from a timer or the run on start: the overlap policy decides when the job is full. */
+    private _handleTimerFire(reg: JobRegistration): void {
+        const attempt = this._tryStart(reg);
+        if (attempt.state === 'started') attempt.done.catch(() => undefined);
     }
 
-    private async _executeJobAsync(reg: JobRegistration, retryAttempt: number): Promise<void> {
+    /**
+     * Takes a run slot, synchronously (so two due runs can never both take the last slot):
+     * starts a run when fewer than `maxConcurrentRuns` are going, else applies the overlap
+     * policy (`skip`: dropped; `queue`: one coalesced pending run; `cancel`: the oldest run is
+     * cancelled and gives its slot to the new one).
+     */
+    private _tryStart(reg: JobRegistration): { state: 'started'; done: Promise<void> } | { state: 'queued' | 'skipped' } {
+        if (reg.runs.size >= maxConcurrentRunsOf(reg.options)) {
+            const policy = reg.options.overlapPolicy ?? 'skip';
+            if (policy === 'skip') return { state: 'skipped' };
+            if (policy === 'queue') {
+                reg.queued = true;
+                return { state: 'queued' };
+            }
+            const oldest = reg.runs.values().next().value as JobRun;
+            this._releaseSlot(reg, oldest);
+            oldest.controller.abort();
+        }
+        return { state: 'started', done: this._startRun(reg) };
+    }
+
+    /** Starts a run in a new slot; the slot is held until the run (with its retries) ends. */
+    private _startRun(reg: JobRegistration): Promise<void> {
+        const run: JobRun = { id: randomUUID(), executionId: '', controller: new AbortController() };
+        reg.runs.set(run.id, run);
+        this._syncCurrent(reg);
+        // Runs synchronously up to its first await, so the run's execution id is set on return
+        return this._runWithRetriesAsync(reg, run).finally(() => {
+            this._releaseSlot(reg, run);
+            this._drainQueue(reg);
+        });
+    }
+
+    private _releaseSlot(reg: JobRegistration, run: JobRun): void {
+        if (reg.runs.delete(run.id)) this._syncCurrent(reg);
+    }
+
+    /** Starts the queued run once a slot is free (also after `maxConcurrentRuns` is raised). */
+    private _drainQueue(reg: JobRegistration): void {
+        if (!reg.queued) return;
+        if (reg.runs.size >= maxConcurrentRunsOf(reg.options)) return;
+        reg.queued = false;
+        this._startRun(reg).catch(() => undefined);
+    }
+
+    /** `currentExecutionId` / `currentAbortController`: the newest run. */
+    private _syncCurrent(reg: JobRegistration): void {
+        const runs = Array.from(reg.runs.values());
+        const newest = runs[runs.length - 1];
+        reg.currentExecutionId = newest?.executionId || undefined;
+        reg.currentAbortController = newest?.controller;
+    }
+
+    /** Cancels every run of the job and drops a queued one. */
+    private _cancelAll(reg: JobRegistration): void {
+        reg.queued = false;
+        for (const run of reg.runs.values()) run.controller.abort();
+    }
+
+    /** One run: its first attempt and its retries. The slot is held during the retry delays too. */
+    private async _runWithRetriesAsync(reg: JobRegistration, run: JobRun): Promise<void> {
+        for (let retryAttempt = 0; ; retryAttempt++) {
+            const outcome = await this._executeAttemptAsync(reg, run, retryAttempt);
+            if (outcome.status !== 'failed' || run.controller.signal.aborted) return;
+            const maxRetries = reg.options.maxRetries ?? 1;
+            if (retryAttempt >= maxRetries) return;
+
+            const baseDelay = parseInterval(reg.options.retryDelay ?? '5s') ?? 5000;
+            const strategy = reg.options.retryStrategy ?? 'exponential';
+            const delay = strategy === 'fixed' ? baseDelay
+                : strategy === 'linear' ? baseDelay * (retryAttempt + 1)
+                : baseDelay * Math.pow(2, retryAttempt);
+            this._broadcast({
+                type: 'job:retrying',
+                jobId: reg.id,
+                executionId: outcome.executionId,
+                attempt: retryAttempt + 1,
+                maxRetries,
+                delayMs: delay,
+            });
+            if (!(await sleepUnlessAborted(delay, run.controller.signal))) return;
+        }
+    }
+
+    private async _executeAttemptAsync(
+        reg: JobRegistration,
+        run: JobRun,
+        retryAttempt: number,
+    ): Promise<{ status: JobExecutionStatus; executionId: string }> {
         const executionId = randomUUID();
         const abortController = new AbortController();
+        // Cancelling the run (cancel, stop, the cancel policy) aborts its current attempt
+        const onRunAbort = () => abortController.abort();
+        run.controller.signal.addEventListener('abort', onRunAbort, { once: true });
+        if (run.controller.signal.aborted) abortController.abort();
 
-        reg.currentExecutionId = executionId;
-        reg.currentAbortController = abortController;
+        run.executionId = executionId;
+        this._syncCurrent(reg);
 
         const execution: JobExecution = {
             id: executionId,
@@ -588,46 +791,46 @@ export class CliJobScheduler implements ICliJobScheduler {
             properties: {},
         };
 
-        await this._storage.saveExecution(execution);
-        this._broadcast({
-            type: 'job:started',
-            jobId: reg.id,
-            executionId,
-            timestamp: execution.startedAt,
-        });
-
         const context = new CliJobExecutionContext();
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-
-        // Set up timeout
-        if (reg.options.timeout) {
-            const timeoutMs = parseInterval(reg.options.timeout);
-            if (timeoutMs !== null) {
-                timeoutTimer = setTimeout(() => {
-                    abortController.abort();
-                }, timeoutMs);
-            }
-        }
-
+        let timedOut = false;
         let finalStatus: JobExecutionStatus = 'completed';
         let error: string | undefined;
 
         try {
-            await reg.job.executeAsync(context, abortController.signal);
+            await this._storage.saveExecution(execution);
+            this._broadcast({
+                type: 'job:started',
+                jobId: reg.id,
+                executionId,
+                timestamp: execution.startedAt,
+            });
 
-            if (abortController.signal.aborted) {
-                // Determine if this was a timeout or manual cancel
-                finalStatus = timeoutTimer ? 'timed_out' : 'cancelled';
+            if (reg.options.timeout) {
+                const timeoutMs = parseInterval(reg.options.timeout);
+                if (timeoutMs !== null) {
+                    timeoutTimer = setTimeout(() => {
+                        timedOut = true;
+                        abortController.abort();
+                    }, timeoutMs);
+                }
             }
-        } catch (err: unknown) {
-            if (abortController.signal.aborted) {
-                finalStatus = timeoutTimer ? 'timed_out' : 'cancelled';
-            } else {
-                finalStatus = 'failed';
-                error = err instanceof Error ? err.message : String(err);
+
+            try {
+                await reg.job.executeAsync(context, abortController.signal);
+                // A job may return without throwing once it saw the abort
+                if (abortController.signal.aborted) finalStatus = timedOut ? 'timed_out' : 'cancelled';
+            } catch (err: unknown) {
+                if (abortController.signal.aborted) {
+                    finalStatus = timedOut ? 'timed_out' : 'cancelled';
+                } else {
+                    finalStatus = 'failed';
+                    error = err instanceof Error ? err.message : String(err);
+                }
             }
         } finally {
             if (timeoutTimer) clearTimeout(timeoutTimer);
+            run.controller.signal.removeEventListener('abort', onRunAbort);
         }
 
         const completedAt = new Date();
@@ -642,8 +845,6 @@ export class CliJobScheduler implements ICliJobScheduler {
 
         await this._saveFinished(execution, context.discarded);
 
-        reg.currentExecutionId = undefined;
-        reg.currentAbortController = undefined;
         reg.lastRunAt = execution.startedAt;
         reg.lastRunStatus = finalStatus;
         reg.lastRunDuration = duration;
@@ -651,7 +852,6 @@ export class CliJobScheduler implements ICliJobScheduler {
         // Persist state; a store failure must not leave the job looking busy or stop its retries
         await this._persistState(reg).catch((err) => console.error(`Saving the state of job ${reg.id} failed:`, err));
 
-        // Broadcast completion event
         if (finalStatus === 'completed') {
             this._broadcast({ type: 'job:completed', jobId: reg.id, executionId, duration });
         } else if (finalStatus === 'failed') {
@@ -661,33 +861,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         } else if (finalStatus === 'timed_out') {
             this._broadcast({ type: 'job:timed_out', jobId: reg.id, executionId, timeout: reg.options.timeout });
         }
-
-        // Handle retry on failure
-        if (finalStatus === 'failed' && retryAttempt < (reg.options.maxRetries ?? 1)) {
-            const baseDelay = parseInterval(reg.options.retryDelay ?? '5s') ?? 5000;
-            const strategy = reg.options.retryStrategy ?? 'exponential';
-            const delay = strategy === 'fixed' ? baseDelay
-                : strategy === 'linear' ? baseDelay * (retryAttempt + 1)
-                : baseDelay * Math.pow(2, retryAttempt);
-            this._broadcast({
-                type: 'job:retrying',
-                jobId: reg.id,
-                executionId,
-                attempt: retryAttempt + 1,
-                maxRetries: reg.options.maxRetries ?? 1,
-                delayMs: delay,
-            });
-            await new Promise(resolve => setTimeout(resolve, delay));
-            await this._executeJobAsync(reg, retryAttempt + 1);
-            return;
-        }
-
-        // Process queue
-        if (reg.queue.length > 0) {
-            const next = reg.queue.shift()!;
-            next.resolve();
-            await this._executeJobAsync(reg, 0);
-        }
+        return { status: finalStatus, executionId };
     }
 
     private _stopTimer(reg: JobRegistration): void {
