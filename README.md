@@ -445,7 +445,7 @@ const { mcp } = createCliServer({
 | one tool per command (`weather`, `weather_current`, ...) | always | `commands:execute` plus `requiredPermissions` |
 | `fs_list`, `fs_stat`, `fs_read` / `fs_write`, `fs_mkdir`, `fs_delete` | file storage configured | `files:read` / `files:write` |
 | `data_sources`, `data_schema`, `data_query` | data sources registered | `data:query` |
-| `jobs_list`, `jobs_get`, `jobs_history` / `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel` | jobs plugin mounted | `jobs:read` / `jobs:manage` |
+| `jobs_list`, `jobs_get`, `jobs_history` / `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel`, `jobs_delete_runs` | jobs plugin mounted | `jobs:read` / `jobs:manage` |
 
 Command tools run through the same executor as `/execute`; outputs are rendered as text, `isError` is `exitCode != 0`. Add your own tools with `mcp.addProvider(provider)`, `builder.addMcpToolProvider(provider)` or a plugin's `mcpProviders` (use `mcpObjectSchema` to build the input schema). An `Origin` header, when present, must be allowed or same-origin.
 
