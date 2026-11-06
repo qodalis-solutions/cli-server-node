@@ -19,3 +19,5 @@ export {
     buildShellEnv,
 } from './cli-shell-options';
 export { CliLogSocketManager, CliLogWebSocketClientInfo } from './cli-log-socket-manager';
+export { CliEventBus } from './cli-event-bus';
+export { publishCommandExecuted } from './cli-command-events';

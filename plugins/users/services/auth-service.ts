@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'http';
 import type { Request } from 'express';
+import type { CliEventAudience, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { randomBytes, randomUUID } from 'crypto';
 import {
     ICliUserStore,
@@ -24,7 +25,7 @@ import {
 } from '../models';
 import { HttpError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors';
 import { hashPassword, verifyPasswordHash, dummyVerify } from './password-hasher';
-import { hasPermission, mergePermissions } from '../permissions';
+import { UsersPermissions, hasPermission, mergePermissions } from '../permissions';
 import { hashToken, sanitize } from '../security';
 import { validatePermissions } from './permission-validation';
 
@@ -63,6 +64,8 @@ export interface AuthServiceOptions {
     maxSessionLifetimeMs?: number;
     /** Broadcasts `session-kicked` events over the events socket. */
     broadcast?: UsersBroadcastFn;
+    /** The server's event bus: `user:*`, `group:*`, `token:*` and `session:*` events are published on it. */
+    eventBus?: ICliEventBus;
     /** API token storage (default in-memory). */
     apiTokenStore?: ICliApiTokenStore;
     /** Allow API tokens that never expire (default false). */
@@ -146,6 +149,7 @@ export class AuthService {
     readonly groupsReadOnly: boolean;
     private readonly groupStore?: ICliGroupStore;
     private broadcast?: UsersBroadcastFn;
+    private eventBus?: ICliEventBus;
     private readonly lockouts = new Map<string, LockoutState>();
     private readonly tickets = new Map<string, TicketEntry>();
     private readonly sessionListeners = new Set<(event: UsersSessionEvent) => void>();
@@ -164,6 +168,7 @@ export class AuthService {
         this.minPasswordLength = options.minPasswordLength ?? DEFAULT_MIN_PASSWORD_LENGTH;
         this.maxSessionLifetimeMs = options.maxSessionLifetimeMs ?? DEFAULT_MAX_SESSION_LIFETIME_MS;
         this.broadcast = options.broadcast;
+        this.eventBus = options.eventBus;
         this.apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
         this.allowNonExpiringTokens = options.allowNonExpiringTokens ?? false;
         this.usersReadOnly = options.usersReadOnly ?? false;
@@ -176,6 +181,46 @@ export class AuthService {
 
     hasBroadcast(): boolean {
         return !!this.broadcast;
+    }
+
+    setEventBus(eventBus: ICliEventBus | undefined): void {
+        this.eventBus = eventBus;
+    }
+
+    hasEventBus(): boolean {
+        return !!this.eventBus;
+    }
+
+    /**
+     * Publishes a server event on the event bus (none without one: the broadcast
+     * function only carries `session-kicked`). Never throws.
+     */
+    async publishEvent(type: string, data: Record<string, unknown>, audience: CliEventAudience): Promise<void> {
+        try {
+            await this.eventBus?.publish(type, data, audience);
+        } catch (err) {
+            console.error(`[users] failed to publish ${type}:`, err);
+        }
+    }
+
+    /** `session:closed` (audience `sessions:read`); looks the user's name up when not given. */
+    private async publishSessionClosed(session: Session, username?: string): Promise<void> {
+        if (!this.eventBus) return;
+        const name = username ?? (await this.userStore.getUser(session.userId).catch(() => undefined))?.name ?? session.userId;
+        await this.publishEvent(
+            'session:closed',
+            { userId: session.userId, username: name, sessionId: session.id },
+            { permission: UsersPermissions.SessionsRead },
+        );
+    }
+
+    /** `token:created` / `token:revoked`: for `tokens:read` holders and the token's owner. */
+    private async publishTokenEvent(type: 'token:created' | 'token:revoked', token: ApiToken, actor?: string): Promise<void> {
+        await this.publishEvent(
+            type,
+            { tokenId: token.id, name: token.name, userId: token.userId, ...(actor ? { actor } : {}) },
+            { permission: UsersPermissions.TokensRead, userId: token.userId },
+        );
     }
 
     /** Subscribes to session lifecycle events; returns an unsubscribe function. */
@@ -449,6 +494,11 @@ export class AuthService {
             details: 'Login successful',
             metadata: { remoteAddress: metadata.remoteAddress, sessionId: session.id },
         });
+        await this.publishEvent(
+            'session:opened',
+            { userId: user.id, username: user.name, sessionId: session.id },
+            { permission: UsersPermissions.SessionsRead },
+        );
 
         const permissions = await this.getEffectivePermissions(liveUser);
         return { token, session: this.toSessionPayload(session, liveUser, permissions) };
@@ -470,6 +520,7 @@ export class AuthService {
             details: 'User logged out',
             metadata: { sessionId: session.id },
         });
+        await this.publishSessionClosed(session, user?.name);
     }
 
     /** `min(lastActivity + idle timeout, createdAt + absolute lifetime)`. */
@@ -486,12 +537,14 @@ export class AuthService {
         if (this.isExpired(session)) {
             await this.sessionStore.deleteSession(session.tokenHash);
             this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason: 'session expired' });
+            await this.publishSessionClosed(session);
             throw unauthorized('session expired');
         }
         const user = await this.userStore.getUser(session.userId);
         if (!user || user.id !== session.userId || user.disabled) {
             await this.sessionStore.deleteSession(session.tokenHash);
             this.emitSessionEvent({ type: 'session-ended', sessionId: session.id, userId: session.userId, reason: 'user unavailable' });
+            await this.publishSessionClosed(session, user?.name);
             throw unauthorized('invalid or expired token');
         }
         return { user, permissions: await this.getEffectivePermissions(user) };
@@ -664,6 +717,7 @@ export class AuthService {
             details: `${apiToken.name} (${apiToken.id})`,
             metadata: { tokenId: apiToken.id, tokenName: apiToken.name },
         });
+        await this.publishTokenEvent('token:created', apiToken, ctx.user.name);
         return { token, apiToken };
     }
 
@@ -687,14 +741,19 @@ export class AuthService {
             details: `${token.name} (${token.id})`,
             metadata: { tokenId: token.id, tokenName: token.name },
         });
+        await this.publishTokenEvent('token:revoked', token, ctx.user.name);
         // Sockets opened with this token re-check their identity and close.
         this.emitSessionEvent({ type: 'access-changed', userId: token.userId });
     }
 
-    /** Deletes every token of a user (user deletion). */
-    async deleteUserTokens(userId: string): Promise<void> {
+    /** Deletes every token of a user (user deletion); `token:revoked` for each. */
+    async deleteUserTokens(userId: string, actor?: string): Promise<void> {
+        const tokens = this.eventBus ? await this.apiTokenStore.getTokens(userId) : [];
         await this.apiTokenStore.deleteUserTokens(userId);
         this.emitSessionEvent({ type: 'access-changed', userId });
+        for (const token of tokens) {
+            await this.publishTokenEvent('token:revoked', token, actor);
+        }
     }
 
     // --------------------------------------------------------- ws tickets
@@ -833,6 +892,7 @@ export class AuthService {
             if (this.isExpired(s, now)) {
                 await this.sessionStore.deleteSession(s.tokenHash);
                 this.emitSessionEvent({ type: 'session-ended', sessionId: s.id, userId: s.userId, reason: 'session expired' });
+                await this.publishSessionClosed(s);
             } else {
                 live.push(s);
             }
@@ -858,14 +918,18 @@ export class AuthService {
             details: reason,
             metadata: { sessionId: session.id },
         });
+        const kicked = { sessionId: session.id, userId: session.userId, reason };
         try {
-            this.broadcast?.({
-                type: 'session-kicked',
-                data: { sessionId: session.id, userId: session.userId, reason },
-            });
+            if (this.broadcast) {
+                this.broadcast({ type: 'session-kicked', data: kicked });
+            } else if (this.eventBus) {
+                // Same control message ({ type, data }) through the bus, for the user's sockets only
+                await this.eventBus.publish('session-kicked', { data: kicked }, { userId: session.userId });
+            }
         } catch (err) {
             console.error('[users] failed to broadcast session-kicked:', err);
         }
+        await this.publishSessionClosed(session, name);
     }
 
     /** Revokes every session of a user, optionally keeping one. */

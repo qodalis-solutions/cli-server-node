@@ -1,6 +1,7 @@
 import express, { Express, Router } from 'express';
 import cors from 'cors';
-import { CliCommandRegistry, CliCommandExecutorService, CliEventSocketManager, CliLogSocketManager } from './services';
+import { CliCommandRegistry, CliCommandExecutorService, CliEventBus, CliEventSocketManager, CliLogSocketManager } from './services';
+import { withFileStorageEvents } from './filesystem/file-storage-events';
 import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
 import { createCliVersionController } from './controllers/cli-version-controller';
@@ -27,7 +28,7 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
-import { CliInstalledPlugin, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import { CliInstalledPlugin, ICliEventBus, installedPluginOf } from '@qodalis/cli-server-abstractions';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -55,6 +56,8 @@ export interface MountablePlugin {
     installedPlugin?: CliInstalledPlugin;
     /** Further packages the plugin brings along and serves (the users plugin: the audit plugin), listed after it. */
     installedPlugins?: CliInstalledPlugin[];
+    /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
+    setEventBus?(eventBus: ICliEventBus): void;
 }
 
 /** MCP extension point of a server instance. */
@@ -140,6 +143,12 @@ export interface CliServerResult {
     executor: CliCommandExecutorService;
     eventSocketManager: CliEventSocketManager;
     logSocketManager: CliLogSocketManager;
+    /**
+     * The server's event bus: publish events (`eventBus.publish(type, data, audience)`)
+     * or react to them in code (`eventBus.subscribe('job:*', handler)`). The events
+     * WebSocket subscribes to `*` and applies each event's audience.
+     */
+    eventBus: ICliEventBus;
     /**
      * Server-wide runtime options set by plugins (same object as `builder.serverOptions`):
      * `externalAuthentication` (set by the users plugin with an external auth adapter)
@@ -244,6 +253,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
+    const eventBus = new CliEventBus();
+    eventBus.subscribe('*', (event) => eventSocketManager.deliverEvent(event));
     const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy, sessionCheckIntervalMs: shell?.sessionCheckIntervalMs });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
@@ -252,7 +263,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     // MCP tool providers, in priority order: built-in features, plugins/host (registration order), then commands
     const mcpFeatureProviders: McpToolProvider[] = [];
-    const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor);
+    const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor, eventBus);
     const mcpFeatures = new Set<string>(['commands']);
     if (mcpOptions) {
         mcpFeatures.add('mcp');
@@ -286,11 +297,11 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
 
     // API v1 routes
-    app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities }));
+    app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
 
     // Custom basePath fallback (when user overrides the default)
     if (basePath !== '/api/v1/qcli') {
-        app.use(basePath, createCliController(registry, executor, { shellCapabilities }));
+        app.use(basePath, createCliController(registry, executor, { shellCapabilities, eventBus }));
     }
 
     // Filesystem API — provider-based
@@ -300,6 +311,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
     }
     if (fsProvider) {
+        // The API and the MCP tools share it, so both publish fs:changed
+        fsProvider = withFileStorageEvents(fsProvider, eventBus);
         app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
         mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
         mcpFeatures.add('filesystem');
@@ -326,6 +339,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         auth?.attachToServer?.({
             allowedOrigins,
             broadcast: (msg) => eventSocketManager.broadcastMessage(msg),
+            eventBus,
             serverOptions,
         });
     };
@@ -349,6 +363,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         for (const bundled of plugin.installedPlugins ?? []) {
             builder.addInstalledPlugin(bundled);
         }
+        plugin.setEventBus?.(eventBus);
         app.use(plugin.prefix, plugin.router);
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
             app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
@@ -357,7 +372,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             serverOptions.jobsEnabled = true;
         }
         if (isJobScheduler(plugin.scheduler) && !mcpFeatures.has('jobs')) {
-            mcpFeatureProviders.push(new JobsMcpToolProvider(plugin.scheduler));
+            mcpFeatureProviders.push(new JobsMcpToolProvider(plugin.scheduler, eventBus));
             mcpFeatures.add('jobs');
         }
         for (const provider of plugin.mcpProviders ?? []) {
@@ -373,7 +388,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         },
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, serverOptions, mountPlugin, setAuth, mcp };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */

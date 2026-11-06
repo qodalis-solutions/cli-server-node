@@ -36,7 +36,7 @@ const jobsPlugin = new CliJobsBuilder()
         group: 'monitoring',
         interval: '30s',
     })
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
+    .build(); // mountPlugin hands it the server's event bus; or build(eventBus)
 
 // Using createCliServer:
 mountPlugin(jobsPlugin);
@@ -46,6 +46,27 @@ app.use(jobsPlugin.prefix, jobsPlugin.router);
 
 await jobsPlugin.scheduler.start();
 ```
+
+## Events
+
+Job events are published on the server's event bus (`createCliServer().eventBus`) with audience `jobs:read`, and
+reach the events WebSocket as flat messages (`{ "type": "job:completed", "timestamp": "…", "jobId", "executionId", "duration" }`):
+
+| Type | Fields | Published by |
+|---|---|---|
+| `job:started` | jobId, executionId | scheduler |
+| `job:completed` | jobId, executionId, duration | scheduler |
+| `job:failed` | jobId, executionId, error | scheduler |
+| `job:cancelled`, `job:timed_out` | jobId, executionId | scheduler |
+| `job:retrying` | jobId, executionId, attempt, maxRetries, delayMs | scheduler |
+| `job:paused`, `job:resumed`, `job:stopped` | jobId, status (`paused`, `active`, `stopped`) | scheduler |
+| `job:triggered` | jobId | REST API (`POST /:id/trigger`) and MCP `jobs_trigger` |
+| `job:updated` | jobId | REST API (`PUT /:id`) |
+| `job:runs-deleted` | jobId, executionId (one run) or count (bulk) | REST API and MCP `jobs_delete_runs` |
+
+`build()` takes the bus, or a function broadcasting raw messages (kept for compatibility; the plugin then keeps it).
+Built with neither, the plugin gets the server's bus from `mountPlugin` (`jobsPlugin.setEventBus(bus)`). The
+scheduler's `setEventBus(bus)`, `eventBus` and `publishEvent(type, data)` are public, for hosts with their own API.
 
 ## Configuration Options
 
