@@ -69,9 +69,9 @@ export interface JobDto {
     overlapPolicy: string;
     /** Up to this many runs of the job at the same time (default 1). */
     maxConcurrentRuns: number;
-    /** The newest running run's execution. */
+    /** The newest executing run's execution. */
     currentExecutionId?: string;
-    /** The running runs' executions, oldest first (empty when idle). */
+    /** The executing attempts' executions, oldest first (a run in its retry delay has none; empty when idle). */
     runningExecutionIds: string[];
     /** A run is queued and starts when a slot frees. */
     queued: boolean;
@@ -337,7 +337,8 @@ export class CliJobScheduler implements ICliJobScheduler {
 
     /**
      * Finishes the runs a previous process left `running` in the store as `cancelled` with
-     * {@link INTERRUPTED_RUN_ERROR}, completed at their start time. Publishes nothing.
+     * {@link INTERRUPTED_RUN_ERROR}, completed at their last log entry when it is later than
+     * their start, else at their start. Publishes nothing.
      */
     private async _finishInterruptedRuns(reg: JobRegistration): Promise<void> {
         let interrupted: JobExecution[];
@@ -355,14 +356,19 @@ export class CliJobScheduler implements ICliJobScheduler {
         }
         for (const execution of interrupted) {
             if (reg.runs.size > 0 && Array.from(reg.runs.values()).some((r) => r.executionId === execution.id)) continue;
-            const completedAt = execution.startedAt || new Date().toISOString();
+            const started = Date.parse(execution.startedAt);
+            const logTimes = (execution.logs ?? []).map((l) => Date.parse(l.timestamp)).filter((t) => !Number.isNaN(t));
+            const lastLog = logTimes.length > 0 ? Math.max(...logTimes) : NaN;
+            const completedAt = !Number.isNaN(lastLog) && !(lastLog <= started)
+                ? new Date(lastLog).toISOString()
+                : execution.startedAt || new Date().toISOString();
             try {
                 await this._storage.saveExecution({
                     ...execution,
                     status: 'cancelled',
                     error: INTERRUPTED_RUN_ERROR,
                     completedAt,
-                    duration: Math.max(0, new Date(completedAt).getTime() - new Date(execution.startedAt).getTime()) || 0,
+                    duration: Math.max(0, Date.parse(completedAt) - started) || 0,
                 });
             } catch (err) {
                 console.error(`Finishing the interrupted run ${execution.id} of job ${reg.id} failed:`, err);
@@ -546,7 +552,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         }
 
         if (updates.maxConcurrentRuns !== undefined && !isValidMaxConcurrentRuns(updates.maxConcurrentRuns)) {
-            throw new JobError('maxConcurrentRuns must be an integer >= 1', 'INVALID_MAX_CONCURRENT_RUNS', 400);
+            throw new JobError('maxConcurrentRuns must be an integer >= 1', 'INVALID_VALUE', 400);
         }
 
         // Apply updates
@@ -685,19 +691,19 @@ export class CliJobScheduler implements ICliJobScheduler {
      * Takes a run slot, synchronously (so two due runs can never both take the last slot):
      * starts a run when fewer than `maxConcurrentRuns` are going, else applies the overlap
      * policy (`skip`: dropped; `queue`: one coalesced pending run; `cancel`: the oldest run is
-     * cancelled and gives its slot to the new one).
+     * cancelled and the new run waits, queued, until that run has ended, so the limit is never
+     * exceeded). Due runs while one is queued merge into it.
      */
     private _tryStart(reg: JobRegistration): { state: 'started'; done: Promise<void> } | { state: 'queued' | 'skipped' } {
         if (reg.runs.size >= maxConcurrentRunsOf(reg.options)) {
             const policy = reg.options.overlapPolicy ?? 'skip';
             if (policy === 'skip') return { state: 'skipped' };
-            if (policy === 'queue') {
-                reg.queued = true;
-                return { state: 'queued' };
+            if (policy === 'cancel' && !reg.queued) {
+                const oldest = Array.from(reg.runs.values()).find((r) => !r.controller.signal.aborted);
+                oldest?.controller.abort();
             }
-            const oldest = reg.runs.values().next().value as JobRun;
-            this._releaseSlot(reg, oldest);
-            oldest.controller.abort();
+            reg.queued = true;
+            return { state: 'queued' };
         }
         return { state: 'started', done: this._startRun(reg) };
     }
@@ -726,11 +732,11 @@ export class CliJobScheduler implements ICliJobScheduler {
         this._startRun(reg).catch(() => undefined);
     }
 
-    /** `currentExecutionId` / `currentAbortController`: the newest run. */
+    /** `currentExecutionId` / `currentAbortController`: the newest executing run. */
     private _syncCurrent(reg: JobRegistration): void {
-        const runs = Array.from(reg.runs.values());
-        const newest = runs[runs.length - 1];
-        reg.currentExecutionId = newest?.executionId || undefined;
+        const executing = Array.from(reg.runs.values()).filter((r) => r.executionId);
+        const newest = executing[executing.length - 1];
+        reg.currentExecutionId = newest?.executionId;
         reg.currentAbortController = newest?.controller;
     }
 
@@ -844,6 +850,10 @@ export class CliJobScheduler implements ICliJobScheduler {
         execution.properties = { ...context.properties };
 
         await this._saveFinished(execution, context.discarded);
+
+        // Executing no more: during a retry delay the run keeps its slot without an execution
+        run.executionId = '';
+        this._syncCurrent(reg);
 
         reg.lastRunAt = execution.startedAt;
         reg.lastRunStatus = finalStatus;

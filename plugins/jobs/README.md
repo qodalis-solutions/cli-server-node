@@ -94,18 +94,20 @@ is full, the overlap policy decides:
 
 - `skip`: the due run is dropped; a trigger answers 409 `JOB_ALREADY_RUNNING`.
 - `queue`: one run is queued and starts when a slot frees. Queued runs coalesce: several due runs while full make
-  one more run, not a backlog. A trigger answers 202 `{ ok: true, queued: true }`.
-- `cancel`: the oldest running run is cancelled and the new one starts.
+  one more run, not a backlog. A trigger answers `{ "message": "Job queued", "queued": true }`.
+- `cancel`: the oldest running run is cancelled, and the new run starts once that run has ended, so the limit is
+  never exceeded. Meanwhile the job is `queued`, and further due runs merge into the waiting one.
 
 Lowering `maxConcurrentRuns` cancels nothing: new runs start once the count is below the limit; raising it starts a
 queued run. `POST /:id/cancel` cancels every running run and drops a queued one; `stop` does the same and disables
-the schedule. Job info carries `maxConcurrentRuns`, `runningExecutionIds` (oldest first, empty when idle),
-`currentExecutionId` (the newest running run) and `queued`.
+the schedule; a run cancelled by hand ends as `cancelled`, never `timed_out`. Job info carries `maxConcurrentRuns`,
+`runningExecutionIds` (the attempts executing now, oldest first; a run in its retry delay keeps its slot without an
+entry), `currentExecutionId` (the newest of them) and `queued`.
 
 A cron job computes its next occurrence from the one that just fired, so a timer that fires a few milliseconds
 early never runs an occurrence twice. On start, runs a previous process left `running` in the store are finished as
-`cancelled` with the error `Interrupted: the server stopped during the run` (completed at their start time, no
-events).
+`cancelled` with the error `Interrupted: the server stopped during the run`, completed at their last log entry when
+it is later than their start, else at their start. No events are published for them.
 
 ## REST API
 
@@ -117,12 +119,12 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 | GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
 | GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
 | GET | `/:id` | Get job details |
-| POST | `/:id/trigger` | Trigger a run → `{ ok: true }` when it ran, 202 `{ ok: true, queued: true }` when queued, 409 `JOB_ALREADY_RUNNING` when full with `skip` |
+| POST | `/:id/trigger` | Trigger a run → `{ "message": "Job triggered", "queued": false }` once it ran, `{ "message": "Job queued", "queued": true }` when queued; 409 `JOB_ALREADY_RUNNING` when every slot is taken and the policy is `skip` |
 | POST | `/:id/pause` | Pause scheduled execution |
 | POST | `/:id/resume` | Resume a paused job |
 | POST | `/:id/stop` | Stop job: cancel its runs, drop a queued one, disable the schedule |
 | POST | `/:id/cancel` | Cancel every running run and drop a queued one; 409 `JOB_NOT_RUNNING` when idle |
-| PUT | `/:id` | Update job options: `description`, `group`, `schedule`, `interval`, `maxRetries`, `retryDelay`, `retryStrategy`, `timeout`, `overlapPolicy`, `maxConcurrentRuns` (integer >= 1, else 400 `INVALID_MAX_CONCURRENT_RUNS`) |
+| PUT | `/:id` | Update job options: `description`, `group`, `schedule`, `interval`, `maxRetries`, `retryDelay`, `retryStrategy`, `timeout`, `overlapPolicy`, `maxConcurrentRuns` (integer >= 1, else 400 `INVALID_VALUE`) |
 | GET | `/:id/history` | Paginated execution history |
 | GET | `/:id/history/:execId` | Execution detail with logs |
 | DELETE | `/:id/history/:execId` | Delete one run and its logs → `{ message: "Run deleted" }`; 404 `JOB_NOT_FOUND` / `EXECUTION_NOT_FOUND` (missing or another job's run), 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED` (the storage has no `deleteExecution`) |

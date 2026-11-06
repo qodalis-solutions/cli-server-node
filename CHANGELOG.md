@@ -8,18 +8,22 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
 - **Jobs: max concurrent runs, and no job started twice**, the same on the .NET and Python servers
   (spec: web-cli `docs/superpowers/specs/2026-11-06-job-concurrency-design.md`):
   - `maxConcurrentRuns` per job (integer >= 1, default 1), in the code options and `PUT /api/v1/qcli/jobs/{id}`
-    (400 `INVALID_MAX_CONCURRENT_RUNS` otherwise). A run holds its slot until it ends, its retries and their delays
+    (400 `INVALID_VALUE` otherwise). A run holds its slot until it ends, its retries and their delays
     included; taking a slot is atomic, so timer ticks, triggers and the run on start never exceed the limit.
-  - When full: `skip` drops the due run (a trigger answers 409), `queue` queues one coalesced run (a trigger answers
-    202 `{ ok: true, queued: true }`), `cancel` cancels the oldest run. Lowering the limit cancels nothing.
-  - Job info adds `maxConcurrentRuns`, `runningExecutionIds` (oldest first) and `queued`; `currentExecutionId` is
-    the newest running run. `POST /cancel` cancels every running run and drops a queued one, as does `stop`.
+  - When full: `skip` drops the due run (a trigger answers 409 `JOB_ALREADY_RUNNING`), `queue` queues one coalesced
+    run, `cancel` cancels the oldest run and starts the new one once it ended (queued meanwhile). Lowering the limit
+    cancels nothing.
+  - `POST /trigger` answers `{ "message": "Job triggered", "queued": false }` or `{ "message": "Job queued",
+    "queued": true }` (was `{ "ok": true }`); MCP `jobs_trigger` says `Job queued` when queued.
+  - Job info adds `maxConcurrentRuns`, `runningExecutionIds` (the executing attempts, oldest first; a run in its
+    retry delay has none) and `queued`; `currentExecutionId` is the newest executing run. `POST /cancel` cancels
+    every running run and drops a queued one, as does `stop`.
   - `runOnStart` runs only when the job is due: an interval job that never ran or whose next run is due, a cron job
     that never ran or missed an occurrence; a job without a schedule still runs on every start.
   - Cron jobs compute the next occurrence from the one that fired, so an early timer never runs it twice; a cron
     run no longer delays the next occurrence until it ends (the overlap policy decides).
   - On start, runs a previous process left `running` are finished as `cancelled` with
-    `Interrupted: the server stopped during the run`.
+    `Interrupted: the server stopped during the run`, completed at their last log entry (or their start).
   - Fixed: a job with a `timeout` cancelled by hand reported `job:timed_out` (and `timed_out`); it is `cancelled`.
   - `CliJobScheduler.triggerAsync` resolves `{ queued }`; `JobRegistration.queue` is replaced by `runs` and `queued`.
 - **Server events**, the same on the .NET and Python servers
