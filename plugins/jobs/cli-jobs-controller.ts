@@ -11,7 +11,7 @@ import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli
  * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
  * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=)
  * - GET    /:id         - single job details
- * - POST   /:id/trigger - trigger immediate execution (202 when queued)
+ * - POST   /:id/trigger - trigger a run ({ message, queued })
  * - POST   /:id/pause   - pause scheduled execution
  * - POST   /:id/resume  - resume a paused job
  * - POST   /:id/stop    - stop job and cancel if running
@@ -97,8 +97,7 @@ export function createCliJobsController(
             const result = await scheduler.triggerAsync(req.params.id);
             await scheduler.publishEvent('job:triggered', { jobId: req.params.id, ...actorOf(req) });
             // Queued: accepted, the run starts when a slot frees
-            if (result.queued) res.status(202).json({ ok: true, queued: true });
-            else res.json({ ok: true });
+            res.json(result.queued ? { message: 'Job queued', queued: true } : { message: 'Job triggered', queued: false });
         } catch (err) {
             handleError(res, err);
         }

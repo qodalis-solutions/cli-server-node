@@ -120,9 +120,24 @@ export class JobsMcpToolProvider implements McpToolProvider {
                     }
                 },
             },
-            action('jobs_trigger', 'Run a job now (queued when the job is full and its overlap policy is queue)', async (id) => {
-                await s.triggerAsync(id);
-            }, undefined, 'job:triggered'),
+            {
+                name: 'jobs_trigger',
+                description: 'Run a job now (queued when every run slot is taken and its overlap policy is queue or cancel)',
+                inputSchema: mcpObjectSchema(idProp, ['id']),
+                requiredPermissions: [P.JobsManage],
+                call: async (args, context) => {
+                    const job = resolve(args.id);
+                    if ('error' in job) return mcpError(job.error);
+                    try {
+                        const result = await s.triggerAsync(job.id);
+                        await this.publish('job:triggered', { jobId: job.id }, context);
+                        const queued = !!result?.queued;
+                        return mcpJson({ ok: true, id: job.id, queued }, queued ? 'Job queued' : 'Job triggered');
+                    } catch (err) {
+                        return mcpError(errorMessage(err));
+                    }
+                },
+            },
             action('jobs_pause', 'Pause a job schedule', (id) => s.pauseAsync(id)),
             action('jobs_resume', 'Resume a paused job', (id) => s.resumeAsync(id)),
             action('jobs_stop', 'Stop a job (and cancel its current run)', (id) => s.stopJobAsync(id), { destructiveHint: true }),

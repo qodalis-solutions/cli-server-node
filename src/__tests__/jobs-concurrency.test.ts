@@ -12,6 +12,8 @@ import { InMemoryJobStorageProvider } from '../../plugins/jobs/in-memory-job-sto
 import { CliJobScheduler, INTERRUPTED_RUN_ERROR, JobError, nextCronOccurrence } from '../../plugins/jobs/cli-job-scheduler';
 import { createCliJobsController } from '../../plugins/jobs/cli-jobs-controller';
 import { CliEventBus } from '../services/cli-event-bus';
+import { createCliServer } from '../create-cli-server';
+import { CliJobsBuilder } from '../../plugins/jobs/cli-jobs-builder';
 
 /** A job whose runs wait until released (or aborted); counts concurrent and total runs. */
 class GatedJob implements ICliJob {
@@ -130,13 +132,16 @@ describe('maxConcurrentRuns', () => {
             await scheduler.start();
             await vi.advanceTimersByTimeAsync(1000); // first attempt fails, the retry waits 10 s
             expect(job.started).toBe(1);
-            expect(scheduler.get('j')!.runningExecutionIds).toHaveLength(1);
+            // The run keeps its slot, but no attempt is executing during the delay
+            expect(scheduler.get('j')!.runningExecutionIds).toEqual([]);
+            expect(scheduler.get('j')!.currentExecutionId).toBeUndefined();
             await vi.advanceTimersByTimeAsync(5000); // five ticks during the delay
             await expect(scheduler.triggerAsync('j')).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
             expect(job.started).toBe(1);
             await vi.advanceTimersByTimeAsync(5000); // the retry
             expect(job.started).toBe(2);
             expect(job.waiting).toBe(1);
+            expect(scheduler.get('j')!.runningExecutionIds).toHaveLength(1);
         } finally {
             vi.useRealTimers();
         }
@@ -183,24 +188,50 @@ describe('maxConcurrentRuns', () => {
         expect(job.maxActive).toBe(1);
     });
 
-    it('cancel policy cancels the oldest run', async () => {
-        scheduler.register(job, { id: 'j', maxConcurrentRuns: 2, overlapPolicy: 'cancel' });
+    it('cancel policy cancels the oldest run; the new run starts once it ended, never exceeding N', async () => {
+        /** A job that ignores the abort for a while, to show the new run waits for the old one to end. */
+        let lingering: (() => void) | undefined;
+        const stubborn: ICliJob = {
+            executeAsync: async (_ctx, signal) => {
+                job.started++;
+                job.active++;
+                job.maxActive = Math.max(job.maxActive, job.active);
+                try {
+                    await new Promise<void>((resolve) => {
+                        const release = () => resolve();
+                        if (!lingering) lingering = release;
+                        else signal.addEventListener('abort', release, { once: true });
+                    });
+                } finally {
+                    job.active--;
+                }
+            },
+        };
+        scheduler.register(stubborn, { id: 'j', maxConcurrentRuns: 2, overlapPolicy: 'cancel' });
         const a = scheduler.triggerAsync('j');
-        await waitUntil(() => job.waiting === 1);
         const b = scheduler.triggerAsync('j');
-        await waitUntil(() => job.waiting === 2);
+        await waitUntil(() => job.active === 2);
         const [idA, idB] = scheduler.get('j')!.runningExecutionIds;
-        const c = scheduler.triggerAsync('j');
+
+        expect(await scheduler.triggerAsync('j')).toEqual({ queued: true }); // A is cancelled, C waits
+        expect(await scheduler.triggerAsync('j')).toEqual({ queued: true }); // merges into C, cancels nothing
+        await flush();
+        expect(scheduler.get('j')!.queued).toBe(true);
+        expect(job.active).toBe(2); // A ignores the abort: C has not started
+
+        lingering!(); // A ends
         await a;
-        await waitUntil(() => job.waiting === 2);
-        const running = scheduler.get('j')!.runningExecutionIds;
-        expect(running).toHaveLength(2);
-        expect(running[0]).toBe(idB);
-        expect(running).not.toContain(idA);
+        await waitUntil(() => job.active === 2);
+        const dto = scheduler.get('j')!;
+        expect(dto.queued).toBe(false);
+        expect(dto.runningExecutionIds[0]).toBe(idB);
+        expect(dto.runningExecutionIds).not.toContain(idA);
         expect((await storage.getExecution(idA))!.status).toBe('cancelled');
-        expect(scheduler.get('j')!.currentExecutionId).toBe(running[1]);
-        job.releaseAll();
-        await Promise.all([b, c]);
+        expect((await storage.getExecution(idB))!.status).toBe('running');
+        expect(job.started).toBe(3);
+        expect(job.maxActive).toBe(2);
+        await scheduler.cancelCurrentAsync('j');
+        await b;
     });
 
     it('cancel cancels every running run and drops a queued one', async () => {
@@ -418,6 +449,19 @@ describe('interrupted runs', () => {
             retryAttempt: 0,
         };
         await storage.saveExecution(left);
+        await storage.saveExecution({
+            ...left,
+            id: 'e-logged',
+            logs: [
+                { timestamp: '2026-11-06T09:00:05.000Z', level: 'info', message: 'step 1' },
+                { timestamp: '2026-11-06T09:00:42.000Z', level: 'info', message: 'step 2' },
+            ],
+        });
+        await storage.saveExecution({
+            ...left,
+            id: 'e-old-log',
+            logs: [{ timestamp: '2026-11-06T08:59:00.000Z', level: 'info', message: 'clock skew' }],
+        });
         await storage.saveExecution({ ...left, id: 'e-done', status: 'completed', completedAt: '2026-11-06T08:00:01.000Z', duration: 1000 });
         await storage.saveExecution({ ...left, id: 'e-other', jobId: 'unregistered' });
 
@@ -435,6 +479,14 @@ describe('interrupted runs', () => {
             completedAt: '2026-11-06T09:00:00.000Z',
             duration: 0,
         });
+        // Completed at the last log entry when it is later than the start
+        expect(await storage.getExecution('e-logged')).toMatchObject({
+            status: 'cancelled',
+            error: INTERRUPTED_RUN_ERROR,
+            completedAt: '2026-11-06T09:00:42.000Z',
+            duration: 42_000,
+        });
+        expect(await storage.getExecution('e-old-log')).toMatchObject({ status: 'cancelled', completedAt: '2026-11-06T09:00:00.000Z', duration: 0 });
         expect((await storage.getExecution('e-done'))!.status).toBe('completed');
         expect((await storage.getExecution('e-other'))!.status).toBe('running');
         expect(events).toEqual([]);
@@ -462,6 +514,16 @@ describe('jobs API', () => {
         await scheduler.stop();
     });
 
+    it('trigger answers { message, queued }; 409 when full with skip', async () => {
+        scheduler.register(new GatedJob(), { id: 'quick-skip', overlapPolicy: 'skip' });
+        const first = request(app).post('/jobs/quick-skip/trigger').then((r) => r);
+        await waitUntil(() => scheduler.get('quick-skip')!.runningExecutionIds.length === 1);
+        const refused = await request(app).post('/jobs/quick-skip/trigger').expect(409);
+        expect(refused.body.code).toBe('JOB_ALREADY_RUNNING');
+        await scheduler.cancelCurrentAsync('quick-skip');
+        expect((await first).body).toEqual({ message: 'Job triggered', queued: false });
+    });
+
     it('job info has maxConcurrentRuns, runningExecutionIds and queued', async () => {
         const idle = await request(app).get('/jobs/j').expect(200);
         expect(idle.body).toMatchObject({ maxConcurrentRuns: 1, runningExecutionIds: [], queued: false });
@@ -469,8 +531,8 @@ describe('jobs API', () => {
 
         const run = scheduler.triggerAsync('j');
         await waitUntil(() => job.waiting === 1);
-        const queued = await request(app).post('/jobs/j/trigger').expect(202);
-        expect(queued.body).toEqual({ ok: true, queued: true });
+        const queued = await request(app).post('/jobs/j/trigger').expect(200);
+        expect(queued.body).toEqual({ message: 'Job queued', queued: true });
 
         const busy = await request(app).get('/jobs').expect(200);
         const info = busy.body.find((j: { id: string }) => j.id === 'j');
@@ -487,8 +549,33 @@ describe('jobs API', () => {
         for (const bad of [0, -2, 1.5, '2', null, true]) {
             const r = await request(app).put('/jobs/j').send({ maxConcurrentRuns: bad });
             expect(r.status).toBe(400);
-            expect(r.body.code).toBe('INVALID_MAX_CONCURRENT_RUNS');
+            expect(r.body.code).toBe('INVALID_VALUE');
         }
         expect((await request(app).get('/jobs/j')).body.maxConcurrentRuns).toBe(3);
+    });
+});
+
+describe('MCP jobs_trigger', () => {
+    it('says "Job queued" when the run was queued', async () => {
+        const job = new GatedJob();
+        const jobs = new CliJobsBuilder().addJob(job, { id: 'j', overlapPolicy: 'queue' }).build();
+        const cli = createCliServer({ mcp: true });
+        cli.mountPlugin(jobs);
+        const call = () =>
+            request(cli.app)
+                .post('/api/qcli/mcp')
+                .set('Content-Type', 'application/json')
+                .set('Accept', 'application/json, text/event-stream')
+                .send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'jobs_trigger', arguments: { id: 'j' } } }));
+        const first = call().then((r) => r);
+        await waitUntil(() => job.waiting === 1);
+        const queued = await call().expect(200);
+        expect(queued.body.result.content[0].text).toBe('Job queued');
+        expect(queued.body.result.structuredContent).toEqual({ ok: true, id: 'j', queued: true });
+        job.releaseAll();
+        await waitUntil(() => job.waiting === 1);
+        job.releaseAll();
+        expect((await first).body.result.content[0].text).toBe('Job triggered');
+        await jobs.scheduler.stop();
     });
 });
