@@ -5,6 +5,8 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
 
 ## 1.0.0-beta.23
 
+- The admin plugin embeds dashboard 1.0.0-beta.18: pages update live from the server events (jobs, job detail, files, audit, overview, events), a run's full error in a details dialog, max concurrent runs in the job editor, and no session token in WebSocket URLs when the ticket request fails.
+
 - **Jobs: max concurrent runs, and no job started twice**, the same on the .NET and Python servers
   (spec: web-cli `docs/superpowers/specs/2026-11-06-job-concurrency-design.md`):
   - `maxConcurrentRuns` per job (integer >= 1, default 1), in the code options and `PUT /api/v1/qcli/jobs/{id}`
