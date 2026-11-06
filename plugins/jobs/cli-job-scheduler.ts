@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 import { CronExpressionParser } from 'cron-parser';
 import {
+    CliEventPermissions,
+    ICliEventBus,
+    cliEventBusFromBroadcast,
     ICliJob,
     CliJobOptions,
     ICliJobStorageProvider,
@@ -137,16 +140,37 @@ export async function deleteFinishedJobExecutions(
 export class CliJobScheduler implements ICliJobScheduler {
     private readonly _registrations = new Map<string, JobRegistration>();
     private readonly _storage: ICliJobStorageProvider;
-    private _broadcastFn: BroadcastFn | null = null;
+    private _eventBus: ICliEventBus | null = null;
     private _running = false;
 
     constructor(storage: ICliJobStorageProvider) {
         this._storage = storage;
     }
 
-    /** Set the function used to broadcast job lifecycle events (e.g. via WebSocket). */
+    /**
+     * Sends job lifecycle events through a raw broadcast function (kept for compatibility;
+     * prefer {@link setEventBus}).
+     */
     setBroadcastFn(fn: BroadcastFn): void {
-        this._broadcastFn = fn;
+        this._eventBus = cliEventBusFromBroadcast(fn);
+    }
+
+    /** Publishes the job lifecycle events (`job:*`, audience `jobs:read`) on `eventBus`. */
+    setEventBus(eventBus: ICliEventBus | undefined): void {
+        this._eventBus = eventBus ?? null;
+    }
+
+    /** The bus job events are published on (also used by the jobs API for `job:triggered`, ...). */
+    get eventBus(): ICliEventBus | undefined {
+        return this._eventBus ?? undefined;
+    }
+
+    /**
+     * Publishes a job event (audience `jobs:read`). The jobs API and the MCP tools publish
+     * `job:triggered`, `job:updated` and `job:runs-deleted` through it.
+     */
+    publishEvent(type: string, data: Record<string, unknown>): Promise<void> {
+        return this._eventBus?.publish(type, data, { permission: CliEventPermissions.JobsRead }) ?? Promise.resolve();
     }
 
     /**
@@ -309,7 +333,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         reg.status = 'paused';
         this._stopTimer(reg);
         await this._persistState(reg);
-        this._broadcast({ type: 'job:paused', jobId: reg.id });
+        this._broadcast({ type: 'job:paused', jobId: reg.id, status: reg.status });
     }
 
     /** Resume a paused job, restarting its schedule timer. */
@@ -321,7 +345,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         reg.status = 'active';
         this._startTimer(reg);
         await this._persistState(reg);
-        this._broadcast({ type: 'job:resumed', jobId: reg.id });
+        this._broadcast({ type: 'job:resumed', jobId: reg.id, status: reg.status });
     }
 
     /** Stop a job entirely, cancelling any running execution and clearing its timer. */
@@ -337,7 +361,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         }
 
         await this._persistState(reg);
-        this._broadcast({ type: 'job:stopped', jobId: reg.id });
+        this._broadcast({ type: 'job:stopped', jobId: reg.id, status: reg.status });
     }
 
     /** Cancel the currently running execution of a job without changing its schedule. */
@@ -712,10 +736,10 @@ export class CliJobScheduler implements ICliJobScheduler {
         });
     }
 
-    private _broadcast(message: Record<string, unknown>): void {
-        if (this._broadcastFn) {
-            this._broadcastFn(message);
-        }
+    /** Publishes a lifecycle event without waiting for in-process handlers (the bus never rejects). */
+    private _broadcast(message: { type: string } & Record<string, unknown>): void {
+        const { type, ...data } = message;
+        void this.publishEvent(type, data);
     }
 }
 

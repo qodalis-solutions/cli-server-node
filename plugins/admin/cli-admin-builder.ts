@@ -1,5 +1,5 @@
 import { Router, RequestHandler, static as expressStatic } from 'express';
-import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
 import { AdminAuthProvider } from './auth/auth-provider';
@@ -40,6 +40,11 @@ export interface CliAdminBuildDeps {
     executor?: IExecutorLike;
     /** Optional broadcast function override for log events. */
     broadcastFn?: (message: Record<string, unknown>) => void;
+    /**
+     * The server's event bus (`createCliServer().eventBus`): log entries are published on it
+     * as `log:entry` (audience `logs:read`) unless `broadcastFn` is set.
+     */
+    eventBus?: ICliEventBus;
 }
 
 export interface CliAdminPluginResult {
@@ -187,7 +192,7 @@ export class CliAdminBuilder {
      * Build the admin plugin, returning the Express router and auth middleware.
      */
     build(deps: CliAdminBuildDeps): CliAdminPluginResult {
-        const { registry, eventSocketManager, builder, executor, broadcastFn } = deps;
+        const { registry, eventSocketManager, builder, executor, broadcastFn, eventBus } = deps;
         this._config.validate();
         // Read on every request: the users plugin sets it when it is mounted (possibly after this build).
         const isExternal = () => !!builder.serverOptions?.externalAuthentication;
@@ -211,7 +216,11 @@ export class CliAdminBuilder {
         }
         const logBuffer = new LogRingBuffer();
 
-        const broadcast = broadcastFn ?? ((msg) => eventSocketManager.broadcastMessage(msg));
+        const broadcast: (msg: Record<string, unknown>) => void =
+            broadcastFn
+            ?? (eventBus
+                ? ({ type, ...data }) => void eventBus.publish(String(type), data, { permission: 'logs:read' })
+                : (msg) => eventSocketManager.broadcastMessage(msg));
         logBuffer.setBroadcastFn(broadcast);
         logBuffer.interceptConsole();
 

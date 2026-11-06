@@ -1,4 +1,5 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
+import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { AuthAdapter, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
@@ -79,7 +80,7 @@ export interface UsersPluginResult {
  *
  * const usersPlugin = new CliUsersBuilder()
  *     .setDefaultAdminPassword('admin')
- *     .build((msg) => eventSocketManager.broadcastMessage(msg));
+ *     .build(eventBus); // or build() and mountPlugin(usersPlugin), which hands it the server's bus
  *
  * mountPlugin(usersPlugin);
  * await usersPlugin.ready;
@@ -248,9 +249,15 @@ export class CliUsersBuilder {
      * Builds the plugin synchronously. Seeding runs in the background; await
      * `ready` to know when it is done (requests wait for it automatically).
      *
-     * @param broadcastFn Broadcasts `session-kicked` events over the events socket.
+     * @param events The server's event bus (`createCliServer().eventBus`), or a function
+     *   broadcasting raw messages over the events socket (kept for compatibility). The
+     *   plugin publishes `user:*`, `group:*`, `token:*` and `session:*` events and the
+     *   `session-kicked` control message. Mounting the plugin hands it the server's bus
+     *   when it was not given one.
      */
-    build(broadcastFn?: UsersBroadcastFn): UsersPluginResult {
+    build(events?: ICliEventBus | UsersBroadcastFn): UsersPluginResult {
+        const broadcastFn = typeof events === 'function' ? events : undefined;
+        const eventBus = events && typeof events === 'object' ? events : undefined;
         const options = this.options;
         const externalAuth = !!options.authAdapter;
         const usersReadOnly = options.readOnlyUsers ?? false;
@@ -276,12 +283,16 @@ export class CliUsersBuilder {
             minPasswordLength: options.minPasswordLength,
             maxSessionLifetimeMs: options.maxSessionLifetimeMs,
             broadcast: broadcastFn,
+            eventBus,
             apiTokenStore,
             allowNonExpiringTokens: options.allowNonExpiringTokens,
             usersReadOnly,
             groupsReadOnly,
         });
         const directory = new DirectoryService(userStore, groupStore, authService);
+        if (eventBus) {
+            auditPlugin.setEventBus?.(eventBus);
+        }
 
         const ready = seed(userStore, groupStore, authService, {
             externalAuth,
@@ -314,6 +325,13 @@ export class CliUsersBuilder {
             }
             if (!authService.hasBroadcast()) {
                 authService.setBroadcast(server.broadcast);
+            }
+            if (!authService.hasEventBus() && server.eventBus) {
+                authService.setEventBus(server.eventBus);
+            }
+            // The audit plugin it serves publishes audit:recorded on the same bus
+            if (!eventBus && server.eventBus) {
+                auditPlugin.setEventBus?.(server.eventBus);
             }
             // The host application signs users in (admin dashboard: GET /api/v1/qcli/auth/mode).
             if (server.serverOptions) {

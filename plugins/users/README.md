@@ -14,13 +14,13 @@ npm install @qodalis/cli-server-plugin-users
 import { createCliServer } from '@qodalis/cli-server-node';
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 
-const { eventSocketManager, mountPlugin } = createCliServer({ /* ... */ });
+const { mountPlugin } = createCliServer({ /* ... */ });
 
 const usersPlugin = new CliUsersBuilder()
     .setDefaultAdminPassword('admin')
     .setSessionTimeout(30 * 60 * 1000)
-    // Relays `session-kicked` events over the events WebSocket
-    .build((msg) => eventSocketManager.broadcastMessage(msg));
+    // Publishes its events (and `session-kicked`) on the server's event bus, handed over by mountPlugin
+    .build();
 
 mountPlugin(usersPlugin);      // mounted at usersPlugin.prefix (/api/v1/qcli)
 await usersPlugin.ready;       // optional: seeding done (requests wait for it anyway)
@@ -57,6 +57,23 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setOptions(options)` | — | Same options as a plain object |
 
 The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
+
+## Events
+
+The plugin publishes on the server's event bus (`build(eventBus)`, or the server's bus once mounted; a raw broadcast
+function passed to `build()` still relays `session-kicked`, and the events then go to the server's bus when mounted):
+
+| Type | Fields | Audience |
+|---|---|---|
+| `user:created`, `user:updated`, `user:deleted` | userId, username, actor | `users:read` |
+| `group:created`, `group:updated`, `group:deleted` | group (its name), actor | `groups:read` |
+| `token:created`, `token:revoked` | tokenId, name, userId, actor | `tokens:read` or the token's owner |
+| `session:opened`, `session:closed` | userId, username, sessionId | `sessions:read` |
+
+`user:updated` covers profile, password, enabled/disabled and group membership changes (a deleted group publishes
+`user:updated` for each former member). `session:closed` covers sign-out, expiry and kicks; deleting a user publishes
+`token:revoked` for each of its tokens. Events are published from the services every caller goes through, so the
+REST API and a host's own calls publish alike. The audit plugin it serves publishes `audit:recorded`.
 
 ## Server protection
 

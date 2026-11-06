@@ -52,3 +52,17 @@ export {
     installedPluginOf,
 } from './installed-plugin';
 export { AuditEntry, AuditMetadata, AuditQueryOptions, ICliAuditStore, pruneAudit } from './audit';
+export {
+    CliEvent,
+    CliEventAudience,
+    CliEventHandler,
+    ICliEventBus,
+    CliEventBroadcastFn,
+    CliEventPermissions,
+    cliEventPatternMatches,
+    toCliEventMessage,
+    isCliEventBus,
+    createCliEvent,
+    cliEventBusFromBroadcast,
+    resolveCliEventBus,
+} from './events';

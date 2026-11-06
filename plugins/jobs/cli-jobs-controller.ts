@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import { CliJobScheduler, JobError } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli-jobs-stats';
@@ -95,6 +95,7 @@ export function createCliJobsController(
     router.post('/:id/trigger', async (req, res) => {
         try {
             await scheduler.triggerAsync(req.params.id);
+            await scheduler.publishEvent('job:triggered', { jobId: req.params.id, ...actorOf(req) });
             res.json({ ok: true });
         } catch (err) {
             handleError(res, err);
@@ -151,6 +152,7 @@ export function createCliJobsController(
                 timeout,
                 overlapPolicy,
             });
+            await scheduler.publishEvent('job:updated', { jobId: req.params.id, ...actorOf(req) });
             const updated = scheduler.get(req.params.id);
             res.json(updated);
         } catch (err) {
@@ -198,6 +200,7 @@ export function createCliJobsController(
     router.delete('/:id/history/:execId', async (req, res) => {
         try {
             await scheduler.deleteExecutionAsync(req.params.id, req.params.execId);
+            await scheduler.publishEvent('job:runs-deleted', { jobId: req.params.id, executionId: req.params.execId, ...actorOf(req) });
             res.json({ message: 'Run deleted' });
         } catch (err) {
             handleError(res, err);
@@ -208,6 +211,7 @@ export function createCliJobsController(
         const status = typeof req.query.status === 'string' && req.query.status ? req.query.status : undefined;
         try {
             const deleted = await scheduler.deleteExecutionsAsync(req.params.id, status);
+            await scheduler.publishEvent('job:runs-deleted', { jobId: req.params.id, count: deleted, ...actorOf(req) });
             res.json({ deleted });
         } catch (err) {
             handleError(res, err);
@@ -215,6 +219,12 @@ export function createCliJobsController(
     });
 
     return router;
+}
+
+/** `{ actor }`: the signed-in caller's name (set by the server's auth gate), when known. */
+function actorOf(req: Request): { actor?: string } {
+    const name = (req as Request & { qcliServerAuth?: { userName?: string } }).qcliServerAuth?.userName;
+    return name ? { actor: name } : {};
 }
 
 /** An execution in a list: without its logs, with their count and the run's properties. */

@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'http';
 import type { Request } from 'express';
+import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
 
 /** Identity of an authenticated caller (HTTP request or WebSocket). */
 export interface CliServerAuthContext {
@@ -59,11 +60,14 @@ export interface ICliServerAuth {
     /**
      * Called once when installed into a server. `serverOptions` is the server's
      * runtime options object: a provider that delegates sign-in to the host sets
-     * `externalAuthentication` on it.
+     * `externalAuthentication` on it. `eventBus` is the server's event bus (the users
+     * plugin publishes `user:*`, `group:*`, `token:*` and `session:*` on it); `broadcast`
+     * sends raw control messages (`session-kicked`).
      */
     attachToServer?(server: {
         allowedOrigins?: string[];
         broadcast: (message: Record<string, unknown>) => void;
+        eventBus?: ICliEventBus;
         serverOptions?: CliServerRuntimeOptions;
     }): void;
     /**
