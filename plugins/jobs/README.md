@@ -81,6 +81,8 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 | PUT | `/:id` | Update job options |
 | GET | `/:id/history` | Paginated execution history |
 | GET | `/:id/history/:execId` | Execution detail with logs |
+| DELETE | `/:id/history/:execId` | Delete one run and its logs → `{ message: "Run deleted" }`; 404 `JOB_NOT_FOUND` / `EXECUTION_NOT_FOUND` (missing or another job's run), 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED` (the storage has no `deleteExecution`) |
+| DELETE | `/:id/history` | Delete every finished run of the job, or only those with `?status=` (e.g. `failed`, as in the history filter) → `{ deleted: <count> }`; running runs are never deleted; 404 and 501 as above |
 
 ## Inside a job
 
@@ -96,11 +98,11 @@ class DigestJob implements ICliJob {
 }
 ```
 
-`plugin.scheduler` (`ICliJobScheduler`) is for the host's own code: `jobs` (the registrations by id), `triggerAsync`, `pauseAsync`, `resumeAsync`, `stopJobAsync`, `cancelCurrentAsync`, `updateOptionsAsync` and `queryExecutions`.
+`plugin.scheduler` (`ICliJobScheduler`) is for the host's own code: `jobs` (the registrations by id), `triggerAsync`, `pauseAsync`, `resumeAsync`, `stopJobAsync`, `cancelCurrentAsync`, `updateOptionsAsync`, `queryExecutions`, `deleteExecutionAsync` and `deleteExecutionsAsync` (the delete endpoints above; the bulk delete pages through the job's runs and deletes each finished one, the default `deleteFinishedJobExecutions` gives other schedulers).
 
 ## Custom Storage
 
-By default, execution history is stored in memory. Provide a custom `ICliJobStorageProvider` for persistence:
+By default, execution history is stored in memory. Provide a custom `ICliJobStorageProvider` for persistence (implement the optional `deleteExecution` so runs can be deleted, and so `context.discard()` works; without it the delete endpoints answer 501):
 
 ```typescript
 const plugin = new CliJobsBuilder()

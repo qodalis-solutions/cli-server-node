@@ -23,8 +23,8 @@ export function resolveJobId(scheduler: CliJobScheduler, idOrName: string): { id
 
 /**
  * Jobs tools over the jobs plugin's scheduler: `jobs_list`, `jobs_get`,
- * `jobs_history` (`jobs:read`) and `jobs_trigger|pause|resume|stop|cancel`
- * (`jobs:manage`).
+ * `jobs_history` (`jobs:read`), `jobs_trigger|pause|resume|stop|cancel` and
+ * `jobs_delete_runs` (`jobs:manage`).
  */
 export class JobsMcpToolProvider implements McpToolProvider {
     readonly name = 'jobs';
@@ -113,6 +113,36 @@ export class JobsMcpToolProvider implements McpToolProvider {
             action('jobs_resume', 'Resume a paused job', (id) => s.resumeAsync(id)),
             action('jobs_stop', 'Stop a job (and cancel its current run)', (id) => s.stopJobAsync(id), { destructiveHint: true }),
             action('jobs_cancel', 'Cancel the current run of a job', (id) => s.cancelCurrentAsync(id), { destructiveHint: true }),
+            {
+                name: 'jobs_delete_runs',
+                description:
+                    'Delete runs of a job and their logs: one run (executionId), else every finished run, or only those with a status (e.g. failed). Running runs are never deleted.',
+                inputSchema: mcpObjectSchema(
+                    {
+                        ...idProp,
+                        executionId: { type: 'string', description: 'The run to delete; omit to delete many' },
+                        status: { type: 'string', description: 'Only runs with this status (completed, failed, cancelled, timed_out)' },
+                    },
+                    ['id'],
+                ),
+                requiredPermissions: [P.JobsManage],
+                annotations: { destructiveHint: true },
+                call: async (args) => {
+                    const job = resolve(args.id);
+                    if ('error' in job) return mcpError(job.error);
+                    try {
+                        if (typeof args.executionId === 'string' && args.executionId) {
+                            await s.deleteExecutionAsync(job.id, args.executionId);
+                            return mcpJson({ deleted: 1, id: job.id }, 'Run deleted');
+                        }
+                        const status = typeof args.status === 'string' && args.status ? args.status : undefined;
+                        const deleted = await s.deleteExecutionsAsync(job.id, status);
+                        return mcpJson({ deleted, id: job.id }, `Deleted ${deleted} run(s)`);
+                    } catch (err) {
+                        return mcpError(errorMessage(err));
+                    }
+                },
+            },
         ];
     }
 }
