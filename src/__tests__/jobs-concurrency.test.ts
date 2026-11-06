@@ -71,6 +71,10 @@ const waitUntil = async (cond: () => boolean, tries = 200) => {
     if (!cond()) throw new Error('condition not reached');
 };
 
+/** Waits until the job has no run left and none queued (triggerAsync resolves once a run started). */
+const idle = (scheduler: CliJobScheduler, id: string) =>
+    waitUntil(() => scheduler.jobs.get(id)!.runs.size === 0 && !scheduler.jobs.get(id)!.queued);
+
 async function executions(storage: InMemoryJobStorageProvider, jobId: string): Promise<JobExecution[]> {
     return (await storage.getExecutions(jobId, { limit: 100, offset: 0 })).items;
 }
@@ -134,7 +138,7 @@ describe('maxConcurrentRuns', () => {
             expect(job.started).toBe(1);
             // The run keeps its slot, but no attempt is executing during the delay
             expect(scheduler.get('j')!.runningExecutionIds).toEqual([]);
-            expect(scheduler.get('j')!.currentExecutionId).toBeUndefined();
+            expect(scheduler.get('j')!.currentExecutionId).toBeNull();
             await vi.advanceTimersByTimeAsync(5000); // five ticks during the delay
             await expect(scheduler.triggerAsync('j')).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
             expect(job.started).toBe(1);
@@ -160,8 +164,8 @@ describe('maxConcurrentRuns', () => {
             expect(job.started).toBe(1);
             await vi.advanceTimersByTimeAsync(10_000);
             expect(job.started).toBe(2); // the retry, the queued run still waits
-            job.releaseOne();
             await first;
+            job.releaseOne();
             await vi.advanceTimersByTimeAsync(0);
             expect(job.started).toBe(3); // the queued run
             expect(scheduler.get('j')!.queued).toBe(false);
@@ -176,9 +180,9 @@ describe('maxConcurrentRuns', () => {
         await waitUntil(() => job.waiting === 1);
         for (let i = 0; i < 3; i++) expect(await scheduler.triggerAsync('j')).toEqual({ queued: true });
         expect(scheduler.get('j')!.queued).toBe(true);
-        job.releaseOne();
         await first;
-        await waitUntil(() => job.waiting === 1);
+        job.releaseOne();
+        await waitUntil(() => job.started === 2 && job.waiting === 1);
         expect(job.started).toBe(2);
         expect(scheduler.get('j')!.queued).toBe(false);
         job.releaseOne();
@@ -219,9 +223,9 @@ describe('maxConcurrentRuns', () => {
         expect(scheduler.get('j')!.queued).toBe(true);
         expect(job.active).toBe(2); // A ignores the abort: C has not started
 
-        lingering!(); // A ends
         await a;
-        await waitUntil(() => job.active === 2);
+        lingering!(); // A ends
+        await waitUntil(() => !scheduler.get('j')!.queued && job.active === 2);
         const dto = scheduler.get('j')!;
         expect(dto.queued).toBe(false);
         expect(dto.runningExecutionIds[0]).toBe(idB);
@@ -241,7 +245,7 @@ describe('maxConcurrentRuns', () => {
         expect(await scheduler.triggerAsync('j')).toEqual({ queued: true });
         await scheduler.cancelCurrentAsync('j');
         await Promise.all(runs);
-        await flush();
+        await idle(scheduler, 'j');
         expect(job.started).toBe(2);
         const dto = scheduler.get('j')!;
         expect(dto.runningExecutionIds).toEqual([]);
@@ -255,15 +259,16 @@ describe('maxConcurrentRuns', () => {
         await waitUntil(() => job.waiting === 2);
         await scheduler.updateOptionsAsync('j', { maxConcurrentRuns: 1 });
         expect(job.active).toBe(2);
+        await Promise.all(runs);
         job.releaseOne();
-        await runs[0];
+        await waitUntil(() => scheduler.jobs.get('j')!.runs.size === 1);
         await expect(scheduler.triggerAsync('j')).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
         job.releaseOne();
-        await runs[1];
-        const third = scheduler.triggerAsync('j');
+        await idle(scheduler, 'j');
+        await scheduler.triggerAsync('j');
         await waitUntil(() => job.waiting === 1);
         job.releaseOne();
-        await third;
+        await idle(scheduler, 'j');
         expect(job.started).toBe(3);
     });
 
@@ -275,6 +280,16 @@ describe('maxConcurrentRuns', () => {
         await scheduler.updateOptionsAsync('j', { maxConcurrentRuns: 2 });
         await waitUntil(() => job.waiting === 2);
         expect(scheduler.get('j')!.queued).toBe(false);
+    });
+
+    it('triggerAsync resolves once the run started, not when it ends', async () => {
+        scheduler.register(job, { id: 'j' });
+        expect(await scheduler.triggerAsync('j')).toEqual({ queued: false });
+        expect(scheduler.get('j')!.runningExecutionIds).toHaveLength(1);
+        await waitUntil(() => job.waiting === 1);
+        job.releaseOne();
+        await idle(scheduler, 'j');
+        expect(scheduler.get('j')!.currentExecutionId).toBeNull();
     });
 
     it('registering an invalid maxConcurrentRuns throws', () => {
@@ -298,6 +313,7 @@ describe('cancel versus timeout', () => {
         await waitUntil(() => job.waiting === 1);
         await scheduler.cancelCurrentAsync('j');
         await run;
+        await idle(scheduler, 'j');
         expect(events.map((e) => e.type)).toEqual(['job:started', 'job:cancelled']);
         expect((await executions(storage, 'j'))[0].status).toBe('cancelled');
         await scheduler.stop();
@@ -311,8 +327,8 @@ describe('cancel versus timeout', () => {
             const job = new GatedJob();
             scheduler.register(job, { id: 'j', timeout: '1s', maxRetries: 0 });
             const run = scheduler.triggerAsync('j');
-            await vi.advanceTimersByTimeAsync(1000);
             await run;
+            await vi.advanceTimersByTimeAsync(1000);
             expect((await executions(storage, 'j'))[0].status).toBe('timed_out');
             await scheduler.stop();
         } finally {
@@ -521,18 +537,17 @@ describe('jobs API', () => {
         const refused = await request(app).post('/jobs/quick-skip/trigger').expect(409);
         expect(refused.body.code).toBe('JOB_ALREADY_RUNNING');
         await scheduler.cancelCurrentAsync('quick-skip');
-        expect((await first).body).toEqual({ message: 'Job triggered', queued: false });
+        expect((await first).body).toEqual({ ok: true, message: 'Job triggered', queued: false });
     });
 
     it('job info has maxConcurrentRuns, runningExecutionIds and queued', async () => {
-        const idle = await request(app).get('/jobs/j').expect(200);
-        expect(idle.body).toMatchObject({ maxConcurrentRuns: 1, runningExecutionIds: [], queued: false });
-        expect(idle.body.currentExecutionId).toBeUndefined();
+        const idleInfo = await request(app).get('/jobs/j').expect(200);
+        expect(idleInfo.body).toMatchObject({ maxConcurrentRuns: 1, runningExecutionIds: [], queued: false, currentExecutionId: null });
 
         const run = scheduler.triggerAsync('j');
         await waitUntil(() => job.waiting === 1);
         const queued = await request(app).post('/jobs/j/trigger').expect(200);
-        expect(queued.body).toEqual({ message: 'Job queued', queued: true });
+        expect(queued.body).toEqual({ ok: true, message: 'Job queued', queued: true });
 
         const busy = await request(app).get('/jobs').expect(200);
         const info = busy.body.find((j: { id: string }) => j.id === 'j');

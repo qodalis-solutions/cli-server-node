@@ -97,7 +97,7 @@ export function createCliJobsController(
             const result = await scheduler.triggerAsync(req.params.id);
             await scheduler.publishEvent('job:triggered', { jobId: req.params.id, ...actorOf(req) });
             // Queued: accepted, the run starts when a slot frees
-            res.json(result.queued ? { message: 'Job queued', queued: true } : { message: 'Job triggered', queued: false });
+            res.json(result.queued ? { ok: true, message: 'Job queued', queued: true } : { ok: true, message: 'Job triggered', queued: false });
         } catch (err) {
             handleError(res, err);
         }

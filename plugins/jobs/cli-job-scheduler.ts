@@ -69,8 +69,8 @@ export interface JobDto {
     overlapPolicy: string;
     /** Up to this many runs of the job at the same time (default 1). */
     maxConcurrentRuns: number;
-    /** The newest executing run's execution. */
-    currentExecutionId?: string;
+    /** The newest executing run's execution; null when nothing is executing. */
+    currentExecutionId: string | null;
     /** The executing attempts' executions, oldest first (a run in its retry delay has none; empty when idle). */
     runningExecutionIds: string[];
     /** A run is queued and starts when a slot frees. */
@@ -135,9 +135,10 @@ export interface ICliJobScheduler {
     /** The registered jobs keyed by job id, in registration order. */
     readonly jobs: ReadonlyMap<string, JobRegistration>;
     /**
-     * Runs the job now, through its run slots: resolves when the run ended, or at once with
-     * `{ queued: true }` when the job is full and its overlap policy is `queue`. Throws a
-     * {@link JobError} (409 `JOB_ALREADY_RUNNING`) when it is full and the policy is `skip`.
+     * Runs the job now, through its run slots. Resolves as soon as the run started
+     * (`{ queued: false }`) or was queued (`{ queued: true }`: every slot taken and the overlap
+     * policy is `queue` or `cancel`), not when it ends. Throws a {@link JobError}
+     * (409 `JOB_ALREADY_RUNNING`) when every slot is taken and the policy is `skip`.
      */
     triggerAsync(id: string): Promise<{ queued: boolean } | void>;
     /** Pauses the job's schedule. */
@@ -440,9 +441,9 @@ export class CliJobScheduler implements ICliJobScheduler {
         if (attempt.state === 'skipped') {
             throw new JobError('Job is already running', 'JOB_ALREADY_RUNNING', 409);
         }
-        // A queued run starts when a slot frees; the trigger is accepted now
+        // Resolves once the run started (or was queued), not when it ends
         if (attempt.state !== 'started') return { queued: true };
-        await attempt.done;
+        attempt.done.catch((err) => console.error(`Run of job ${reg.id} failed:`, err));
         return { queued: false };
     }
 
@@ -613,7 +614,7 @@ export class CliJobScheduler implements ICliJobScheduler {
             timeout: reg.options.timeout,
             overlapPolicy: reg.options.overlapPolicy ?? 'skip',
             maxConcurrentRuns: maxConcurrentRunsOf(reg.options),
-            currentExecutionId: reg.currentExecutionId,
+            currentExecutionId: reg.currentExecutionId ?? null,
             runningExecutionIds: Array.from(reg.runs.values()).map((r) => r.executionId).filter(Boolean),
             queued: reg.queued,
             nextRunAt: reg.nextRunAt,
