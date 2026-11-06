@@ -3,6 +3,58 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## 1.0.0-beta.23
+
+- The admin plugin embeds dashboard 1.0.0-beta.18: pages update live from the server events (jobs, job detail, files, audit, overview, events), a run's full error in a details dialog, max concurrent runs in the job editor, and no session token in WebSocket URLs when the ticket request fails.
+
+- **Jobs: max concurrent runs, and no job started twice**, the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-06-job-concurrency-design.md`):
+  - `maxConcurrentRuns` per job (integer >= 1, default 1), in the code options and `PUT /api/v1/qcli/jobs/{id}`
+    (400 `INVALID_VALUE` otherwise). A run holds its slot until it ends, its retries and their delays
+    included; taking a slot is atomic, so timer ticks, triggers and the run on start never exceed the limit.
+  - When full: `skip` drops the due run (a trigger answers 409 `JOB_ALREADY_RUNNING`), `queue` queues one coalesced
+    run, `cancel` cancels the oldest run and starts the new one once it ended (queued meanwhile). Lowering the limit
+    cancels nothing.
+  - `POST /trigger` answers at once, no longer waiting for the run to finish: `{ "ok": true, "message": "Job
+    triggered", "queued": false }` or `{ "ok": true, "message": "Job queued", "queued": true }`; MCP `jobs_trigger`
+    says `Job queued` when queued. `triggerAsync` resolves `{ queued }` once the run started or was queued.
+  - Job info adds `maxConcurrentRuns`, `runningExecutionIds` (the executing attempts, oldest first; a run in its
+    retry delay has none) and `queued`; `currentExecutionId` is the newest executing run, `null` when none. `POST /cancel` cancels
+    every running run and drops a queued one, as does `stop`.
+  - `runOnStart` runs only when the job is due: an interval job that never ran or whose next run is due, a cron job
+    that never ran or missed an occurrence; a job without a schedule still runs on every start.
+  - Cron jobs compute the next occurrence from the one that fired, so an early timer never runs it twice; a cron
+    run no longer delays the next occurrence until it ends (the overlap policy decides).
+  - On start, runs a previous process left `running` are finished as `cancelled` with
+    `Interrupted: the server stopped during the run`, completed at their last log entry (or their start).
+  - Fixed: a job with a `timeout` cancelled by hand reported `job:timed_out` (and `timed_out`); it is `cancelled`.
+  - `JobRegistration.queue` is replaced by `runs` and `queued`.
+- **Server events**, the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-06-server-events-design.md`):
+  - `createCliServer` returns `eventBus` (`CliEventBus`, typed `ICliEventBus` in `@qodalis/cli-server-abstractions`):
+    `publish(type, data?, audience?)` and `subscribe(pattern, handler)` (`*`, `ns:*` or an exact type;
+    `cliEventPatternMatches`). Handlers run in subscription order; one that throws is logged and never fails the
+    publishing action. The events WebSocket is the bus's subscriber of `*`.
+  - Each message is one flat JSON object: `type`, `timestamp` (ISO 8601 UTC, added unless set), the publisher's
+    fields and, when known, `actor`.
+  - Audience: an event goes to every socket, to the sockets holding a `permission`, to a `userId`'s sockets, or with
+    both to the user or the permission holders. Servers without the users plugin deliver everything to everyone;
+    in-process subscribers receive every event. `eventSocketManager.broadcastMessage` still works: on a protected
+    server namespaced raw messages need their namespace's read permission (`job:*` → `jobs:read`, `user:*` →
+    `users:read`, ...).
+  - New events: `job:triggered`, `job:updated`, `job:runs-deleted` (jobs API and MCP); `job:paused`, `job:resumed`
+    and `job:stopped` carry `status`; `user:created|updated|deleted`, `group:created|updated|deleted`,
+    `token:created|revoked`, `session:opened|closed` (users plugin); `fs:changed` (`upload`, `mkdir`, `delete`,
+    `write`, `move`, `copy`: the file storage provider shared by the filesystem API and the MCP `fs_*` tools);
+    `command:executed` (`/execute`, `/execute/stream` and MCP command tools: the processor name, success, duration,
+    caller; never arguments); `audit:recorded` (every entry the audit plugin's store keeps). Job events need
+    `jobs:read`, user/group/session events `users:read`/`groups:read`/`sessions:read`, token events `tokens:read` or
+    the owner, `fs:changed` `files:read`, `command:executed` and `audit:recorded` `audit:read`.
+  - The jobs and users builders take the bus (`build(eventBus)`); the broadcast-function parameter keeps working.
+    Built with neither, `mountPlugin` hands them the server's bus (new optional `MountablePlugin.setEventBus`, also on
+    the jobs and audit plugin results; auth providers get `eventBus` in `attachToServer`). The admin plugin takes
+    `eventBus` in `build()` and publishes `log:entry` with audience `logs:read`.
+
 ## 1.0.0-beta.22
 
 - The admin plugin embeds dashboard 1.0.0-beta.17: logs jump to newest, pause, copy an entry and collapsed exceptions; jobs run again and delete runs from the recent runs table.

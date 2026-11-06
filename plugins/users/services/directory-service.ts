@@ -2,7 +2,7 @@ import { ICliUserStore, ICliGroupStore } from '../stores/interfaces';
 import { Group, User, UpdateUserDto } from '../models';
 import { AuthService } from './auth-service';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
-import { ADMIN_GROUP, BUILT_IN_GROUPS, USERS_GROUP, inGroup, mergePermissions, sameName } from '../permissions';
+import { ADMIN_GROUP, BUILT_IN_GROUPS, USERS_GROUP, UsersPermissions, inGroup, mergePermissions, sameName } from '../permissions';
 import { hasControlChars, uncoveredPermissions } from '../security';
 import { validatePermissions } from './permission-validation';
 
@@ -231,6 +231,7 @@ export class DirectoryService {
             await this.authService.setPassword(user.id, password);
         }
         await this.authService.audit({ event: 'user_created', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id });
+        await this.publishUserEvent('user:created', user, caller);
         return user;
     }
 
@@ -293,6 +294,9 @@ export class DirectoryService {
         if (disabledChanged) {
             await this.authService.audit({ event: disabled ? 'user_disabled' : 'user_enabled', ...audit });
         }
+        if (otherFields.length > 0 || disabledChanged) {
+            await this.publishUserEvent('user:updated', updated, caller);
+        }
         return updated;
     }
 
@@ -313,8 +317,9 @@ export class DirectoryService {
         });
         // After the revocations: deleting tokens makes open sockets re-check, which
         // must not end the sessions above before they are kicked.
-        await this.authService.deleteUserTokens(target.id);
+        await this.authService.deleteUserTokens(target.id, caller.name);
         await this.authService.audit({ event: 'user_deleted', username: target.name, userId: target.id, actor: caller.name, actorId: caller.id });
+        await this.publishUserEvent('user:deleted', target, caller);
     }
 
     async setMustChangePassword(user: User, value: boolean): Promise<void> {
@@ -340,6 +345,7 @@ export class DirectoryService {
         }
         const group = await this.groupStore.createGroup({ name, description, permissions, builtIn: false });
         await this.authService.audit({ event: 'group_created', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
+        await this.publishGroupEvent('group:created', group.name, caller);
         return group;
     }
 
@@ -356,6 +362,7 @@ export class DirectoryService {
         }
         const updated = await this.groupStore.updateGroup(group.name, { description, permissions });
         await this.authService.audit({ event: 'group_updated', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
+        await this.publishGroupEvent('group:updated', group.name, caller);
         return updated;
     }
 
@@ -365,12 +372,17 @@ export class DirectoryService {
         }
         await this.groupStore.deleteGroup(group.name);
         // A read-only user store keeps its memberships (the host owns them).
+        const members: User[] = [];
         for (const user of this.authService.usersReadOnly ? [] : await this.userStore.getUsers()) {
             if (inGroup(user.groups, group.name)) {
-                await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) });
+                members.push(await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) }));
             }
         }
         await this.authService.audit({ event: 'group_deleted', username: caller.name, userId: caller.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
+        await this.publishGroupEvent('group:deleted', group.name, caller);
+        for (const member of members) {
+            await this.publishUserEvent('user:updated', member, caller);
+        }
     }
 
     async getMembers(group: Group): Promise<User[]> {
@@ -386,6 +398,7 @@ export class DirectoryService {
         this.assertCanAddGroups(caller, [group]);
         await this.userStore.updateUser(user.id, { groups: [...user.groups, group.name] });
         await this.authService.audit({ event: 'group_member_added', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
+        await this.publishUserEvent('user:updated', user, caller);
     }
 
     async removeMember(group: Group, user: User, caller: Caller): Promise<void> {
@@ -396,6 +409,21 @@ export class DirectoryService {
         }
         await this.userStore.updateUser(user.id, { groups: user.groups.filter((g) => !sameName(g, group.name)) });
         await this.authService.audit({ event: 'group_member_removed', username: user.name, userId: user.id, actor: caller.name, actorId: caller.id, details: group.name, target: `group:${group.name}` });
+        await this.publishUserEvent('user:updated', user, caller);
+    }
+
+    /** `user:created|updated|deleted` (audience `users:read`). Also used for password changes. */
+    publishUserEvent(type: 'user:created' | 'user:updated' | 'user:deleted', user: User, caller?: Caller): Promise<void> {
+        return this.authService.publishEvent(
+            type,
+            { userId: user.id, username: user.name, ...(caller ? { actor: caller.name } : {}) },
+            { permission: UsersPermissions.UsersRead },
+        );
+    }
+
+    /** `group:created|updated|deleted` (audience `groups:read`); `group` is the group's name. */
+    private publishGroupEvent(type: 'group:created' | 'group:updated' | 'group:deleted', group: string, caller: Caller): Promise<void> {
+        return this.authService.publishEvent(type, { group, actor: caller.name }, { permission: UsersPermissions.GroupsRead });
     }
 }
 

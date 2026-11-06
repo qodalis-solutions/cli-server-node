@@ -3,11 +3,19 @@ import * as os from 'os';
 import { CliStructuredOutput, ICliCommandProcessor, isStreamCapable } from '../abstractions';
 import { CliServerCommandDescriptor, CliServerCommandParameterDescriptorDto } from '../models';
 import { ICliCommandRegistry, ICliCommandExecutorService, CliOutputLimits, DEFAULT_MAX_TABLE_ROWS, CliCommandUsageStats } from '../services';
+import { publishCommandExecuted } from '../services/cli-command-events';
+import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { createLogger } from '../utils/logger';
 import { CapabilitiesOptions, resolveShellCapabilities } from './cli-version-controller';
 
 const logger = createLogger('CliController');
 const SERVER_VERSION = '1.0.0';
+
+/** Options of {@link createCliController}. */
+export interface CliControllerOptions extends CapabilitiesOptions {
+    /** Publishes `command:executed` after each `/execute` and `/execute/stream`. */
+    eventBus?: ICliEventBus;
+}
 
 /**
  * Creates an Express router for the v1 CLI API with version, capabilities, commands, and execute endpoints.
@@ -18,7 +26,7 @@ const SERVER_VERSION = '1.0.0';
 export function createCliController(
     registry: ICliCommandRegistry,
     executor: ICliCommandExecutorService,
-    options?: CapabilitiesOptions,
+    options?: CliControllerOptions,
 ): Router {
     const router = Router();
     // Executors without counters (custom implementations) get their own
@@ -70,7 +78,20 @@ export function createCliController(
         const abortController = new AbortController();
         req.on('close', () => abortController.abort());
 
-        const response = await executor.executeAsync(command, abortController.signal);
+        const started = Date.now();
+        let response: Awaited<ReturnType<ICliCommandExecutorService['executeAsync']>> | undefined;
+        try {
+            response = await executor.executeAsync(command, abortController.signal);
+        } finally {
+            await publishCommandExecuted(
+                options?.eventBus,
+                registry,
+                command.command,
+                !!response && response.exitCode === 0,
+                Date.now() - started,
+                req.qcliServerAuth?.userId,
+            );
+        }
         res.json(response);
     });
 
@@ -144,6 +165,7 @@ export function createCliController(
             }
         } finally {
             usage.record(command?.command, known, Date.now() - started, failed);
+            await publishCommandExecuted(options?.eventBus, registry, command?.command, !failed, Date.now() - started, req.qcliServerAuth?.userId);
         }
 
         res.end();

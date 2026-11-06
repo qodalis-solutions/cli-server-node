@@ -55,6 +55,22 @@ export {
     ShellCloseCodes,
 } from './services';
 
+// Server events
+export { CliEventBus, publishCommandExecuted } from './services';
+export { withFileStorageEvents } from './filesystem/file-storage-events';
+export {
+    CliEvent,
+    CliEventAudience,
+    CliEventHandler,
+    ICliEventBus,
+    CliEventBroadcastFn,
+    CliEventPermissions,
+    cliEventPatternMatches,
+    toCliEventMessage,
+    cliEventBusFromBroadcast,
+    resolveCliEventBus,
+} from '@qodalis/cli-server-abstractions';
+
 // Server auth (implemented by the users plugin)
 export {
     CliServerAuthContext,
@@ -109,7 +125,7 @@ export {
 } from './mcp';
 
 // Controllers
-export { createCliController } from './controllers/cli-controller';
+export { createCliController, CliControllerOptions } from './controllers/cli-controller';
 export { createCliVersionController } from './controllers/cli-version-controller';
 export { createFilesystemRouter } from './controllers/filesystem-controller';
 

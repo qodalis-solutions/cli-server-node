@@ -2,6 +2,9 @@ import { CliProcessCommand, ICliCommandProcessor, quoteShellWord as quote } from
 import { CliServerPermissions as P } from '../../auth/cli-server-auth';
 import { ICliCommandRegistry } from '../../services/cli-command-registry';
 import { ICliCommandExecutorService } from '../../services/cli-command-executor-service';
+import { publishCommandExecuted } from '../../services/cli-command-events';
+import { CliServerResponse } from '../../models';
+import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { commandResult } from '../mcp-render';
 import { McpInputSchema, McpPropertySchema, McpTool, McpToolProvider, mcpObjectSchema } from '../mcp-types';
 
@@ -99,6 +102,7 @@ export class CommandsMcpToolProvider implements McpToolProvider {
     constructor(
         private readonly registry: ICliCommandRegistry,
         private readonly executor: ICliCommandExecutorService,
+        private readonly eventBus?: ICliEventBus,
     ) {}
 
     getTools(): McpTool[] {
@@ -128,8 +132,21 @@ export class CommandsMcpToolProvider implements McpToolProvider {
             inputSchema: commandInputSchema(processor),
             requiredPermissions: [P.CommandsExecute, ...permissions],
             call: async (args, context) => {
-                const response = await this.executor.executeAsync(buildCliCommand(path, positional, args), context.signal);
-                return commandResult(response);
+                const started = Date.now();
+                let response: CliServerResponse | undefined;
+                try {
+                    response = await this.executor.executeAsync(buildCliCommand(path, positional, args), context.signal);
+                } finally {
+                    await publishCommandExecuted(
+                        this.eventBus,
+                        this.registry,
+                        path[0],
+                        !!response && response.exitCode === 0,
+                        Date.now() - started,
+                        context.auth?.userId,
+                    );
+                }
+                return commandResult(response!);
             },
         };
     }

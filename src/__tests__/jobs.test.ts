@@ -22,6 +22,16 @@ import { CliJobScheduler, JobError } from '../../plugins/jobs/cli-job-scheduler'
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Resolves once the job has no run left (triggerAsync resolves when a run started). */
+async function untilIdle(scheduler: CliJobScheduler, id: string, timeoutMs = 10_000): Promise<void> {
+    const reg = scheduler.jobs.get(id)!;
+    const start = Date.now();
+    while (reg.runs.size > 0 || reg.queued) {
+        if (Date.now() - start > timeoutMs) throw new Error(`job ${id} still running`);
+        await new Promise((r) => setTimeout(r, 5));
+    }
+}
+
 class DummyJob implements ICliJob {
     callCount = 0;
     private _sleep: number;
@@ -279,8 +289,8 @@ describe('CliJobScheduler', () => {
         const job = new DummyJob();
         const id = scheduler.register(job, { name: 't', interval: '999s' });
         (scheduler as any)._running = true;
-        await scheduler.triggerAsync(id);
-        await new Promise((r) => setTimeout(r, 100));
+        expect(await scheduler.triggerAsync(id)).toEqual({ queued: false });
+        await untilIdle(scheduler, id);
         expect(job.callCount).toBe(1);
         const { items, total } = await storage.getExecutions(id);
         expect(total).toBe(1);
@@ -300,8 +310,9 @@ describe('CliJobScheduler', () => {
         const firstTrigger = scheduler.triggerAsync(id);
         await new Promise((r) => setTimeout(r, 50));
         await expect(scheduler.triggerAsync(id)).rejects.toThrow();
-        // Clean up: wait for first trigger to finish
+        // Clean up: wait for the first run to finish
         await firstTrigger;
+        await untilIdle(scheduler, id);
     });
 
     it('pause and resume', async () => {
@@ -349,10 +360,10 @@ describe('CliJobScheduler', () => {
         const id = scheduler.register(job, { name: 't', interval: '999s' });
         (scheduler as any)._running = true;
         // Don't await — let the job run in background
-        const triggerPromise = scheduler.triggerAsync(id);
+        await scheduler.triggerAsync(id);
         await new Promise((r) => setTimeout(r, 50));
         await scheduler.cancelCurrentAsync(id);
-        await triggerPromise;
+        await untilIdle(scheduler, id);
         const { items } = await storage.getExecutions(id);
         expect(items.length).toBeGreaterThanOrEqual(1);
         expect(items[0].status).toBe('cancelled');
@@ -363,7 +374,7 @@ describe('CliJobScheduler', () => {
         const id = scheduler.register(job, { name: 't', interval: '999s', maxRetries: 2, retryDelay: '1s', retryStrategy: 'fixed' });
         (scheduler as any)._running = true;
         await scheduler.triggerAsync(id);
-        await new Promise((r) => setTimeout(r, 3000));
+        await untilIdle(scheduler, id);
         expect(job.callCount).toBe(3); // 1 original + 2 retries
         const { items, total } = await storage.getExecutions(id);
         expect(total).toBe(3);
@@ -374,11 +385,9 @@ describe('CliJobScheduler', () => {
         const job = new DummyJob({ sleep: 5000 });
         const id = scheduler.register(job, { name: 't', interval: '999s', timeout: '1s' });
         (scheduler as any)._running = true;
-        // Don't await — triggerAsync awaits execution which would take 5s
-        const triggerPromise = scheduler.triggerAsync(id);
-        // Wait for timeout to fire (1s) plus some buffer
-        await new Promise((r) => setTimeout(r, 1500));
-        await triggerPromise;
+        await scheduler.triggerAsync(id);
+        // The timeout fires after 1 s
+        await untilIdle(scheduler, id);
         const { items } = await storage.getExecutions(id);
         expect(items.length).toBe(1);
         expect(items[0].status).toBe('timed_out');
@@ -517,13 +526,14 @@ describe('CliJobScheduler ids and start', () => {
         await s.start();
         try {
             await s.triggerAsync(id);
-            await wait(100);
+            await untilIdle(s, id);
 
             const { items } = await refusing.getExecutions(id);
             expect(items[0].status).toBe('completed');
             expect(items[0].properties).toEqual({});
             expect(items[0].logs.some((l) => l.level === 'error' && l.message.includes('properties'))).toBe(true);
             expect(s.jobs.get(id)!.currentExecutionId).toBeUndefined();
+            expect(s.get(id)!.currentExecutionId).toBeNull();
         } finally {
             await s.stop();
         }
@@ -591,6 +601,7 @@ describe('CliJobScheduler ids and start', () => {
         await scheduler.start();
 
         await scheduler.triggerAsync('props');
+        await untilIdle(scheduler, 'props');
 
         const { items } = await storage.getExecutions('props');
         expect(items[0].properties).toEqual({ calls: 1 });
@@ -603,6 +614,8 @@ describe('CliJobScheduler ids and start', () => {
 
         await scheduler.triggerAsync('quiet');
         await scheduler.triggerAsync('broken');
+        await untilIdle(scheduler, 'quiet');
+        await untilIdle(scheduler, 'broken');
 
         expect((await storage.getExecutions('quiet')).total).toBe(0);
         expect(scheduler.jobs.get('quiet')!.lastRunAt).toBeDefined();
@@ -626,8 +639,10 @@ describe('CliJobScheduler ids and start', () => {
         s.register(job, { name: 'b' });
         await s.start();
         await s.triggerAsync('a');
+        await untilIdle(s, 'a');
         await wait(5);
         await s.triggerAsync('b');
+        await untilIdle(s, 'b');
 
         const all = await s.queryExecutions({});
         expect(all.total).toBe(2);

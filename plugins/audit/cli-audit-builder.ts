@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { CliInstalledPlugin, ICliAuditStore } from '@qodalis/cli-server-abstractions';
+import { CliInstalledPlugin, ICliAuditStore, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { InMemoryAuditStore } from './in-memory-audit-store';
+import { publishAuditEntries } from './cli-audit-event-store';
 import { CliAuditGuard, createAuditController } from './cli-audit-controller';
 import { auditInstalledPlugin } from './package-info';
 
@@ -9,7 +10,10 @@ export interface CliAuditPluginResult {
     prefix: '/api/v1/qcli/audit';
     /** The audit API (`GET` / `DELETE`). */
     router: Router;
-    /** Where the log is kept: record a host's own events here (`store.log(...)`). */
+    /**
+     * Where the log is kept: record a host's own events here (`store.log(...)`). Every
+     * entry stored through it publishes `audit:recorded` once an event bus is set.
+     */
     store: ICliAuditStore;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
     installedPlugin: CliInstalledPlugin;
@@ -18,6 +22,11 @@ export interface CliAuditPluginResult {
      * protects the audit plugin it serves with its own sign-in and permissions.
      */
     protect(guard: CliAuditGuard | undefined): void;
+    /**
+     * Publishes `audit:recorded` (audience `audit:read`) on `eventBus` for every stored
+     * entry. `mountPlugin` calls it with the server's bus; the users plugin with its own.
+     */
+    setEventBus(eventBus: ICliEventBus | undefined): void;
 }
 
 /**
@@ -53,6 +62,7 @@ export class CliAuditBuilder {
 
     build(): CliAuditPluginResult {
         const store = this._store ?? new InMemoryAuditStore();
+        const setEventBus = publishAuditEntries(store);
         let guard = this._guard;
         const router = createAuditController(store, () => guard);
         return {
@@ -63,6 +73,7 @@ export class CliAuditBuilder {
             protect: (next) => {
                 guard = next;
             },
+            setEventBus,
         };
     }
 }

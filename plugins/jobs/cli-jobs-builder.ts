@@ -1,4 +1,12 @@
-import { ICliJob, CliJobOptions, ICliJobStorageProvider, CliInstalledPlugin } from '@qodalis/cli-server-abstractions';
+import {
+    ICliJob,
+    CliJobOptions,
+    ICliJobStorageProvider,
+    CliInstalledPlugin,
+    CliEventBroadcastFn,
+    ICliEventBus,
+    resolveCliEventBus,
+} from '@qodalis/cli-server-abstractions';
 import { Router } from 'express';
 import { CliJobScheduler } from './cli-job-scheduler';
 import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
@@ -14,6 +22,11 @@ export interface CliJobsPluginResult {
     scheduler: CliJobScheduler;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
     installedPlugin: CliInstalledPlugin;
+    /**
+     * Publishes the job events on `eventBus` unless `build()` was given a bus or a
+     * broadcast function. `mountPlugin` calls it with the server's bus.
+     */
+    setEventBus(eventBus: ICliEventBus): void;
 }
 
 /**
@@ -25,7 +38,7 @@ export interface CliJobsPluginResult {
  *
  * const jobsPlugin = new CliJobsBuilder()
  *     .addJob(new SampleHealthCheckJob(), { name: 'health-check', interval: '30s' })
- *     .build((msg) => eventSocketManager.broadcastMessage(msg));
+ *     .build(eventBus); // or build() and mountPlugin(jobsPlugin), which hands it the server's bus
  *
  * app.use('/api/v1/qcli/jobs', jobsPlugin.router);
  * await jobsPlugin.scheduler.start();
@@ -55,9 +68,11 @@ export class CliJobsBuilder {
     /**
      * Build the plugin, returning the Express router and scheduler.
      *
-     * @param broadcastFn Optional function to broadcast job events (e.g. via WebSocket).
+     * @param events The server's event bus (`createCliServer().eventBus`), or a function
+     *   broadcasting raw messages (kept for compatibility). Job events (`job:*`) are
+     *   published with audience `jobs:read`.
      */
-    build(broadcastFn?: (message: Record<string, unknown>) => void): CliJobsPluginResult {
+    build(events?: ICliEventBus | CliEventBroadcastFn): CliJobsPluginResult {
         const storage = this._storageProvider ?? new InMemoryJobStorageProvider();
         const scheduler = new CliJobScheduler(storage);
 
@@ -65,12 +80,19 @@ export class CliJobsBuilder {
             scheduler.register(job, options);
         }
 
-        if (broadcastFn) {
-            scheduler.setBroadcastFn(broadcastFn);
-        }
+        const explicitBus = resolveCliEventBus(events);
+        scheduler.setEventBus(explicitBus);
 
         const router = createCliJobsController(scheduler, storage);
 
-        return { prefix: '/api/v1/qcli/jobs', router, scheduler, installedPlugin: jobsInstalledPlugin };
+        return {
+            prefix: '/api/v1/qcli/jobs',
+            router,
+            scheduler,
+            installedPlugin: jobsInstalledPlugin,
+            setEventBus: (eventBus) => {
+                if (!explicitBus) scheduler.setEventBus(eventBus);
+            },
+        };
     }
 }

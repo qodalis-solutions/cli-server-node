@@ -1,6 +1,7 @@
 import { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
+import { CliEventPermissions, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliServerPermissions as P } from '../../auth/cli-server-auth';
-import { McpTool, McpToolAnnotations, McpToolProvider, mcpError, mcpJson, mcpObjectSchema } from '../mcp-types';
+import { McpTool, McpToolAnnotations, McpToolCallContext, McpToolProvider, mcpError, mcpJson, mcpObjectSchema } from '../mcp-types';
 
 const errorMessage = (err: unknown) => (err as Error)?.message ?? String(err);
 
@@ -24,12 +25,21 @@ export function resolveJobId(scheduler: CliJobScheduler, idOrName: string): { id
 /**
  * Jobs tools over the jobs plugin's scheduler: `jobs_list`, `jobs_get`,
  * `jobs_history` (`jobs:read`), `jobs_trigger|pause|resume|stop|cancel` and
- * `jobs_delete_runs` (`jobs:manage`).
+ * `jobs_delete_runs` (`jobs:manage`). With an event bus, `jobs_trigger` publishes
+ * `job:triggered` and `jobs_delete_runs` publishes `job:runs-deleted` (audience `jobs:read`).
  */
 export class JobsMcpToolProvider implements McpToolProvider {
     readonly name = 'jobs';
 
-    constructor(private readonly scheduler: CliJobScheduler) {}
+    constructor(
+        private readonly scheduler: CliJobScheduler,
+        private readonly eventBus?: ICliEventBus,
+    ) {}
+
+    private publish(type: string, data: Record<string, unknown>, context: McpToolCallContext): Promise<void> {
+        const actor = context.auth?.userName;
+        return this.eventBus?.publish(type, { ...data, ...(actor ? { actor } : {}) }, { permission: CliEventPermissions.JobsRead }) ?? Promise.resolve();
+    }
 
     getTools(): McpTool[] {
         const s = this.scheduler;
@@ -40,17 +50,19 @@ export class JobsMcpToolProvider implements McpToolProvider {
             description: string,
             fn: (id: string) => Promise<void>,
             annotations?: McpToolAnnotations,
+            event?: string,
         ): McpTool => ({
             name,
             description,
             inputSchema: mcpObjectSchema(idProp, ['id']),
             requiredPermissions: [P.JobsManage],
             ...(annotations ? { annotations } : {}),
-            call: async (args) => {
+            call: async (args, context) => {
                 const job = resolve(args.id);
                 if ('error' in job) return mcpError(job.error);
                 try {
                     await fn(job.id);
+                    if (event) await this.publish(event, { jobId: job.id }, context);
                     return mcpJson({ ok: true, id: job.id }, `${name.slice('jobs_'.length)}: ok`);
                 } catch (err) {
                     return mcpError(errorMessage(err));
@@ -108,7 +120,24 @@ export class JobsMcpToolProvider implements McpToolProvider {
                     }
                 },
             },
-            action('jobs_trigger', 'Run a job now', (id) => s.triggerAsync(id)),
+            {
+                name: 'jobs_trigger',
+                description: 'Run a job now (queued when every run slot is taken and its overlap policy is queue or cancel)',
+                inputSchema: mcpObjectSchema(idProp, ['id']),
+                requiredPermissions: [P.JobsManage],
+                call: async (args, context) => {
+                    const job = resolve(args.id);
+                    if ('error' in job) return mcpError(job.error);
+                    try {
+                        const result = await s.triggerAsync(job.id);
+                        await this.publish('job:triggered', { jobId: job.id }, context);
+                        const queued = !!result?.queued;
+                        return mcpJson({ ok: true, id: job.id, queued }, queued ? 'Job queued' : 'Job triggered');
+                    } catch (err) {
+                        return mcpError(errorMessage(err));
+                    }
+                },
+            },
             action('jobs_pause', 'Pause a job schedule', (id) => s.pauseAsync(id)),
             action('jobs_resume', 'Resume a paused job', (id) => s.resumeAsync(id)),
             action('jobs_stop', 'Stop a job (and cancel its current run)', (id) => s.stopJobAsync(id), { destructiveHint: true }),
@@ -127,16 +156,18 @@ export class JobsMcpToolProvider implements McpToolProvider {
                 ),
                 requiredPermissions: [P.JobsManage],
                 annotations: { destructiveHint: true },
-                call: async (args) => {
+                call: async (args, context) => {
                     const job = resolve(args.id);
                     if ('error' in job) return mcpError(job.error);
                     try {
                         if (typeof args.executionId === 'string' && args.executionId) {
                             await s.deleteExecutionAsync(job.id, args.executionId);
+                            await this.publish('job:runs-deleted', { jobId: job.id, executionId: args.executionId }, context);
                             return mcpJson({ deleted: 1, id: job.id }, 'Run deleted');
                         }
                         const status = typeof args.status === 'string' && args.status ? args.status : undefined;
                         const deleted = await s.deleteExecutionsAsync(job.id, status);
+                        await this.publish('job:runs-deleted', { jobId: job.id, count: deleted }, context);
                         return mcpJson({ deleted, id: job.id }, `Deleted ${deleted} run(s)`);
                     } catch (err) {
                         return mcpError(errorMessage(err));

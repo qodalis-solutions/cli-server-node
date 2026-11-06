@@ -29,7 +29,7 @@ With the users plugin, either let it build the audit plugin (`new CliUsersBuilde
 
 ```typescript
 const auditPlugin = new CliAuditBuilder().setStore(new MyAuditStore()).build();
-const usersPlugin = new CliUsersBuilder().setAuditPlugin(auditPlugin).build(broadcast);
+const usersPlugin = new CliUsersBuilder().setAuditPlugin(auditPlugin).build();
 
 mountPlugin(usersPlugin); // serves the audit API at /api/v1/qcli/audit and lists the audit plugin
 ```
@@ -42,7 +42,14 @@ mountPlugin(usersPlugin); // serves the audit API at /api/v1/qcli/audit and list
 |---|---|---|
 | `setStore(store)` | `InMemoryAuditStore` | Where the log is kept (any `ICliAuditStore`) |
 | `setGuard(guard)` | none | Middleware protecting the routes: `(permission) => RequestHandler[]` (the users plugin installs its own) |
-| `build()` | | `{ prefix: '/api/v1/qcli/audit', router, store, installedPlugin, protect(guard) }` |
+| `build()` | | `{ prefix: '/api/v1/qcli/audit', router, store, installedPlugin, protect(guard), setEventBus(bus) }` |
+
+## Events
+
+Every entry stored through `store.log` (by the users plugin, the server or the host) publishes `audit:recorded`
+(audience `audit:read`) on the server's event bus, with the entry as `GET /audit` returns it (its `timestamp` is the
+message's ISO 8601 `timestamp`). `mountPlugin(auditPlugin)` hands it the server's bus; the users plugin hands the bus
+to the audit plugin it serves. `store` stays the store you set: its `log` method is instrumented in place.
 
 ## API
 
