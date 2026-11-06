@@ -11,12 +11,12 @@ import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli
  * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
  * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=)
  * - GET    /:id         - single job details
- * - POST   /:id/trigger - trigger immediate execution
+ * - POST   /:id/trigger - trigger immediate execution (202 when queued)
  * - POST   /:id/pause   - pause scheduled execution
  * - POST   /:id/resume  - resume a paused job
  * - POST   /:id/stop    - stop job and cancel if running
- * - POST   /:id/cancel  - cancel current execution only
- * - PUT    /:id         - update job options
+ * - POST   /:id/cancel  - cancel every running run (and a queued one)
+ * - PUT    /:id         - update job options (incl. maxConcurrentRuns)
  * - GET    /:id/history - paginated execution history
  * - GET    /:id/history/:execId - single execution with full logs
  * - DELETE /:id/history/:execId - delete one finished run and its logs
@@ -94,9 +94,11 @@ export function createCliJobsController(
 
     router.post('/:id/trigger', async (req, res) => {
         try {
-            await scheduler.triggerAsync(req.params.id);
+            const result = await scheduler.triggerAsync(req.params.id);
             await scheduler.publishEvent('job:triggered', { jobId: req.params.id, ...actorOf(req) });
-            res.json({ ok: true });
+            // Queued: accepted, the run starts when a slot frees
+            if (result.queued) res.status(202).json({ ok: true, queued: true });
+            else res.json({ ok: true });
         } catch (err) {
             handleError(res, err);
         }
@@ -140,7 +142,7 @@ export function createCliJobsController(
 
     router.put('/:id', async (req, res) => {
         try {
-            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy } = req.body ?? {};
+            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy, maxConcurrentRuns } = req.body ?? {};
             await scheduler.updateOptionsAsync(req.params.id, {
                 description,
                 group,
@@ -151,6 +153,7 @@ export function createCliJobsController(
                 retryStrategy,
                 timeout,
                 overlapPolicy,
+                maxConcurrentRuns,
             });
             await scheduler.publishEvent('job:updated', { jobId: req.params.id, ...actorOf(req) });
             const updated = scheduler.get(req.params.id);

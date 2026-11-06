@@ -78,11 +78,34 @@ scheduler's `setEventBus(bus)`, `eventBus` and `publishEvent(type, data)` are pu
 | `group` | `string?` | — | Logical grouping |
 | `schedule` | `string?` | — | Cron expression (5-field) |
 | `interval` | `string?` | — | Fixed interval (`30s`, `5m`, `1h`, `1d`); the next run is the last run plus the interval, across restarts and pauses (right away when that has passed) |
-| `runOnStart` | `boolean` | `false` | Run once right after the scheduler starts (not for paused or stopped jobs) |
+| `runOnStart` | `boolean` | `false` | Run when the scheduler starts unless the job ran recently: an interval job when it never ran or its next run is due, a cron job when it never ran or missed an occurrence since its last run, a job without a schedule on every start. Not for paused or stopped jobs; it takes a run slot like any due run |
 | `enabled` | `boolean` | `true` | Whether the job starts active. `false` keeps it stopped whatever state was saved; otherwise a saved pause or stop (made from the API) is kept across restarts |
-| `maxRetries` | `number` | `0` | Retry count on failure |
-| `timeout` | `string?` | — | Max execution duration (same format as interval) |
-| `overlapPolicy` | `string` | `skip` | `skip`, `queue`, or `cancel` |
+| `maxRetries` | `number` | `1` | Retry count on failure |
+| `timeout` | `string?` | — | Max execution duration (same format as interval); a run past it ends as `timed_out`, a run cancelled by hand as `cancelled` |
+| `maxConcurrentRuns` | `number` | `1` | Up to this many runs of the job at the same time (integer >= 1) |
+| `overlapPolicy` | `string` | `skip` | What a due run does when `maxConcurrentRuns` runs are going: `skip`, `queue`, or `cancel` (see below) |
+
+## Concurrent runs
+
+A **run** holds one of the job's `maxConcurrentRuns` slots from its start until it ends, its retries and the delays
+between them included, so a timer tick or a trigger during a retry delay never starts a second run. Taking a slot is
+atomic: due runs at the same moment (timer ticks, triggers, the run on start) never exceed the limit. When the job
+is full, the overlap policy decides:
+
+- `skip`: the due run is dropped; a trigger answers 409 `JOB_ALREADY_RUNNING`.
+- `queue`: one run is queued and starts when a slot frees. Queued runs coalesce: several due runs while full make
+  one more run, not a backlog. A trigger answers 202 `{ ok: true, queued: true }`.
+- `cancel`: the oldest running run is cancelled and the new one starts.
+
+Lowering `maxConcurrentRuns` cancels nothing: new runs start once the count is below the limit; raising it starts a
+queued run. `POST /:id/cancel` cancels every running run and drops a queued one; `stop` does the same and disables
+the schedule. Job info carries `maxConcurrentRuns`, `runningExecutionIds` (oldest first, empty when idle),
+`currentExecutionId` (the newest running run) and `queued`.
+
+A cron job computes its next occurrence from the one that just fired, so a timer that fires a few milliseconds
+early never runs an occurrence twice. On start, runs a previous process left `running` in the store are finished as
+`cancelled` with the error `Interrupted: the server stopped during the run` (completed at their start time, no
+events).
 
 ## REST API
 
@@ -94,12 +117,12 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 | GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
 | GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
 | GET | `/:id` | Get job details |
-| POST | `/:id/trigger` | Trigger immediate execution |
+| POST | `/:id/trigger` | Trigger a run → `{ ok: true }` when it ran, 202 `{ ok: true, queued: true }` when queued, 409 `JOB_ALREADY_RUNNING` when full with `skip` |
 | POST | `/:id/pause` | Pause scheduled execution |
 | POST | `/:id/resume` | Resume a paused job |
-| POST | `/:id/stop` | Stop job and cancel if running |
-| POST | `/:id/cancel` | Cancel current execution only |
-| PUT | `/:id` | Update job options |
+| POST | `/:id/stop` | Stop job: cancel its runs, drop a queued one, disable the schedule |
+| POST | `/:id/cancel` | Cancel every running run and drop a queued one; 409 `JOB_NOT_RUNNING` when idle |
+| PUT | `/:id` | Update job options: `description`, `group`, `schedule`, `interval`, `maxRetries`, `retryDelay`, `retryStrategy`, `timeout`, `overlapPolicy`, `maxConcurrentRuns` (integer >= 1, else 400 `INVALID_MAX_CONCURRENT_RUNS`) |
 | GET | `/:id/history` | Paginated execution history |
 | GET | `/:id/history/:execId` | Execution detail with logs |
 | DELETE | `/:id/history/:execId` | Delete one run and its logs → `{ message: "Run deleted" }`; 404 `JOB_NOT_FOUND` / `EXECUTION_NOT_FOUND` (missing or another job's run), 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED` (the storage has no `deleteExecution`) |
