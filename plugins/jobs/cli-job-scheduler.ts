@@ -58,6 +58,8 @@ export interface JobDto {
     name: string;
     description: string;
     group?: string;
+    /** The job's tags (empty when it has none). */
+    tags: string[];
     status: JobStatus;
     schedule?: string;
     interval?: string;
@@ -84,7 +86,7 @@ export interface JobDto {
 type BroadcastFn = (message: Record<string, unknown>) => void;
 
 /** Options of a job that `updateOptionsAsync` may change. */
-export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'group' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy' | 'maxConcurrentRuns'>>;
+export type CliJobOptionsUpdate = Partial<Pick<CliJobOptions, 'description' | 'group' | 'tags' | 'schedule' | 'interval' | 'maxRetries' | 'retryDelay' | 'retryStrategy' | 'timeout' | 'overlapPolicy' | 'maxConcurrentRuns'>>;
 
 /** The interrupted-run error: runs a previous process left `running` are finished with it on start. */
 export const INTERRUPTED_RUN_ERROR = 'Interrupted: the server stopped during the run';
@@ -92,6 +94,43 @@ export const INTERRUPTED_RUN_ERROR = 'Interrupted: the server stopped during the
 /** A job's `maxConcurrentRuns` (default 1). */
 function maxConcurrentRunsOf(options: CliJobOptions): number {
     return options.maxConcurrentRuns ?? 1;
+}
+
+/** Most tags a job may have. */
+export const MAX_JOB_TAGS = 20;
+/** Longest tag. */
+export const MAX_JOB_TAG_LENGTH = 64;
+
+/**
+ * Validates and normalizes a job's tags: trimmed, duplicates (ignoring case) dropped keeping
+ * the first spelling. Returns an error message when a tag is not a string, is empty, longer
+ * than 64 characters or contains a comma, or when there are more than 20.
+ */
+export function normalizeJobTags(value: unknown): { tags: string[] } | { error: string } {
+    if (value === null || value === undefined) return { tags: [] };
+    if (!Array.isArray(value)) return { error: 'tags must be an array of strings' };
+    const tags: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of value) {
+        if (typeof raw !== 'string') return { error: 'tags must be an array of strings' };
+        const tag = raw.trim();
+        if (!tag || tag.length > MAX_JOB_TAG_LENGTH || tag.includes(',')) {
+            return { error: `Invalid tag '${raw}': 1-${MAX_JOB_TAG_LENGTH} characters, no commas` };
+        }
+        const key = tag.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        tags.push(tag);
+    }
+    if (tags.length > MAX_JOB_TAGS) return { error: `A job has at most ${MAX_JOB_TAGS} tags` };
+    return { tags };
+}
+
+/** Whether a job has every tag in `tags` (ignoring case); true when `tags` is empty. */
+export function jobHasTags(job: { tags?: string[] }, tags: string[]): boolean {
+    if (tags.length === 0) return true;
+    const own = new Set((job.tags ?? []).map((t) => t.toLowerCase()));
+    return tags.every((t) => own.has(t.toLowerCase()));
 }
 
 function isValidMaxConcurrentRuns(value: unknown): value is number {
@@ -270,11 +309,15 @@ export class CliJobScheduler implements ICliJobScheduler {
         if (options.maxConcurrentRuns !== undefined && !isValidMaxConcurrentRuns(options.maxConcurrentRuns)) {
             throw new Error(`Job '${id}': maxConcurrentRuns must be an integer >= 1`);
         }
+        const tags = normalizeJobTags(options.tags);
+        if ('error' in tags) {
+            throw new Error(`Job '${id}': ${tags.error}`);
+        }
         const enabled = options.enabled !== false;
         const reg: JobRegistration = {
             id,
             job,
-            options: { ...options, name, enabled },
+            options: { ...options, name, enabled, tags: tags.tags },
             status: enabled ? 'active' : 'stopped',
             runs: new Map(),
             queued: false,
@@ -556,9 +599,17 @@ export class CliJobScheduler implements ICliJobScheduler {
             throw new JobError('maxConcurrentRuns must be an integer >= 1', 'INVALID_VALUE', 400);
         }
 
+        let tags: string[] | undefined;
+        if (updates.tags !== undefined) {
+            const normalized = normalizeJobTags(updates.tags);
+            if ('error' in normalized) throw new JobError(normalized.error, 'INVALID_VALUE', 400);
+            tags = normalized.tags;
+        }
+
         // Apply updates
         if (updates.description !== undefined) reg.options.description = updates.description;
         if (updates.group !== undefined) reg.options.group = updates.group;
+        if (tags !== undefined) reg.options.tags = tags;
         if (updates.maxRetries !== undefined) reg.options.maxRetries = updates.maxRetries;
         if (updates.retryDelay !== undefined) reg.options.retryDelay = updates.retryDelay;
         if (updates.retryStrategy !== undefined) reg.options.retryStrategy = updates.retryStrategy;
@@ -604,6 +655,7 @@ export class CliJobScheduler implements ICliJobScheduler {
             name: reg.options.name ?? 'unnamed',
             description: reg.options.description ?? reg.options.name ?? 'unnamed',
             group: reg.options.group,
+            tags: [...(reg.options.tags ?? [])],
             status: reg.status,
             schedule: reg.options.schedule,
             interval: reg.options.interval,

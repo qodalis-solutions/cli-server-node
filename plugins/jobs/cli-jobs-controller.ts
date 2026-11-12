@@ -1,5 +1,5 @@
 import { Request, Router } from 'express';
-import { CliJobScheduler, JobError } from './cli-job-scheduler';
+import { CliJobScheduler, JobError, jobHasTags } from './cli-job-scheduler';
 import { ICliJobStorageProvider, JobExecution, JobExecutionStatus } from '@qodalis/cli-server-abstractions';
 import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli-jobs-stats';
 
@@ -7,9 +7,9 @@ import { buildJobStats, collectRuns, resolveStatsRange, StatsRange } from './cli
  * Creates the jobs REST controller router.
  *
  * Routes (relative to mount point):
- * - GET    /            - list all jobs
- * - GET    /executions  - executions across jobs (?job=a,b&group=&status=&since=&limit=&offset=)
- * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=)
+ * - GET    /            - list the jobs (?tag=a&tag=b: those with every tag)
+ * - GET    /executions  - executions across jobs (?job=a,b&group=&tag=&status=&since=&limit=&offset=)
+ * - GET    /stats       - run statistics for charts (?since=&until=&buckets=&job=&group=&tag=)
  * - GET    /:id         - single job details
  * - POST   /:id/trigger - trigger a run ({ message, queued })
  * - POST   /:id/pause   - pause scheduled execution
@@ -32,14 +32,15 @@ export function createCliJobsController(
 ): Router {
     const router = Router();
 
-    router.get('/', (_req, res) => {
-        const jobs = scheduler.getAll();
+    router.get('/', (req, res) => {
+        const tags = queryTags(req.query.tag);
+        const jobs = scheduler.getAll().filter((j) => jobHasTags(j, tags));
         res.json(jobs);
     });
 
     // Before /:id, which would take "executions" for a job id
     router.get('/executions', async (req, res) => {
-        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group);
+        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group, req.query.tag);
 
         let since: Date | undefined;
         if (typeof req.query.since === 'string' && req.query.since) {
@@ -72,7 +73,7 @@ export function createCliJobsController(
         } catch (err) {
             return res.status(400).json({ error: (err as Error).message, code: 'INVALID_QUERY' });
         }
-        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group);
+        const jobIds = resolveJobIds(scheduler, req.query.job, req.query.group, req.query.tag);
         try {
             // A group (or a job filter) matching no job gives empty stats, not every job
             const runs = jobIds && jobIds.length === 0
@@ -141,10 +142,11 @@ export function createCliJobsController(
 
     router.put('/:id', async (req, res) => {
         try {
-            const { description, group, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy, maxConcurrentRuns } = req.body ?? {};
+            const { description, group, tags, schedule, interval, maxRetries, retryDelay, retryStrategy, timeout, overlapPolicy, maxConcurrentRuns } = req.body ?? {};
             await scheduler.updateOptionsAsync(req.params.id, {
                 description,
                 group,
+                tags,
                 schedule,
                 interval,
                 maxRetries,
@@ -236,20 +238,28 @@ function toListItem(exec: JobExecution): Omit<JobExecution, 'logs'> & { logCount
 }
 
 /**
- * The jobs named by `job` (repeatable or comma-separated) within `group` (case-insensitive):
+ * The jobs named by `job` (repeatable or comma-separated) within `group` (case-insensitive)
+ * having every `tag` (repeatable or comma-separated, case-insensitive):
  * undefined for every job, an empty list when the filters match no job.
  */
-function resolveJobIds(scheduler: CliJobScheduler, job: unknown, groupValue: unknown): string[] | undefined {
+function resolveJobIds(scheduler: CliJobScheduler, job: unknown, groupValue: unknown, tagValue?: unknown): string[] | undefined {
     const jobIds = queryList(job).flatMap((j) => j.split(',').map((id) => id.trim()).filter(Boolean));
     const group = typeof groupValue === 'string' && groupValue.trim() ? groupValue.trim() : undefined;
-    if (group) {
-        const inGroup = scheduler
+    const tags = queryTags(tagValue);
+    if (group || tags.length > 0) {
+        const matching = scheduler
             .getAll()
-            .filter((j) => j.group !== undefined && j.group.toLowerCase() === group.toLowerCase())
+            .filter((j) => !group || (j.group !== undefined && j.group.toLowerCase() === group.toLowerCase()))
+            .filter((j) => jobHasTags(j, tags))
             .map((j) => j.id);
-        return jobIds.length > 0 ? jobIds.filter((id) => inGroup.includes(id)) : inGroup;
+        return jobIds.length > 0 ? jobIds.filter((id) => matching.includes(id)) : matching;
     }
     return jobIds.length === 0 ? undefined : jobIds;
+}
+
+/** The `tag` query parameter (repeatable or comma-separated) as a list of trimmed tags. */
+function queryTags(value: unknown): string[] {
+    return queryList(value).flatMap((t) => t.split(',').map((tag) => tag.trim()).filter(Boolean));
 }
 
 /** A query parameter given once, repeated or not at all, as a list of strings. */

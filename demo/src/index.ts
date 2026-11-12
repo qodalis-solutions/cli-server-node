@@ -276,6 +276,7 @@ const jobsPlugin = new CliJobsBuilder()
         name: 'health-check',
         description: 'Periodic health check',
         group: 'monitoring',
+        tags: ['health', 'demo'],
         interval: '30s',
     })
     .build(eventBus);
