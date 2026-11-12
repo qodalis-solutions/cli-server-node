@@ -181,6 +181,13 @@ function mapToDescriptor(processor: ICliCommandProcessor): CliServerCommandDescr
         description: processor.description,
         version: processor.version,
     };
+    if (processor.aliases?.length) descriptor.aliases = [...processor.aliases];
+    if (processor.examples?.length) {
+        descriptor.examples = processor.examples.map((e) => (e.description ? { command: e.command, description: e.description } : { command: e.command }));
+    }
+    if (processor.documentation) descriptor.documentation = processor.documentation;
+    if (processor.module) descriptor.module = processor.module;
+    if (processor.icon) descriptor.icon = processor.icon;
 
     if (processor.parameters?.length) {
         descriptor.parameters = processor.parameters.map(
@@ -191,6 +198,7 @@ function mapToDescriptor(processor: ICliCommandProcessor): CliServerCommandDescr
                 required: p.required,
                 type: p.type,
                 defaultValue: p.defaultValue,
+                ...(p.allowedValues?.length ? { allowedValues: [...p.allowedValues] } : {}),
             }),
         );
     }
