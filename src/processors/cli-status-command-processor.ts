@@ -5,6 +5,11 @@ import os from 'os';
 export class CliStatusCommandProcessor extends CliCommandProcessor {
     command = 'status';
     description = 'Shows server status information';
+    examples = [
+        { command: 'status', description: 'Uptime, version and state of the server' },
+    ];
+    documentation =
+        'Shows how long the server has been running, its version and its current state.';
 
     async handleAsync(_command: CliProcessCommand): Promise<string> {
         const uptime = Math.floor(process.uptime());

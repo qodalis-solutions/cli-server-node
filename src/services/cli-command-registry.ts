@@ -1,4 +1,4 @@
-import { ICliCommandProcessor } from '../abstractions';
+import { ICliCommandProcessor, commandMatches } from '../abstractions';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('CommandRegistry');
@@ -32,7 +32,9 @@ export class CliCommandRegistry implements ICliCommandRegistry {
     }
 
     findProcessor(command: string, chainCommands?: string[]): ICliCommandProcessor | undefined {
-        const processor = this._processors.get(command.toLowerCase());
+        // A command name wins over another command's alias
+        const processor =
+            this._processors.get(command.toLowerCase()) ?? this.processors.find((p) => commandMatches(p, command));
         if (!processor || !chainCommands?.length) {
             return processor;
         }
@@ -48,9 +50,9 @@ export class CliCommandRegistry implements ICliCommandRegistry {
         let current = processor;
 
         for (const sub of chainCommands) {
-            const child = current.processors?.find(
-                (p) => p.command.toLowerCase() === sub.toLowerCase(),
-            );
+            const child =
+                current.processors?.find((p) => p.command.toLowerCase() === sub.toLowerCase()) ??
+                current.processors?.find((p) => commandMatches(p, sub));
             if (!child) {
                 return current.allowUnlistedCommands ? current : undefined;
             }

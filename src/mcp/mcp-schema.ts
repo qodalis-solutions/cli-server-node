@@ -36,6 +36,9 @@ function checkProperty(key: string, prop: McpPropertySchema, value: unknown): st
     if (prop.type === 'array' && prop.items?.type && (value as unknown[]).some((v) => !typeMatches(prop.items!.type, v))) {
         return `argument '${key}' must be an array of ${prop.items.type}s`;
     }
+    if (Array.isArray(prop.enum) && !prop.enum.includes(value)) {
+        return `argument '${key}' must be one of: ${prop.enum.join(', ')}`;
+    }
     return undefined;
 }
 

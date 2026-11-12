@@ -7,6 +7,10 @@ import { getPositionalText } from '../abstractions';
 class Base64EncodeProcessor extends CliCommandProcessor {
     command = 'encode';
     description = 'Encodes text to Base64';
+    aliases = ['enc'];
+    examples = [
+        { command: 'base64 encode hello', description: 'Prints aGVsbG8=' },
+    ];
     acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
@@ -20,6 +24,10 @@ class Base64EncodeProcessor extends CliCommandProcessor {
 class Base64DecodeProcessor extends CliCommandProcessor {
     command = 'decode';
     description = 'Decodes Base64 to text';
+    aliases = ['dec'];
+    examples = [
+        { command: 'base64 decode aGVsbG8=', description: 'Prints hello' },
+    ];
     acceptsValue = true;
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
@@ -37,6 +45,13 @@ class Base64DecodeProcessor extends CliCommandProcessor {
 export class CliBase64CommandProcessor extends CliCommandProcessor {
     command = 'base64';
     description = 'Encodes or decodes Base64 text';
+    aliases = ['b64'];
+    examples = [
+        { command: 'base64 encode hello', description: 'Prints aGVsbG8=' },
+        { command: 'base64 decode aGVsbG8=', description: 'Prints hello' },
+    ];
+    documentation =
+        'Encodes text to Base64 or decodes Base64 back to text (UTF-8), on the server.';
     allowUnlistedCommands = false;
     processors: ICliCommandProcessor[] = [new Base64EncodeProcessor(), new Base64DecodeProcessor()];
 

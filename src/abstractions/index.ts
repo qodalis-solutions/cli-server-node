@@ -12,6 +12,8 @@ export {
     CliCommandParameterDescriptor,
     ICliCommandProcessor,
     CliCommandProcessor,
+    CliCommandExample,
+    commandMatches,
     ICliModule,
     CliModule,
     ICliJob,

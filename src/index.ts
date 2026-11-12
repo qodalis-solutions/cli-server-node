@@ -28,6 +28,7 @@ export {
     CliServerResponse,
     CliServerCommandDescriptor,
     CliServerCommandParameterDescriptorDto,
+    CliServerCommandExampleDto,
 } from './models';
 
 // Services
