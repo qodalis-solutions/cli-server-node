@@ -199,6 +199,7 @@ function mapToDescriptor(processor: ICliCommandProcessor): CliServerCommandDescr
                 type: p.type,
                 defaultValue: p.defaultValue,
                 ...(p.allowedValues?.length ? { allowedValues: [...p.allowedValues] } : {}),
+                ...(p.examples?.length ? { examples: [...p.examples] } : {}),
             }),
         );
     }

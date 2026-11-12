@@ -119,7 +119,7 @@ Nest processors with `processors = [new AddProcessor(), new MultiplyProcessor()]
 | `command`, `description` | required | Name and help text |
 | `handleAsync(command, signal?)` | required | Execution logic, returns text |
 | `handleStructuredAsync(command, signal?)` | none | Returns `{ exitCode, outputs }`; takes precedence over `handleAsync` |
-| `parameters` | none | `CliCommandParameterDescriptor[]` (`string`, `number`, `boolean`, ...); `allowedValues` lists the only values a parameter takes (help, Tab completion and a check in the web CLI, `enum` in MCP) |
+| `parameters` | none | `CliCommandParameterDescriptor[]` (`string`, `number`, `boolean`, ...); `allowedValues` lists the only values a parameter takes (help, Tab completion and a check in the web CLI, `enum` in MCP); `examples` lists example values (help, `examples` in MCP) |
 | `aliases` | none | Other names; the server resolves them (and their permissions) like the command |
 | `examples` | none | `{ command, description? }[]` shown by `help <command>` in the web CLI |
 | `documentation` | none | Longer help text for `help <command>` (paragraphs separated by a blank line) |

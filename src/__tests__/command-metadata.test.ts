@@ -28,7 +28,7 @@ class ThingsProcessor extends CliCommandProcessor {
     examples = [{ command: 'things show 1', description: 'Shows thing 1' }, { command: 'things' }];
     requiredPermissions = ['things:use'];
     parameters = [
-        new CliCommandParameterDescriptor('format', 'Output format', false, 'string', ['f'], 'table', ['table', 'json']),
+        new CliCommandParameterDescriptor('format', 'Output format', false, 'string', ['f'], 'table', ['table', 'json'], ['json']),
         new CliCommandParameterDescriptor('verbose', 'More output', false, 'boolean'),
     ];
     processors: ICliCommandProcessor[] = [new ShowProcessor()];
@@ -42,7 +42,7 @@ function app() {
 }
 
 describe('Command metadata', () => {
-    it('GET /commands sends aliases, examples, documentation, module, icon and allowed values', async () => {
+    it('GET /commands sends aliases, examples, documentation, module, icon, allowed values and parameter examples', async () => {
         const res = await request(app()).get('/api/v1/qcli/commands').expect(200);
         const things = res.body.find((c: any) => c.command === 'things');
         expect(things).toMatchObject({
@@ -53,7 +53,9 @@ describe('Command metadata', () => {
             examples: [{ command: 'things show 1', description: 'Shows thing 1' }, { command: 'things' }],
         });
         expect(things.parameters[0].allowedValues).toEqual(['table', 'json']);
+        expect(things.parameters[0].examples).toEqual(['json']);
         expect(things.parameters[1]).not.toHaveProperty('allowedValues');
+        expect(things.parameters[1]).not.toHaveProperty('examples');
         expect(things.processors[0]).toMatchObject({ command: 'show', aliases: ['sh'] });
         expect(things.processors[0]).not.toHaveProperty('examples');
         expect(things.processors[0]).not.toHaveProperty('module');
@@ -85,6 +87,8 @@ describe('Command metadata', () => {
     it('MCP schemas list allowed values as an enum and refuse other values', () => {
         const schema = commandInputSchema(new ThingsProcessor());
         expect(schema.properties.format.enum).toEqual(['table', 'json']);
+        expect(schema.properties.format.examples).toEqual(['json']);
+        expect(schema.properties.verbose).not.toHaveProperty('examples');
         expect(validateMcpArguments(schema, { format: 'xml' })).toBe("argument 'format' must be one of: table, json");
         expect(validateMcpArguments(schema, { format: 'json' })).toBeUndefined();
     });

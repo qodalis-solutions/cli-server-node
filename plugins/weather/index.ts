@@ -82,6 +82,8 @@ const locationParam: ICliCommandParameterDescriptor = new CliCommandParameterDes
     'string',
     ['-l'],
     'London',
+    undefined,
+    ['Paris', 'New York'],
 );
 
 /** Processor for the `weather current` sub-command. */
