@@ -87,7 +87,13 @@ export interface DataExplorerProviderOptions {
 }
 
 /** Why the server refused a data explorer query. */
-export type DataExplorerErrorCode = 'forbidden' | 'rate_limited' | 'read_only' | 'object_not_allowed' | 'unknown_source';
+export type DataExplorerErrorCode =
+    | 'forbidden'
+    | 'rate_limited'
+    | 'read_only'
+    | 'object_not_allowed'
+    | 'masked_column'
+    | 'unknown_source';
 
 /** Rate limit of a data source: at most `maxQueries` per caller per `windowSeconds`. */
 export interface DataExplorerRateLimit {
@@ -156,7 +162,7 @@ export interface DataExplorerResult {
     error: string | null;
     /**
      * Why the server refused the query, when it did: `forbidden` (missing permission, 403),
-     * `rate_limited` (429), `read_only`, `object_not_allowed`, `unknown_source`.
+     * `rate_limited` (429), `read_only`, `object_not_allowed`, `masked_column`, `unknown_source`.
      */
     errorCode?: DataExplorerErrorCode;
 }

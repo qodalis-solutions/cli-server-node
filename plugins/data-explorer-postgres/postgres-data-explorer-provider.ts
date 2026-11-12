@@ -6,7 +6,7 @@ import {
     DataExplorerSchemaTable,
     DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
-import { Client } from 'pg';
+import { Client, QueryConfig } from 'pg';
 import { CLI_INSTALLED_PLUGIN, dataExplorerPostgresInstalledPlugin } from './package-info';
 
 /** Connection configuration for the PostgreSQL data explorer provider. */
@@ -36,7 +36,8 @@ export class PostgresDataExplorerProvider implements IDataExplorerProvider {
             if (readOnly) await client.query('BEGIN READ ONLY');
             let result;
             try {
-                result = await client.query(context.query);
+                // The extended protocol runs one statement, so a `COMMIT; …` cannot end the transaction
+                result = await client.query({ text: context.query, queryMode: 'extended' } as QueryConfig);
             } finally {
                 if (readOnly) await client.query('ROLLBACK').catch(() => undefined);
             }
