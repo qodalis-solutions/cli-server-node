@@ -123,6 +123,7 @@ When the users plugin delegates authentication to your application (`setAuthAdap
 
 - `GET /api/v1/qcli/auth/mode` answers `{ "mode": "external", "signInUrl": "<setSignInUrl>" }`. It is public, also on protected servers, so the dashboard can call it before anyone signs in. Otherwise it answers `"password"`.
 - The dashboard hides its username/password form and shows "Sign in at `<signInUrl>`" with a Retry button (or tells users to sign in through the host application when no sign-in URL is set). Any 401 leads to that screen.
+- The dashboard sends users back: it fills `{returnTo}` in the sign-in URL (`/sign-in?next={returnTo}`), or appends a `returnTo=` parameter, with the dashboard page they were on (e.g. a terminal link's approval page). After signing in, the host opens that URL with `#token=<bearer token>`.
 - `POST /api/v1/qcli/auth/login` signs no one in: it answers `501` with `code: "EXTERNAL_AUTH"`, a message pointing to the host's sign-in and `signInUrl`. The static admin credentials are never accepted in this mode.
 - With `setAuthProvider(usersPlugin.serverAuth)`, admin routes authenticate the request through the users plugin (your adapter) and require `admin:access` (`isAdmin` grants it through the `admin` group).
 

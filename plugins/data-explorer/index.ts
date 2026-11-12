@@ -22,6 +22,7 @@ export {
     maskedResultError,
     applyColumnPolicy,
     filterSchema,
+    nameCaseHint,
     filterListing,
     DataExplorerRateLimiter,
     MASK,

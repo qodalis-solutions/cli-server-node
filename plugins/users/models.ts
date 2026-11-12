@@ -216,6 +216,18 @@ export interface UsersModuleOptions {
     apiTokenStore?: ICliApiTokenStore;
     /** Allow API tokens that never expire (`expiresInDays: null`; default false). */
     allowNonExpiringTokens?: boolean;
+    /**
+     * With an auth adapter (`authAdapter`), also accept the plugin's API tokens
+     * (`qcli_pat_…` bearer tokens, checked before the adapter), so users signed in
+     * by the host can create tokens (`POST /tokens`) and approve terminal links
+     * (`POST /link/code/{code}/approve`, `server add` in the web CLI). Default false:
+     * the host owns sign-in. The token's user is read from the user store by id on
+     * every request and socket re-check, so the store must find the adapter's users
+     * and report `disabled`; keep the tokens in a persistent `apiTokenStore` (the
+     * default store forgets them on restart). Ignored without an adapter (tokens are
+     * always on).
+     */
+    apiTokensWithExternalAuth?: boolean;
     /** The page where users approve a terminal's link request (default the dashboard's `/qcli/admin/link`). */
     linkApprovalUrl?: string;
     /** Idle timeout in ms (default 30 minutes). */

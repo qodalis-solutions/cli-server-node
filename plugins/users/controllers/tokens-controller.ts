@@ -10,7 +10,7 @@ import { UsersPermissions as P } from '../permissions';
  * API tokens resource. Expects the auth middleware to have run.
  *
  * - `GET    /`          — own tokens (`?all=true` with `tokens:read`: every user's)
- * - `POST   /`          — create a token (session only) → `201 { token, apiToken }`
+ * - `POST   /`          — create a token (a session, or the host's sign-in with `apiTokensWithExternalAuth`) → `201 { token, apiToken }`
  * - `DELETE /:id`       — revoke (owner or `tokens:revoke`; otherwise 404)
  */
 export function createTokensController(authService: AuthService, userStore: ICliUserStore): Router {

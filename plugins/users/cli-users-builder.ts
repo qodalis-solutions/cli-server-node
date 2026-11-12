@@ -163,6 +163,18 @@ export class CliUsersBuilder {
     }
 
     /**
+     * With an auth adapter (`setAuthAdapter`), also accept the plugin's API tokens:
+     * `qcli_pat_…` bearer tokens are checked before the adapter, and users signed in by
+     * the host create tokens (`POST /tokens`) and approve terminal links
+     * (`POST /link/code/{code}/approve`); both answer 501 without it. See
+     * `UsersModuleOptions.apiTokensWithExternalAuth`.
+     */
+    allowApiTokens(allow = true): this {
+        this.options.apiTokensWithExternalAuth = allow;
+        return this;
+    }
+
+    /**
      * Delegate authentication to the host application. The adapter may be sync
      * or async (return a Promise); the plugin awaits it for requests, ticket
      * issuance and the re-checks of open sockets.
@@ -275,6 +287,8 @@ export class CliUsersBuilder {
         const eventBus = events && typeof events === 'object' ? events : undefined;
         const options = this.options;
         const externalAuth = !!options.authAdapter;
+        // API tokens next to the host's sign-in (opt-in); always on without an adapter
+        const apiTokensWithExternalAuth = externalAuth && (options.apiTokensWithExternalAuth ?? false);
         const usersReadOnly = options.readOnlyUsers ?? false;
         const groupsReadOnly = options.readOnlyGroups ?? false;
 
@@ -301,6 +315,7 @@ export class CliUsersBuilder {
             eventBus,
             apiTokenStore,
             allowNonExpiringTokens: options.allowNonExpiringTokens,
+            apiTokensWithExternalAuth,
             usersReadOnly,
             groupsReadOnly,
         });
@@ -322,7 +337,7 @@ export class CliUsersBuilder {
         };
 
         let allowedOrigins = options.allowedOrigins;
-        const authenticator = new RequestAuthenticator(authService, options.authAdapter, () => allowedOrigins);
+        const authenticator = new RequestAuthenticator(authService, options.authAdapter, () => allowedOrigins, apiTokensWithExternalAuth);
         const authMiddleware = createAuthMiddleware(authenticator);
 
         const trustProxy = options.trustProxy ?? false;
