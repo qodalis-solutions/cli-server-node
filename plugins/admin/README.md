@@ -85,9 +85,10 @@ The plugin samples the status every 15 seconds (the first at build) and keeps 24
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/plugins` | List all registered modules |
+| GET | `/plugins` | List all registered modules, and the commands added on their own grouped by their `module` (see [Command modules](#command-modules)) |
+| GET | `/plugins/:id` | One module (case-insensitive id); 404 when unknown |
 | GET | `/plugins/installed` | The installed server plugin packages (`id`, `name`, `version`, `description`), the server (`Core`) first |
-| POST | `/plugins/:id/toggle` | Enable or disable a module |
+| POST | `/plugins/:id/toggle` | Enable or disable a module (its commands answer as unknown while disabled) |
 
 The built-in plugins list themselves when added (`mountPlugin` for users, admin and jobs; `addModule`, `setFileStorageProvider`/`addFileSystem` and `addDataExplorerProvider` for modules and providers). A plugin of your own calls `builder.addInstalledPlugin(__dirname)` (reads the nearest `package.json`) or `builder.addInstalledPlugin({ id, name, version, description })`; modules and providers can instead carry the description under `CLI_INSTALLED_PLUGIN` (`@qodalis/cli-server-abstractions`).
 
@@ -230,6 +231,30 @@ The defaults match the Qodalis CLI panel: its grays, indigo accent with the viol
 | `warning` | `--qcli-warning` | Warning states | `#f0883e` | `#bc4c00` |
 | `error` | `--qcli-error` | Errors and destructive actions | `#f85149` | `#cf222e` |
 | `info` | `--qcli-info` | Informational states | `#58a6ff` | `#0969da` |
+
+## Command modules
+
+The Plugins page also lists the command modules, each with its commands and a switch that disables them
+(`/api/v1/qcli/plugins`). A module added with `builder.addModule(...)` is listed with its name, version, description and
+`icon` (one emoji or an image URL). Commands registered on their own (`builder.addProcessor(...)`) are listed under the
+module their `module` property names (case-insensitive). To describe such a group, add a module of the same name with
+no processors of its own:
+
+```typescript
+class ShopModule extends CliModule {
+    name = 'shop';
+    version = '1.0.0';
+    description = 'Shop administration';
+    icon = '🛒';
+    processors = []; // StatsCommand etc. set module = 'shop'
+}
+
+builder.addModule(new ShopModule())
+    .addProcessor(new StatsCommand())
+    .addProcessor(new OrdersCommand());
+```
+
+A group without such a module takes its version and author from its first command and has no description or icon.
 
 ## Name and icon
 

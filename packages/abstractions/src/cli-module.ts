@@ -19,6 +19,9 @@ export interface ICliModule {
 
     /** Command processors provided by this module. */
     processors: ICliCommandProcessor[];
+
+    /** One emoji or an image URL shown for the module (the admin dashboard's plugins page); undefined = none. */
+    icon?: string;
 }
 
 /**
@@ -30,4 +33,5 @@ export abstract class CliModule implements ICliModule {
     abstract description: string;
     author: ICliCommandAuthor = DefaultLibraryAuthor;
     abstract processors: ICliCommandProcessor[];
+    icon?: string;
 }
