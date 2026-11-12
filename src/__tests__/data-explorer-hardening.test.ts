@@ -287,6 +287,16 @@ describe('rules shared with the .NET server', () => {
         expect(sqlObjects('SELECT * FROM "sec""ret"')).toEqual(['sec"ret']);
     });
 
+    it('SQL allowed objects: a quoted table is still the table under the MySQL reading, never WHERE or its alias', () => {
+        for (const q of [
+            `SELECT "Id" FROM "Users" WHERE "CountryCode" = 'RO'`,
+            `SELECT u."Id" FROM "Users" u WHERE u."CountryCode" = 'RO' ORDER BY 1`,
+            'SELECT * FROM "Users" AS u JOIN "Bots" b ON b."UserId" = u."Id"',
+        ]) {
+            expect(objectsError(opts({ allowedObjects: ['Users', 'Bots'] }), q), q).toBeUndefined();
+        }
+    });
+
     it('MongoDB: JSON escapes and the collections pipeline stages read', () => {
         expect(readOnlyError(L.Shell, 'db.users.aggregate([{ "\\u0024out": "x" }])')).toBe('Read-only source: $out and $merge are not allowed');
         const o = opts({ language: L.Shell, allowedObjects: ['users'] });
@@ -378,6 +388,8 @@ describe('masked columns', () => {
             'SELECT password_hash AS h FROM users',
             // Under the MySQL reading the # comment hides nothing: the alias counts
             'SELECT email # x\nAS e FROM users',
+            `SELECT "id" FROM "users" WHERE "email" LIKE '%a%'`,
+            `SELECT "id" FROM "users" u WHERE u."email" = 'x'`,
         ]) {
             expect(maskedColumnError(o, q), q).toContain('can only be selected by its own name');
         }

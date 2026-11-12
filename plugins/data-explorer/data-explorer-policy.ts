@@ -150,7 +150,8 @@ function quotedIdentifier(sql: string, i: number, close: string): [string, numbe
 
 /**
  * Splits SQL into words, quoted identifiers and punctuation; comments and string literals
- * are dropped, so keywords inside them do not count.
+ * are dropped, so keywords inside them do not count. A `"..."` string (MySQL without
+ * `ANSI_QUOTES`) stays a single name token, so it never hides a keyword and still names what it quotes.
  */
 export function tokenizeSql(sql: string, reading: SqlReading = SQL_READINGS[0]): SqlToken[] {
     const tokens: SqlToken[] = [];
@@ -174,7 +175,16 @@ export function tokenizeSql(sql: string, reading: SqlReading = SQL_READINGS[0]):
             i = executable ? i + executable[0].length : skipBlockComment(sql, i, !!reading.nestedComments);
             continue;
         }
-        if (c === "'" || (c === '"' && reading.doubleQuotedStrings)) {
+        if (c === '"' && reading.doubleQuotedStrings) {
+            // A string here, but every other dialect reads a name, and a string cannot stand where a table or a
+            // column does: kept as that name, so FROM "Users" u WHERE ... still names the table, not WHERE or u
+            const end = skipString(sql, i, c, !!reading.backslashEscapes);
+            const name = sql.slice(i + 1, Math.max(i + 1, end - 1)).replace(/""/g, '"');
+            tokens.push({ kind: 'ident', value: name, raw: name });
+            i = end;
+            continue;
+        }
+        if (c === "'") {
             i = skipString(sql, i, c, !!reading.backslashEscapes);
             continue;
         }
