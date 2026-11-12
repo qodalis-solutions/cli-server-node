@@ -8,6 +8,8 @@ export interface CliServerCommandParameterDescriptorDto {
     defaultValue?: any;
     /** The only values the parameter takes. */
     allowedValues?: string[];
+    /** Example values. */
+    examples?: string[];
 }
 
 /** An example command line in a command's help. */

@@ -39,7 +39,9 @@ class HttpPostProcessor extends CliCommandProcessor implements ICliStreamCommand
     acceptsValue = true;
     description = 'Performs an HTTP POST request';
     parameters = [
-        new CliCommandParameterDescriptor('body', 'Request body (JSON string)', false, 'string', ['-b']),
+        new CliCommandParameterDescriptor('body', 'Request body (JSON string)', false, 'string', ['-b'], undefined, undefined, [
+            '{"name":"qodalis"}',
+        ]),
         new CliCommandParameterDescriptor('headers', 'Show response headers', false, 'boolean'),
     ];
 
