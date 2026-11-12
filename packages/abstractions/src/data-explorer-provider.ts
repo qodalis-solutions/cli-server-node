@@ -8,6 +8,13 @@ export interface IDataExplorerProvider {
      */
     readOnlyQueries?: boolean;
     /**
+     * A table or column name quoted for this source's SQL, used when the server fixes the case of a
+     * name a query wrote without quotes (`DataExplorerProviderOptions.fixNameCase`). Default: double
+     * quotes (ANSI).
+     * @param name - The name as the schema spells it.
+     */
+    quoteName?(name: string): string;
+    /**
      * Executes a query against the data source.
      * @param context - Execution context containing the query, parameters, and options.
      * @returns Query results including rows, columns, and execution metadata.

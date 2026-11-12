@@ -1,6 +1,6 @@
 export { DataExplorerRegistry } from './data-explorer-registry';
 export type { DataExplorerRegistryEntry } from './data-explorer-registry';
-export { DataExplorerExecutor, AUDIT_QUERY_MAX_LENGTH } from './data-explorer-executor';
+export { DataExplorerExecutor, AUDIT_QUERY_MAX_LENGTH, MAX_NAME_FIXES } from './data-explorer-executor';
 export type { DataExplorerAuditSink, DataExplorerExecutorOptions } from './data-explorer-executor';
 export { createDataExplorerController } from './data-explorer-controller';
 export type { DataExplorerControllerOptions } from './data-explorer-controller';
@@ -23,6 +23,8 @@ export {
     applyColumnPolicy,
     filterSchema,
     nameCaseHint,
+    fixNameCase,
+    ansiQuoteName,
     filterListing,
     DataExplorerRateLimiter,
     MASK,

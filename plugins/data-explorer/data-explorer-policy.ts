@@ -55,6 +55,8 @@ interface SqlToken {
     value: string;
     /** As written (words keep their case for object names). */
     raw: string;
+    /** Where a word starts in the query. */
+    start?: number;
 }
 
 /**
@@ -213,7 +215,7 @@ export function tokenizeSql(sql: string, reading: SqlReading = SQL_READINGS[0]):
                 i = skipString(sql, j, "'", true);
                 continue;
             }
-            tokens.push({ kind: 'word', value: raw.toUpperCase(), raw });
+            tokens.push({ kind: 'word', value: raw.toUpperCase(), raw, start: i });
             i = j;
             continue;
         }
@@ -793,6 +795,31 @@ export function applyColumnPolicy(result: DataExplorerResult, options: DataExplo
 
 // PostgreSQL: 'relation "users" does not exist', 'column "countrycode" does not exist', 'column u.countrycode does not exist'
 const MISSING_NAME_RE = /\b(relation|column) (?:"?[^"\s.]+"?\.)?"?([^"\s.]+)"? does not exist/;
+// MySQL (table names are case-sensitive on Linux): "Table 'shop.users' doesn't exist"
+const MYSQL_MISSING_TABLE_RE = /\bTable '(?:[^'.]+\.)?([^'.]+)' doesn't exist/;
+// SQL Server with a case-sensitive collation: "Invalid object name 'users'.", "Invalid column name 'countrycode'."
+const MSSQL_MISSING_NAME_RE = /\bInvalid (object|column) name '(?:[^'.]+\.)*([^'.]+)'/;
+
+/** The table (`table: true`) or column an error says does not exist, as the database reports it. */
+function missingNameIn(error: string): { table: boolean; name: string } | undefined {
+    let m = MISSING_NAME_RE.exec(error);
+    if (m) return { table: m[1] === 'relation', name: m[2] };
+    m = MYSQL_MISSING_TABLE_RE.exec(error);
+    if (m) return { table: true, name: m[1] };
+    m = MSSQL_MISSING_NAME_RE.exec(error);
+    if (m) return { table: m[1] === 'object', name: m[2] };
+    return undefined;
+}
+
+/** The name of `schema` that differs from the missing one only in case; undefined for none, the same name, or several. */
+function caseMatch(missing: { table: boolean; name: string }, schema: DataExplorerSchemaResult): string | undefined {
+    const lower = missing.name.toLowerCase();
+    const names = missing.table
+        ? schema.tables.map((t) => t.name.split('.').pop()!)
+        : schema.tables.flatMap((t) => t.columns.map((c) => c.name));
+    const matches = [...new Set(names.filter((n) => n.toLowerCase() === lower))];
+    return matches.length === 1 && matches[0] !== missing.name ? matches[0] : undefined;
+}
 
 /**
  * For an error saying a table or column does not exist (PostgreSQL folds unquoted names to lower case):
@@ -800,14 +827,49 @@ const MISSING_NAME_RE = /\b(relation|column) (?:"?[^"\s.]+"?\.)?"?([^"\s.]+)"? d
  * so a hidden table or dropped column is never named. Undefined when nothing matches.
  */
 export function nameCaseHint(error: string, schema: DataExplorerSchemaResult | undefined): string | undefined {
-    const m = schema ? MISSING_NAME_RE.exec(error) : null;
-    if (!schema || !m) return undefined;
-    const name = m[2];
-    const candidates = m[1] === 'relation'
-        ? schema.tables.map((t) => t.name.split('.').pop()!)
-        : schema.tables.flatMap((t) => t.columns.map((c) => c.name));
-    const match = candidates.find((c) => c !== name && c.toLowerCase() === name.toLowerCase());
+    const missing = schema ? missingNameIn(error) : undefined;
+    const match = missing && caseMatch(missing, schema!);
     return match === undefined ? undefined : `Names with capital letters need double quotes: "${match}"`;
+}
+
+/** ANSI quoting of a name: `"Users"` (the default of `IDataExplorerProvider.quoteName`). */
+export function ansiQuoteName(name: string): string {
+    return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * The query with the name an error says does not exist written as `schema` spells it and quoted by
+ * `quote`, so `select * from Users` runs as `select * from "Users"`; undefined when the error names no
+ * such table or column. Only an unquoted name outside strings and comments under every dialect's
+ * reading ({@link SQL_READINGS}) is changed, never a function name (`count(`).
+ */
+export function fixNameCase(
+    query: string,
+    error: string,
+    schema: DataExplorerSchemaResult | undefined,
+    quote: (name: string) => string = ansiQuoteName,
+): string | undefined {
+    const missing = schema ? missingNameIn(error) : undefined;
+    const match = missing && caseMatch(missing, schema!);
+    if (!missing || match === undefined) return undefined;
+    const lower = missing.name.toLowerCase();
+    let starts: Set<number> | undefined;
+    for (const reading of SQL_READINGS) {
+        const tokens = tokenizeSql(query, reading);
+        const here = new Set(
+            tokens
+                .filter((t, i) => t.kind === 'word' && t.raw.toLowerCase() === lower && !(tokens[i + 1]?.kind === 'punct' && tokens[i + 1].value === '('))
+                .map((t) => t.start!),
+        );
+        starts = starts ? new Set([...starts].filter((s) => here.has(s))) : here;
+    }
+    if (!starts?.size) return undefined;
+    const quoted = quote(match);
+    let fixed = query;
+    for (const start of [...starts].sort((a, b) => b - a)) {
+        fixed = fixed.slice(0, start) + quoted + fixed.slice(start + missing.name.length);
+    }
+    return fixed;
 }
 
 /** The schema as the source shows it: allowed tables only, without dropped columns. */

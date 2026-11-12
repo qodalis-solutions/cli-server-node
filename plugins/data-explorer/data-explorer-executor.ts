@@ -16,7 +16,9 @@ import {
     applyColumnPolicy,
     DataExplorerRateLimiter,
     filterListing,
+    ansiQuoteName,
     filterSchema,
+    fixNameCase,
     isReadOnly,
     maskedColumnError,
     maskedResultError,
@@ -37,6 +39,9 @@ export interface DataExplorerExecutorOptions {
 
 /** Longest query text kept in an audit entry. */
 export const AUDIT_QUERY_MAX_LENGTH = 2000;
+
+/** Most names whose case a query has fixed before it runs again (`DataExplorerProviderOptions.fixNameCase`). */
+export const MAX_NAME_FIXES = 5;
 
 /**
  * Executes data explorer queries: the source's permissions, rate limit, read-only rules,
@@ -76,57 +81,71 @@ export class DataExplorerExecutor {
             const limit = options.rateLimit!;
             return this.refuse(request, options, caller, `Too many queries: at most ${limit.maxQueries} per ${limit.windowSeconds} s`, 'rate_limited');
         }
-        if (isReadOnly(options) && !provider.readOnlyQueries) {
-            const error = readOnlyError(options.language, request.query);
-            if (error) return this.refuse(request, options, caller, error, 'read_only');
-        }
-        const objects = objectsError(options, request.query);
-        if (objects) return this.refuse(request, options, caller, objects, 'object_not_allowed');
-        const masked = maskedColumnError(options, request.query);
-        if (masked) return this.refuse(request, options, caller, masked, 'masked_column');
-
         const timeoutMs = options.timeout ?? 30000;
-        const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), timeoutMs);
-
-        const context: DataExplorerExecutionContext = {
-            query: request.query,
-            parameters: request.parameters ?? {},
-            options,
-            signal: abortController.signal,
-        };
-
+        const readOnly = isReadOnly(options);
+        let query = request.query;
         let result: DataExplorerResult;
-        try {
-            result = await provider.executeAsync(context);
-            clearTimeout(timer);
+        for (let fixes = 0; ; fixes++) {
+            if (readOnly && !provider.readOnlyQueries) {
+                const error = readOnlyError(options.language, query);
+                if (error) return this.refuse(request, options, caller, error, 'read_only');
+            }
+            const objects = objectsError(options, query);
+            if (objects) return this.refuse(request, options, caller, objects, 'object_not_allowed');
+            const masked = maskedColumnError(options, query);
+            if (masked) return this.refuse(request, options, caller, masked, 'masked_column');
 
-            // Enforce maxRows
-            if (options.maxRows && result.rows.length > options.maxRows) {
-                result.rows = result.rows.slice(0, options.maxRows);
-                result.rowCount = result.rows.length;
-                result.truncated = true;
+            const abortController = new AbortController();
+            const timer = setTimeout(() => abortController.abort(), timeoutMs);
+            const context: DataExplorerExecutionContext = {
+                query,
+                parameters: request.parameters ?? {},
+                options,
+                signal: abortController.signal,
+            };
+
+            try {
+                result = await provider.executeAsync(context);
+                clearTimeout(timer);
+                if (query !== request.query) result.executedQuery = query;
+
+                // Enforce maxRows
+                if (options.maxRows && result.rows.length > options.maxRows) {
+                    result.rows = result.rows.slice(0, options.maxRows);
+                    result.rowCount = result.rows.length;
+                    result.truncated = true;
+                }
+                const maskedResult = result.success ? maskedResultError(options, query, result.columns) : undefined;
+                if (maskedResult) {
+                    // A masked column came back under another name: withhold the rows
+                    result = this.failure(request.source, options, maskedResult, Date.now() - startTime, 'masked_column');
+                } else if (result.success) {
+                    filterListing(result, options, query);
+                    applyColumnPolicy(result, options);
+                }
+            } catch (err: any) {
+                clearTimeout(timer);
+                const message = abortController.signal.aborted
+                    ? `Query timed out after ${timeoutMs}ms`
+                    : err.message ?? String(err);
+                result = this.failure(request.source, options, message, Date.now() - startTime);
+                if (abortController.signal.aborted) break;
             }
-            const maskedResult = result.success ? maskedResultError(options, request.query, result.columns) : undefined;
-            if (maskedResult) {
-                // A masked column came back under another name: withhold the rows
-                result = this.failure(request.source, options, maskedResult, Date.now() - startTime, 'masked_column');
-            } else if (result.success) {
-                filterListing(result, options, request.query);
-                applyColumnPolicy(result, options);
+            // A missing table or column that the shown schema has with capitals (SQL sources answer
+            // failures in the result or throw them)
+            if (result.success || result.errorCode || !result.error || options.language !== DataExplorerLanguage.Sql) break;
+            const schema = await this.visibleSchema(provider, options);
+            // A read-only query changed nothing, so it runs again with the name's case fixed (one name per run)
+            const fixed = readOnly && options.fixNameCase !== false && fixes < MAX_NAME_FIXES
+                ? fixNameCase(query, result.error, schema, (name) => provider.quoteName?.(name) ?? ansiQuoteName(name))
+                : undefined;
+            if (fixed !== undefined) {
+                query = fixed;
+                continue;
             }
-        } catch (err: any) {
-            clearTimeout(timer);
-            const message = abortController.signal.aborted
-                ? `Query timed out after ${timeoutMs}ms`
-                : err.message ?? String(err);
-            result = this.failure(request.source, options, message, Date.now() - startTime);
-        }
-        // A missing table or column that the shown schema has with capitals (SQL sources answer
-        // failures in the result or throw them)
-        if (!result.success && !result.errorCode && result.error && options.language === DataExplorerLanguage.Sql) {
-            const hint = nameCaseHint(result.error, await this.visibleSchema(provider, options));
+            const hint = nameCaseHint(result.error, schema);
             if (hint) result.error = `${result.error.trimEnd()}\n${hint}`;
+            break;
         }
         this.audit(request, options, caller, result, Date.now() - startTime);
         return result;
@@ -190,9 +209,9 @@ export class DataExplorerExecutor {
         if (options.audit === false) return;
         const sink = this.options.audit?.();
         if (!sink) return;
-        const query = request.query.length > AUDIT_QUERY_MAX_LENGTH
-            ? `${request.query.slice(0, AUDIT_QUERY_MAX_LENGTH)}…`
-            : request.query;
+        const truncate = (text: string) =>
+            text.length > AUDIT_QUERY_MAX_LENGTH ? `${text.slice(0, AUDIT_QUERY_MAX_LENGTH)}…` : text;
+        const query = truncate(request.query);
         sink({
             event: 'data_query',
             userId: caller?.userId ?? '',
@@ -204,6 +223,7 @@ export class DataExplorerExecutor {
                 rowCount: result.rowCount,
                 durationMs,
                 ...(result.error ? { error: result.error } : {}),
+                ...(result.executedQuery ? { executedQuery: truncate(result.executedQuery) } : {}),
                 ...(caller?.remoteAddress ? { remoteAddress: caller.remoteAddress } : {}),
             },
         }).catch(() => undefined);

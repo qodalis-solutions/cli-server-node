@@ -77,6 +77,7 @@ All endpoints are mounted at the path you choose (typically `/api/v1/qcli/data-e
 | `audit` | `boolean` | `true` | Writes a `data_query` entry to the server's audit log for every execute |
 | `rateLimit` | `{ maxQueries, windowSeconds }` | -- | Executes allowed per caller and window; more answer 429 |
 | `exportPermissions` | `string[]` | -- | Permissions needed to export results (`canExport` in `/sources`; advisory) |
+| `fixNameCase` | `boolean` | `true` | A read-only SQL query naming a table or column without quotes that exists only with other capitals runs again with the name quoted (`executedQuery` in the result) |
 
 ### Read-only sources
 
