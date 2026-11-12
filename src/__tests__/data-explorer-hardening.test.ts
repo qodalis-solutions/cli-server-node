@@ -89,6 +89,8 @@ describe('read-only rules', () => {
             'EXPLAIN SELECT * FROM users',
             '-- DROP TABLE users\nSELECT 1',
             'SHOW TABLES',
+            "SELECT 'it''s'",
+            'SELECT 1 # trailing MySQL comment',
         ]) {
             expect(readOnlyError(L.Sql, q), q).toBeUndefined();
         }
@@ -102,6 +104,12 @@ describe('read-only rules', () => {
             'SELECT * INTO copy FROM users',
             'TRUNCATE users',
             'CREATE TABLE t (a int)',
+            // A backslash is an escape only in MySQL: on SQL Server this is two statements
+            "SELECT 'a\\'; DROP TABLE users; --'",
+            // `#t` is a SQL Server temp table, not a comment hiding the rest of the line
+            'SELECT * FROM #t; DROP TABLE users',
+            // $$ quotes only in Postgres
+            'SELECT $$; DROP TABLE users; $$',
         ]) {
             expect(readOnlyError(L.Sql, q), q).toBeDefined();
         }

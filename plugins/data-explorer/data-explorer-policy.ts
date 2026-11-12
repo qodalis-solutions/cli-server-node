@@ -57,11 +57,23 @@ interface SqlToken {
     raw: string;
 }
 
+/** How a dialect reads strings: MySQL takes `\'` as an escape, Postgres `$tag$` quotes; SQL Server and SQLite neither. */
+export interface SqlReading {
+    backslashEscapes: boolean;
+    dollarQuotes: boolean;
+}
+
+/** Both readings: a query is checked under each, so a dialect-specific quote cannot hide a statement. */
+const SQL_READINGS: SqlReading[] = [
+    { backslashEscapes: true, dollarQuotes: true },
+    { backslashEscapes: false, dollarQuotes: false },
+];
+
 /**
  * Splits SQL into words, quoted identifiers and punctuation; comments and string literals
  * are dropped, so keywords inside them do not count.
  */
-export function tokenizeSql(sql: string): SqlToken[] {
+export function tokenizeSql(sql: string, reading: SqlReading = SQL_READINGS[0]): SqlToken[] {
     const tokens: SqlToken[] = [];
     let i = 0;
     while (i < sql.length) {
@@ -71,8 +83,8 @@ export function tokenizeSql(sql: string): SqlToken[] {
             while (i < sql.length && sql[i] !== '\n') i++;
             continue;
         }
-        if (c === '#' ) {
-            // MySQL comment
+        if (c === '#' && (next === undefined || /\s/.test(next))) {
+            // MySQL comment (`#t` is a SQL Server temp table)
             while (i < sql.length && sql[i] !== '\n') i++;
             continue;
         }
@@ -85,14 +97,14 @@ export function tokenizeSql(sql: string): SqlToken[] {
             i++;
             while (i < sql.length) {
                 if (sql[i] === "'" && sql[i + 1] === "'") i += 2;
-                else if (sql[i] === '\\' ) i += 2;
+                else if (reading.backslashEscapes && sql[i] === '\\') i += 2;
                 else if (sql[i] === "'") break;
                 else i++;
             }
             i++;
             continue;
         }
-        if (c === '$') {
+        if (c === '$' && reading.dollarQuotes) {
             // Postgres dollar-quoted string: $tag$ ... $tag$
             const m = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
             if (m) {
@@ -136,7 +148,15 @@ const SQL_WRITE_WORDS = new Set([
 const SQL_FUNCTION_WORDS = new Set(['REPLACE', 'INSERT']);
 
 function sqlReadOnlyError(query: string): string | undefined {
-    const tokens = tokenizeSql(query);
+    for (const reading of SQL_READINGS) {
+        const error = sqlReadOnlyErrorAs(query, reading);
+        if (error) return error;
+    }
+    return undefined;
+}
+
+function sqlReadOnlyErrorAs(query: string, reading: SqlReading): string | undefined {
+    const tokens = tokenizeSql(query, reading);
     const statements: SqlToken[][] = [[]];
     for (const t of tokens) {
         if (t.kind === 'punct' && t.value === ';') statements.push([]);
@@ -164,7 +184,13 @@ const SQL_OBJECT_KEYWORDS = new Set(['FROM', 'JOIN', 'INTO', 'UPDATE', 'TABLE'])
 
 /** The tables a SQL query names (after FROM, JOIN, INTO, UPDATE, TABLE), without the CTE names it defines. */
 export function sqlObjects(query: string): string[] {
-    const tokens = tokenizeSql(query);
+    const all = new Set<string>();
+    for (const reading of SQL_READINGS) for (const o of sqlObjectsAs(query, reading)) all.add(o);
+    return [...all];
+}
+
+function sqlObjectsAs(query: string, reading: SqlReading): string[] {
+    const tokens = tokenizeSql(query, reading);
     const isName = (t: SqlToken | undefined) => !!t && (t.kind === 'ident' || t.kind === 'word');
     // CTE names: name [ (columns) ] AS (
     const cteNames = new Set<string>();
