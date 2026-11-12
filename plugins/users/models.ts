@@ -216,6 +216,8 @@ export interface UsersModuleOptions {
     apiTokenStore?: ICliApiTokenStore;
     /** Allow API tokens that never expire (`expiresInDays: null`; default false). */
     allowNonExpiringTokens?: boolean;
+    /** The page where users approve a terminal's link request (default the dashboard's `/qcli/admin/link`). */
+    linkApprovalUrl?: string;
     /** Idle timeout in ms (default 30 minutes). */
     sessionTimeoutMs?: number;
     /** Password of the seeded `root` user (default `root`). */
