@@ -14,7 +14,7 @@ export const LINK_CREATE_RATE_LIMIT = 10;
  * - `POST /`                       — a terminal asks to be linked (public, rate limited) → `201 { linkId, userCode, verificationUrl, expiresIn, interval }`
  * - `GET  /:linkId`                — the terminal polls (public) → `{ status }`, the token once approved; 404 `{ status: 'expired' }`
  * - `GET  /code/:userCode`         — the approval page reads the request (signed in)
- * - `POST /code/:userCode/approve` — creates the approver's API token for the terminal (session only)
+ * - `POST /code/:userCode/approve` — creates the approver's API token for the terminal (a session, or the host's sign-in with `apiTokensWithExternalAuth`)
  * - `POST /code/:userCode/deny`
  */
 export function createLinkController(

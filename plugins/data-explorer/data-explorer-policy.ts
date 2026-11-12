@@ -791,6 +791,25 @@ export function applyColumnPolicy(result: DataExplorerResult, options: DataExplo
     return result;
 }
 
+// PostgreSQL: 'relation "users" does not exist', 'column "countrycode" does not exist', 'column u.countrycode does not exist'
+const MISSING_NAME_RE = /\b(relation|column) (?:"?[^"\s.]+"?\.)?"?([^"\s.]+)"? does not exist/;
+
+/**
+ * For an error saying a table or column does not exist (PostgreSQL folds unquoted names to lower case):
+ * the hint naming the same name with its capitals, from `schema` as the source shows it (`filterSchema`),
+ * so a hidden table or dropped column is never named. Undefined when nothing matches.
+ */
+export function nameCaseHint(error: string, schema: DataExplorerSchemaResult | undefined): string | undefined {
+    const m = schema ? MISSING_NAME_RE.exec(error) : null;
+    if (!schema || !m) return undefined;
+    const name = m[2];
+    const candidates = m[1] === 'relation'
+        ? schema.tables.map((t) => t.name.split('.').pop()!)
+        : schema.tables.flatMap((t) => t.columns.map((c) => c.name));
+    const match = candidates.find((c) => c !== name && c.toLowerCase() === name.toLowerCase());
+    return match === undefined ? undefined : `Names with capital letters need double quotes: "${match}"`;
+}
+
 /** The schema as the source shows it: allowed tables only, without dropped columns. */
 export function filterSchema(schema: DataExplorerSchemaResult, options: DataExplorerProviderOptions): DataExplorerSchemaResult {
     const allowed = options.allowedObjects;

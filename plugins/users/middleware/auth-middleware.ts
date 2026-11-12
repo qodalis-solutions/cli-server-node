@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthAdapter } from '../models';
-import { AuthService, AuthContext } from '../services/auth-service';
+import { AuthService, AuthContext, isApiToken } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup, mergePermissions } from '../permissions';
 import { isOriginAllowed, isSameOrigin } from '../security';
@@ -29,7 +29,8 @@ export function getBearerToken(req: Request): string | undefined {
 }
 
 /**
- * Authenticates requests: bearer token, or the host's auth adapter.
+ * Authenticates requests: bearer token, or the host's auth adapter (API tokens
+ * first with `apiTokensWithExternalAuth`).
  * Enforces the CSRF rule: a state-changing request without a bearer token
  * (adapter/cookie mode) must come from an allowed `Origin` or from the
  * server's own origin (same-origin, e.g. the bundled admin dashboard).
@@ -39,6 +40,8 @@ export class RequestAuthenticator {
         private readonly authService: AuthService,
         private readonly authAdapter: AuthAdapter | undefined,
         private readonly getAllowedOrigins: () => readonly string[] | undefined,
+        /** With an adapter, `qcli_pat_` bearer tokens are the plugin's API tokens, checked before the adapter. */
+        private readonly apiTokensWithExternalAuth = false,
     ) {}
 
     /** True when a host auth adapter authenticates requests (no stored sessions). */
@@ -81,7 +84,10 @@ export class RequestAuthenticator {
         const token = getBearerToken(req);
         let ctx: AuthContext;
 
-        if (this.authAdapter) {
+        if (this.authAdapter && this.apiTokensWithExternalAuth && token && isApiToken(token)) {
+            // The plugin's own token: the adapter never sees it
+            ctx = await this.authService.authenticateApiToken(token);
+        } else if (this.authAdapter) {
             ctx = await this.authenticateWithAdapter(req);
         } else {
             if (!token) {

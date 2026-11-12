@@ -28,6 +28,7 @@ import {
     MASK,
     maskedColumnError,
     maskedResultError,
+    nameCaseHint,
     objectsError,
     readOnlyError,
     sqlObjects,
@@ -351,6 +352,74 @@ describe('rules shared with the .NET server', () => {
             o,
         );
         expect(res.rows).toEqual([['{"_source":{"email":"***","id":1}}'], ['[not json']]);
+    });
+});
+
+describe('name case hint', () => {
+    const schema = {
+        source: 'db',
+        tables: [
+            { name: 'public.Users', type: 'table', columns: [{ name: 'CountryCode', type: 'text', nullable: true }] },
+            { name: 'job_states', type: 'table', columns: [{ name: 'status', type: 'text', nullable: true }] },
+        ],
+    };
+
+    it.each([
+        ['42P01: relation "users" does not exist\n\nPOSITION: 22', '"Users"'],
+        ['42703: column "countrycode" does not exist', '"CountryCode"'],
+        ['42703: column u.countrycode does not exist', '"CountryCode"'],
+    ])('names the table or column with its capitals: %s', (error, quoted) => {
+        expect(nameCaseHint(error, schema)).toBe(`Names with capital letters need double quotes: ${quoted}`);
+    });
+
+    it.each([
+        // Nothing differs only in case, or the name is not shown (a hidden table is never named)
+        ['42P01: relation "job_states" does not exist'],
+        ['42P01: relation "onetimecodes" does not exist'],
+        ['syntax error at or near "FORM"'],
+    ])('says nothing else: %s', (error) => {
+        expect(nameCaseHint(error, schema)).toBeUndefined();
+    });
+
+    function hinted(error: string, o: Partial<DataExplorerProviderOptions> = {}, thrown = false) {
+        const registry = new DataExplorerRegistry();
+        registry.register(
+            {
+                executeAsync: async () => {
+                    if (thrown) throw new Error(error);
+                    return { ...result(null, []), success: false, error };
+                },
+                getSchemaAsync: async () => ({
+                    source: 'db',
+                    tables: [
+                        { name: 'public.Users', type: 'table', columns: [{ name: 'Id', type: 'int', nullable: false }, { name: 'Secret', type: 'text', nullable: true }] },
+                        { name: 'public.OneTimeCodes', type: 'table', columns: [{ name: 'Code', type: 'text', nullable: false }] },
+                    ],
+                }),
+            },
+            opts(o),
+        );
+        return new DataExplorerExecutor(registry).executeAsync({ source: 'db', query: 'SELECT 1' });
+    }
+
+    it('adds the hint on a new line to a failed SQL query (answered or thrown)', async () => {
+        expect((await hinted('relation "users" does not exist')).error).toBe(
+            'relation "users" does not exist\nNames with capital letters need double quotes: "Users"',
+        );
+        expect((await hinted('column "id" does not exist', {}, true)).error).toBe(
+            'column "id" does not exist\nNames with capital letters need double quotes: "Id"',
+        );
+    });
+
+    it('names only tables the source shows and columns it does not drop', async () => {
+        const o = { allowedObjects: ['Users'], dropColumns: ['Secret'] };
+        expect((await hinted('relation "onetimecodes" does not exist', o)).error).toBe('relation "onetimecodes" does not exist');
+        expect((await hinted('column "secret" does not exist', o)).error).toBe('column "secret" does not exist');
+        expect((await hinted('relation "users" does not exist', o)).error).toContain('"Users"');
+    });
+
+    it('leaves sources of other languages alone', async () => {
+        expect((await hinted('relation "users" does not exist', { language: L.Shell, readOnly: false })).error).toBe('relation "users" does not exist');
     });
 });
 

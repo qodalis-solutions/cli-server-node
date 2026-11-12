@@ -70,6 +70,8 @@ export interface AuthServiceOptions {
     apiTokenStore?: ICliApiTokenStore;
     /** Allow API tokens that never expire (default false). */
     allowNonExpiringTokens?: boolean;
+    /** An auth adapter signs users in and they may create API tokens (`apiTokensWithExternalAuth`). */
+    apiTokensWithExternalAuth?: boolean;
     /** The host owns the users (published on session payloads as `usersReadOnly`). */
     usersReadOnly?: boolean;
     /** The host owns the groups (published on session payloads as `groupsReadOnly`). */
@@ -142,6 +144,8 @@ export class AuthService {
     readonly minPasswordLength: number;
     readonly maxSessionLifetimeMs: number;
     readonly allowNonExpiringTokens: boolean;
+    /** Users signed in by the host's auth adapter (no session) may create API tokens. */
+    readonly apiTokensWithExternalAuth: boolean;
     readonly apiTokenStore: ICliApiTokenStore;
     /** The host owns the users: user writes answer 501 (`readOnlyUsers`). */
     readonly usersReadOnly: boolean;
@@ -171,6 +175,7 @@ export class AuthService {
         this.eventBus = options.eventBus;
         this.apiTokenStore = options.apiTokenStore ?? new InMemoryApiTokenStore();
         this.allowNonExpiringTokens = options.allowNonExpiringTokens ?? false;
+        this.apiTokensWithExternalAuth = options.apiTokensWithExternalAuth ?? false;
         this.usersReadOnly = options.usersReadOnly ?? false;
         this.groupsReadOnly = options.groupsReadOnly ?? false;
     }
@@ -643,7 +648,8 @@ export class AuthService {
     }
 
     /**
-     * Creates an API token for the caller (session only). Validates the name
+     * Creates an API token for the caller (a session, or a user signed in by the
+     * auth adapter with `apiTokensWithExternalAuth`; 501 otherwise). Validates the name
      * (400, duplicate 409), the expiry (1-365 days, default 90; `null` only with
      * `allowNonExpiringTokens`), the 20-token limit (400) and the scope (each entry
      * valid, 400, and covered by the caller's permissions, 403).
@@ -652,7 +658,8 @@ export class AuthService {
         if (ctx.apiToken) {
             throw forbidden('forbidden: API tokens cannot create tokens');
         }
-        if (!ctx.session) {
+        // Adapter users have no session: they create tokens only with `apiTokensWithExternalAuth`
+        if (!ctx.session && !this.apiTokensWithExternalAuth) {
             throw new HttpError(501, 'Authentication is managed by the host application');
         }
         const name = body.name;

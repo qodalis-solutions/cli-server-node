@@ -43,6 +43,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
 | `setLinkApprovalUrl(url)` | `/qcli/admin/link` | The page where users approve a terminal's link request (absolute or root-relative; `{code}` is replaced, otherwise `?code=` is appended) |
 | `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
+| `allowApiTokens(bool = true)` | `false` | With an auth adapter, also accept API tokens and terminal links (see [API tokens with an auth adapter](#api-tokens-with-an-auth-adapter)) |
 | `setReadOnlyUsers(bool = true)` | `false` | The host owns the users: user writes answer `501` (see [Read-only stores](#read-only-stores)) |
 | `setReadOnlyGroups(bool = true)` | `false` | The host owns the groups: group writes answer `501` |
 | `setSessionTimeout(ms)` | 30 min | Idle timeout; checked on every request, `lastActivity` slides |
@@ -250,6 +251,23 @@ const usersPlugin = new CliUsersBuilder()
 A user the adapter returns with `disabled: true` is refused (401 `account disabled`) on requests and ticket issuance.
 
 The admin dashboard plugin keeps its own login at `/auth/login`; both plugins can be mounted at the same prefix.
+
+### API tokens with an auth adapter
+
+With an adapter, API tokens are off: `POST /tokens` and `POST /link/code/{code}/approve` (`server add` in the web CLI) answer `501`, and a `qcli_pat_` bearer token goes to the adapter like any other request. `allowApiTokens()` (`apiTokensWithExternalAuth: true`) turns them on next to the host's sign-in:
+
+```typescript
+const usersPlugin = new CliUsersBuilder()
+    .setAuthAdapter(hostAdapter)
+    .setUserStore(new HostUserStore())          // finds the adapter's users by id and reports `disabled`
+    .setApiTokenStore(new PostgresTokenStore()) // persistent: the default store forgets tokens on restart
+    .allowApiTokens()
+    .build(broadcast);
+```
+
+- A `qcli_pat_` bearer token is checked by the token store before the adapter (the adapter never sees it).
+- Users signed in by the host create tokens (`POST /tokens`) and approve terminal links (`POST /link/code/{code}/approve`). An API token still cannot create another token (`403`). The other credential endpoints (login, logout, verify-password, password changes) keep answering `501`.
+- The token's user is read from the user store by id on every request and socket re-check: a user the store reports `disabled` (or no longer finds) gets `401`.
 
 ## Read-only stores
 

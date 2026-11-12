@@ -8,16 +8,20 @@ import {
     DataExplorerLanguage,
     DataExplorerOutputFormat,
     DataExplorerProviderOptions,
+    DataExplorerSchemaResult,
+    IDataExplorerProvider,
 } from '@qodalis/cli-server-abstractions';
 import { DataExplorerRegistry } from './data-explorer-registry';
 import {
     applyColumnPolicy,
     DataExplorerRateLimiter,
     filterListing,
+    filterSchema,
     isReadOnly,
     maskedColumnError,
     maskedResultError,
     missingPermissions,
+    nameCaseHint,
     objectsError,
     readOnlyError,
 } from './data-explorer-policy';
@@ -118,8 +122,27 @@ export class DataExplorerExecutor {
                 : err.message ?? String(err);
             result = this.failure(request.source, options, message, Date.now() - startTime);
         }
+        // A missing table or column that the shown schema has with capitals (SQL sources answer
+        // failures in the result or throw them)
+        if (!result.success && !result.errorCode && result.error && options.language === DataExplorerLanguage.Sql) {
+            const hint = nameCaseHint(result.error, await this.visibleSchema(provider, options));
+            if (hint) result.error = `${result.error.trimEnd()}\n${hint}`;
+        }
         this.audit(request, options, caller, result, Date.now() - startTime);
         return result;
+    }
+
+    /** The source's schema as its callers see it, or undefined when the provider cannot give one. */
+    private async visibleSchema(
+        provider: IDataExplorerProvider,
+        options: DataExplorerProviderOptions,
+    ): Promise<DataExplorerSchemaResult | undefined> {
+        try {
+            const schema = await provider.getSchemaAsync?.(options);
+            return schema ? filterSchema(schema, options) : undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     private refuse(
