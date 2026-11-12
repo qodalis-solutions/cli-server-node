@@ -2,12 +2,12 @@
  * Link requests: a terminal asks to be linked, a signed-in user approves it in a browser
  * (spec: web-cli docs/superpowers/specs/2026-11-12-server-linking-design.md).
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import http from 'http';
 import express from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliUsersBuilder, UsersPluginResult, InMemoryAuditStore } from '../../plugins/users/index';
+import { CliUsersBuilder, UsersPluginResult, InMemoryAuditStore, InMemoryApiTokenStore } from '../../plugins/users/index';
 import {
     LinkService,
     linkTokenName,
@@ -45,6 +45,57 @@ describe('link helpers', () => {
         now += LINK_EXPIRES_IN_SECONDS * 1000;
         expect(links.poll(linkId)).toBeUndefined();
         expect(() => links.view(userCode)).toThrow(/not found/);
+    });
+
+    it('a parallel approval gets 404 and creates no second token', async () => {
+        const names: string[] = [];
+        const authService = {
+            createApiToken: async (_ctx: unknown, { name }: { name: string }) => {
+                names.push(name);
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                return { token: 'qcli_pat_x', apiToken: { id: `t${names.length}`, name, expiresAt: null } };
+            },
+            audit: async () => undefined,
+        };
+        const links = new LinkService(authService as any, '/qcli/admin/link');
+        const { linkId, userCode } = links.create({ client: 'term' });
+        const ctx = { user: { id: 'u1', name: 'root' } } as any;
+        const results = await Promise.allSettled([links.approve(ctx, userCode), links.approve(ctx, userCode)]);
+        expect(names).toHaveLength(1);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+        expect(links.poll(linkId)).toMatchObject({ status: 'approved' });
+    });
+
+    it('a failed approval leaves the request pending', async () => {
+        const authService = { createApiToken: async () => { throw new Error('token limit reached'); } };
+        const links = new LinkService(authService as any, '/qcli/admin/link');
+        const { userCode } = links.create({ client: 'term' });
+        await expect(links.approve({ user: { id: 'u1', name: 'root' } } as any, userCode)).rejects.toThrow(/limit/);
+        expect(links.view(userCode)).toMatchObject({ client: 'term' });
+    });
+
+    it('a request that expires while it is approved answers 404 and revokes the new token', async () => {
+        let now = 1_000_000;
+        const revoked: string[] = [];
+        const events: string[] = [];
+        const authService = {
+            createApiToken: async (_ctx: unknown, { name }: { name: string }) => {
+                now += LINK_EXPIRES_IN_SECONDS * 1000;
+                return { token: 'qcli_pat_x', apiToken: { id: 't1', name, expiresAt: null } };
+            },
+            revokeApiToken: async (_ctx: unknown, id: string) => {
+                revoked.push(id);
+            },
+            audit: async (entry: { event: string }) => {
+                events.push(entry.event);
+            },
+        };
+        const links = new LinkService(authService as any, '/qcli/admin/link', () => now);
+        const { linkId, userCode } = links.create({ client: 'term' });
+        await expect(links.approve({ user: { id: 'u1', name: 'root' } } as any, userCode)).rejects.toThrow(/not found/);
+        expect(revoked).toEqual(['t1']);
+        expect(events).not.toContain('link_approved');
+        expect(links.poll(linkId)).toBeUndefined();
     });
 });
 
@@ -183,6 +234,16 @@ describe('link routes on a protected server', () => {
         expect((await request(app).post(`${V1}/link/code/${second.userCode}/approve`).set(bearer(token))).status).toBe(403);
     });
 
+    it('parallel approvals: one creates a token, the others answer 404', async () => {
+        const { userCode } = (await create({ client: 'parallel term' })).body;
+        const results = await Promise.all(
+            Array.from({ length: 5 }, () => request(app).post(`${V1}/link/code/${userCode}/approve`).set(bearer(ann))),
+        );
+        expect(results.map((r) => r.status).sort()).toEqual([200, 404, 404, 404, 404]);
+        const tokens = (await request(app).get(`${V1}/tokens`).set(bearer(ann))).body;
+        expect(tokens.filter((t: any) => t.name.startsWith('link parallel term'))).toHaveLength(1);
+    });
+
     it('unknown codes and links', async () => {
         expect((await request(app).get(`${V1}/link/code/AAAA-AAAA`).set(bearer(ann))).status).toBe(404);
         expect((await request(app).get(`${V1}/link/nope`)).body).toEqual({ status: 'expired' });
@@ -205,5 +266,48 @@ describe('custom approval page', () => {
         cli.logSocketManager.dispose();
         expect(() => new CliUsersBuilder().setLinkApprovalUrl('javascript:alert(1)')).toThrow();
         expect(() => new CliUsersBuilder().setLinkApprovalUrl('//evil.example.com')).toThrow();
+    });
+});
+
+describe('a link request that expires during the approval', () => {
+    it('revokes the new token: 404, not listed, token_revoked audited, no link_approved', async () => {
+        // The clock the link service reads moves past the request's expiry while the token is created
+        let offset = 0;
+        const realNow = Date.now.bind(Date);
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+        const store = new InMemoryApiTokenStore();
+        const createToken = store.createToken.bind(store);
+        store.createToken = async (token) => {
+            offset += (LINK_EXPIRES_IN_SECONDS + 1) * 1000;
+            return createToken(token);
+        };
+        const audit = new InMemoryAuditStore();
+        const cli = createCliServer({});
+        const users = new CliUsersBuilder()
+            .setDefaultAdminPassword(ROOT_PASS)
+            .setProtectServer(true)
+            .setAuditStore(audit)
+            .setApiTokenStore(store)
+            .build(() => {});
+        try {
+            await users.ready;
+            cli.mountPlugin(users);
+            const root = (await request(cli.app).post(`${V1}/sessions`).send({ username: 'root', password: ROOT_PASS })).body.token;
+            const { linkId, userCode } = (await request(cli.app).post(`${V1}/link`).send({ client: 'late term' })).body;
+            const approve = await request(cli.app).post(`${V1}/link/code/${userCode}/approve`).set('Authorization', `Bearer ${root}`);
+            expect(approve.status).toBe(404);
+            expect(approve.body).toEqual({ error: 'link request not found or expired' });
+            const tokens = (await request(cli.app).get(`${V1}/tokens`).set('Authorization', `Bearer ${root}`)).body;
+            expect(tokens.filter((t: any) => t.name.startsWith('link late term'))).toHaveLength(0);
+            const events = (await audit.getEntries()).map((e) => e.event);
+            expect(events.filter((e) => e === 'token_revoked')).toHaveLength(1);
+            expect(events).not.toContain('link_approved');
+            expect((await request(cli.app).get(`${V1}/link/${linkId}`)).status).toBe(404);
+        } finally {
+            clock.mockRestore();
+            cli.eventSocketManager.dispose();
+            cli.logSocketManager.dispose();
+            users.dispose();
+        }
     });
 });

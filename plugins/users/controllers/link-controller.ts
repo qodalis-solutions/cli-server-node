@@ -20,10 +20,11 @@ export const LINK_CREATE_RATE_LIMIT = 10;
 export function createLinkController(
     links: LinkService,
     authMiddleware: RequestHandler,
-    options: { trustProxy: boolean | number },
+    options: { trustProxy: boolean | number; limiter?: RateLimiter },
 ): Router {
     const router = Router();
-    const limiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
+    // The caller sweeps it (the plugin's cleanup timer), so addresses seen once are not kept forever
+    const limiter = options.limiter ?? new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
 
     router.post('/', asyncHandler(async (req: Request, res: Response) => {
         const ip = clientIp(req, options.trustProxy);
