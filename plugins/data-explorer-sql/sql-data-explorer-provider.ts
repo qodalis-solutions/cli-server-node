@@ -95,6 +95,8 @@ export class SqlDataExplorerProvider implements IDataExplorerProvider {
         const Database = (await import('better-sqlite3')).default;
         const db = new Database(this.connectionOptions.filename ?? ':memory:');
         try {
+            // Read-only sources: SQLite refuses every write on this connection
+            if ((context.options as { readOnly?: boolean }).readOnly !== false) db.pragma('query_only = ON');
             const stmt = db.prepare(context.query);
             if (stmt.reader) {
                 const rows = stmt.all(context.parameters ?? {});

@@ -3,6 +3,11 @@ import { DataExplorerExecutionContext, DataExplorerResult, DataExplorerSchemaRes
 /** Provider that executes queries against a specific data source (e.g. SQL database, MongoDB). */
 export interface IDataExplorerProvider {
     /**
+     * The provider can only read, whatever the query (e.g. a read-only API), so the server
+     * skips its read-only query checks for read-only sources.
+     */
+    readOnlyQueries?: boolean;
+    /**
      * Executes a query against the data source.
      * @param context - Execution context containing the query, parameters, and options.
      * @returns Query results including rows, columns, and execution metadata.

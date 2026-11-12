@@ -19,6 +19,15 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
   `enum` (and parameter examples as `examples`) and refuse other values. The built-in processors and the weather plugin carry examples and documentation
   (`hash --algorithm` its algorithms). Same on the .NET and Python servers (spec: web-cli
   `docs/superpowers/specs/2026-11-12-server-command-metadata-design.md`).
+- **Data explorer: per-source permissions, read-only mode, masking, audit and limits**, the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-12-data-explorer-hardening-design.md`):
+  - **Breaking:** sources are read-only by default. Writes, DDL and several statements are refused before the provider runs
+    (`errorCode: 'read_only'`), and the SQL providers run queries in a read-only transaction. Set `readOnly: false` on a source that must write.
+  - New source options: `requiredPermissions` (403, and the source is hidden from `/sources` and MCP `data_sources`),
+    `allowedObjects` (globs of tables, collections, keys or indices), `maskColumns` (`***`), `dropColumns`, `audit`
+    (default true: a `data_query` audit entry per execute), `rateLimit { maxQueries, windowSeconds }` (429) and `exportPermissions`.
+  - `GET /sources` adds `readOnly` and `canExport`; the schema lists only allowed tables without dropped columns; results carry `errorCode` when refused.
+  - `DataExplorerExecutor.executeAsync(request, caller?)`, `createDataExplorerController(registry, executor, { caller })`; providers that only read can set `readOnlyQueries`.
 
 ## 1.0.0-beta.24
 

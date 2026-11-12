@@ -58,6 +58,66 @@ export interface DataExplorerProviderOptions {
     timeout?: number;
     /** Maximum number of rows to return per query. */
     maxRows?: number;
+    /**
+     * Permissions the caller must hold (all of them, besides `data:query`) to see and use
+     * the source. Ignored on an open server.
+     */
+    requiredPermissions?: string[];
+    /**
+     * Queries may only read (default true): the server checks the query by language and
+     * SQL providers run it in a read-only transaction. Set false for a source that writes.
+     */
+    readOnly?: boolean;
+    /**
+     * Glob patterns (`*`, case-insensitive) of the tables (`schema.table` or `table`),
+     * collections, Redis keys or Elasticsearch indices the source shows and accepts.
+     * Best effort: the database account's permissions are the real boundary.
+     */
+    allowedObjects?: string[];
+    /** Glob patterns of columns/fields whose values are replaced by `***` in results. */
+    maskColumns?: string[];
+    /** Glob patterns of columns/fields removed from results and from the schema. */
+    dropColumns?: string[];
+    /** Write every execute to the audit log when the server has one (default true). */
+    audit?: boolean;
+    /** At most `maxQueries` executes per caller per `windowSeconds` on this source. */
+    rateLimit?: DataExplorerRateLimit;
+    /** Permissions needed to export results (`json`/`csv` output in the web CLI). Advisory. */
+    exportPermissions?: string[];
+}
+
+/** Why the server refused a data explorer query. */
+export type DataExplorerErrorCode = 'forbidden' | 'rate_limited' | 'read_only' | 'object_not_allowed' | 'unknown_source';
+
+/** Rate limit of a data source: at most `maxQueries` per caller per `windowSeconds`. */
+export interface DataExplorerRateLimit {
+    maxQueries: number;
+    windowSeconds: number;
+}
+
+/** Whether a source only reads (`readOnly` defaults to true). */
+export function isReadOnlySource(options: Pick<DataExplorerProviderOptions, 'readOnly'>): boolean {
+    return options.readOnly !== false;
+}
+
+/**
+ * Who runs a data explorer request, as the server knows it. `hasPermission` is absent on an
+ * open server (no auth provider): permission options are then not enforced.
+ */
+export interface DataExplorerCaller {
+    userId?: string;
+    userName?: string;
+    /** The client address, for rate limiting anonymous callers. */
+    remoteAddress?: string;
+    hasPermission?: (permission: string) => boolean;
+}
+
+/** An audit entry the data explorer writes (event `data_query`). */
+export interface DataExplorerAuditEntry {
+    event: string;
+    userId: string;
+    userName: string;
+    metadata: Record<string, unknown>;
 }
 
 /** Context passed to a data explorer provider when executing a query. */
@@ -94,6 +154,11 @@ export interface DataExplorerResult {
     truncated: boolean;
     /** Error message if the query failed, otherwise null. */
     error: string | null;
+    /**
+     * Why the server refused the query, when it did: `forbidden` (missing permission, 403),
+     * `rate_limited` (429), `read_only`, `object_not_allowed`, `unknown_source`.
+     */
+    errorCode?: DataExplorerErrorCode;
 }
 
 /** Request payload for executing a data explorer query. */
@@ -120,6 +185,10 @@ export interface DataExplorerSourceInfo {
     templates: DataExplorerTemplate[];
     /** Accepted parameters. */
     parameters: DataExplorerParameterDescriptor[];
+    /** Queries may only read (servers with data explorer hardening). */
+    readOnly?: boolean;
+    /** The caller may export results (`json`/`csv`); absent on older servers. */
+    canExport?: boolean;
 }
 
 /** Describes a single column within a data explorer schema table. */

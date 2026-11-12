@@ -375,6 +375,8 @@ builder.addDataExplorerProvider(new SqlDataExplorerProvider({ type: 'sqlite', fi
 
 The same provider class can be registered several times under different names. Implement `IDataExplorerProvider` for other sources.
 
+Sources are **read-only by default**: set `readOnly: false` on a source that must write. Per source you can also require permissions (`requiredPermissions`), limit the tables, collections or keys it shows (`allowedObjects`), mask or drop columns (`maskColumns`, `dropColumns`), limit queries per user (`rateLimit`) and gate exports (`exportPermissions`). Every query is written to the audit log as `data_query` unless `audit: false`. See the [data explorer README](plugins/data-explorer/README.md#read-only-sources).
+
 ## Security
 
 When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth`), every `/api/...` route and WebSocket requires a session or an API token; login, version discovery and capabilities stay public.
@@ -386,7 +388,7 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth
 | `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own) |
 | fs `ls` / `cat` / `stat` / `download` | `files:read` |
 | fs `upload` / `mkdir` / `rm` | `files:write` |
-| data explorer | `data:query` |
+| data explorer | `data:query` plus the source's `requiredPermissions` |
 | jobs read / manage | `jobs:read` / `jobs:manage` |
 | events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
 | admin dashboard | `admin:access` |

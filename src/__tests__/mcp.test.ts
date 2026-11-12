@@ -557,7 +557,7 @@ describe('MCP: tool providers', () => {
                 b.addDataExplorerProvider(
                     {
                         executeAsync: async (ctx) => {
-                            if (ctx.query === 'bad') throw new Error('syntax error');
+                            if (ctx.query === 'SELECT bad') throw new Error('syntax error');
                             return {
                                 success: true, source: 'mem', language: DataExplorerLanguage.Sql, defaultOutputFormat: DataExplorerOutputFormat.Table,
                                 executionTime: 1, columns: ['id', 'name'], rows: [[1, 'a'], [2, 'b'], [3, 'c']], rowCount: 3, truncated: false,
@@ -576,7 +576,7 @@ describe('MCP: tool providers', () => {
         const q = await call(s.app, 'data_query', { source: 'mem', query: 'select', parameters: { a: 1 } });
         expect(q.result.isError).toBe(false);
         expect(q.result.content[0].text).toBe('id | name\n1 | a\n2 | b\n(2 rows, truncated)'); // maxRows applied
-        const bad = await call(s.app, 'data_query', { source: 'mem', query: 'bad' });
+        const bad = await call(s.app, 'data_query', { source: 'mem', query: 'SELECT bad' });
         expect(bad.result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'syntax error' }] });
     });
 
@@ -740,7 +740,7 @@ describe('MCP: authentication', () => {
         const a = await names(analyst);
         expect(a).toEqual(expect.arrayContaining(['data_sources', 'data_schema', 'data_query', 'jobs_list', 'jobs_get', 'jobs_history']));
         expect(a).not.toContain('jobs_trigger');
-        expect((await call(s.app, 'data_query', { source: 'mem', query: 'q' }, bearer(analyst))).result.content[0].text).toBe('x\n1\n(1 row)');
+        expect((await call(s.app, 'data_query', { source: 'mem', query: 'SELECT 1' }, bearer(analyst))).result.content[0].text).toBe('x\n1\n(1 row)');
         expect((await call(s.app, 'jobs_trigger', { id: 'x' }, bearer(analyst))).error.code).toBe(-32602);
 
         const r = await names(root);
