@@ -3,7 +3,9 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
-## Unreleased
+## 1.0.0-beta.25
+
+- The admin plugin embeds dashboard 1.0.0-beta.20: job tags, command metadata, the terminal link page, API tokens, a data explorer page and audit details.
 
 - **Jobs: tags.** `tags` on a job (`CliJobOptions.tags`: free-form labels such as `country:ro`, `bank`; each 1-64
   characters without commas, at most 20, duplicates ignoring case dropped), always present in job info (`[]` when
