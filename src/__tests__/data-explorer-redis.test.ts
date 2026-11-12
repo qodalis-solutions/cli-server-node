@@ -122,6 +122,14 @@ describe('RedisDataExplorerProvider', () => {
         expect(result.rows[0]).toEqual(['mykey', 'hello']);
     });
 
+    it('should split arguments at any whitespace, as the allowed-keys check does', async () => {
+        mockCall.mockResolvedValueOnce(['1', '2']);
+
+        await provider.executeAsync(makeContext('MGET a\nb\rc'));
+
+        expect(mockCall).toHaveBeenCalledWith('MGET', 'a', 'b', 'c');
+    });
+
     it('should parse arguments with double-quoted strings', async () => {
         mockCall.mockResolvedValueOnce('OK');
 

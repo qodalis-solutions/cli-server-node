@@ -18,6 +18,8 @@ export {
     sqlObjects,
     isObjectAllowed,
     objectsError,
+    maskedColumnError,
+    maskedResultError,
     applyColumnPolicy,
     filterSchema,
     filterListing,

@@ -23,6 +23,18 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
   (spec: web-cli `docs/superpowers/specs/2026-11-12-data-explorer-hardening-design.md`):
   - **Breaking:** sources are read-only by default. Writes, DDL and several statements are refused before the provider runs
     (`errorCode: 'read_only'`), and the SQL providers run queries in a read-only transaction. Set `readOnly: false` on a source that must write.
+    The SQL check reads quotes and comments as MySQL (`--` before a space, `#`, `/*! ... */`, `"..."` strings), Postgres
+    (`E'...'`, `$$...$$`, nested comments), SQL Server (nested comments, `[...]`) and SQLite each do, and a query must
+    pass under every reading, so a quote or comment one database skips cannot hide a statement another runs. The Postgres
+    provider runs one statement per query. `COMMIT`, `ROLLBACK` and `DENY` count as writes, and a lone carriage return is refused.
+  - `allowedObjects` reads every item of a SQL `FROM`/`USING` list, `db..table`, `DESCRIBE`/`EXPLAIN <table>`, CTE names only in
+    their scope, the collections of MongoDB `$lookup`/`$graphLookup`/`$unionWith`/`$out`/`$merge` (JSON escapes decoded) and
+    Elasticsearch indices named in the body; Elasticsearch `POST …/_search` is a read only after index names (the path is
+    cut at `?` and `#`); Redis keys are split as the provider splits them. JSON text in results is masked like a document.
+  - On SQL sources with `maskColumns` or `dropColumns`, those columns can only be selected by their own name (a plain
+    item of the outer select list, or `*`): aliases, expressions, filters, sorts, subqueries, set operations, Postgres
+    whole-row values and `U&"..."` names are refused before the query runs (`errorCode: 'masked_column'`, `Masked column
+    'email' can only be selected by its own name`), and a result that returns such a column under another name is withheld.
   - New source options: `requiredPermissions` (403, and the source is hidden from `/sources` and MCP `data_sources`),
     `allowedObjects` (globs of tables, collections, keys or indices), `maskColumns` (`***`), `dropColumns`, `audit`
     (default true: a `data_query` audit entry per execute), `rateLimit { maxQueries, windowSeconds }` (429) and `exportPermissions`.

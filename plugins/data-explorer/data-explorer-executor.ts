@@ -15,6 +15,8 @@ import {
     DataExplorerRateLimiter,
     filterListing,
     isReadOnly,
+    maskedColumnError,
+    maskedResultError,
     missingPermissions,
     objectsError,
     readOnlyError,
@@ -33,8 +35,8 @@ export interface DataExplorerExecutorOptions {
 export const AUDIT_QUERY_MAX_LENGTH = 2000;
 
 /**
- * Executes data explorer queries: the source's permissions, rate limit, read-only rules and
- * allowed objects first, then the provider with a timeout, then the row limit, column masking
+ * Executes data explorer queries: the source's permissions, rate limit, read-only rules,
+ * allowed objects and masked columns first, then the provider with a timeout, then the row limit, column masking
  * and the audit entry.
  */
 export class DataExplorerExecutor {
@@ -76,6 +78,8 @@ export class DataExplorerExecutor {
         }
         const objects = objectsError(options, request.query);
         if (objects) return this.refuse(request, options, caller, objects, 'object_not_allowed');
+        const masked = maskedColumnError(options, request.query);
+        if (masked) return this.refuse(request, options, caller, masked, 'masked_column');
 
         const timeoutMs = options.timeout ?? 30000;
         const abortController = new AbortController();
@@ -99,7 +103,11 @@ export class DataExplorerExecutor {
                 result.rowCount = result.rows.length;
                 result.truncated = true;
             }
-            if (result.success) {
+            const maskedResult = result.success ? maskedResultError(options, request.query, result.columns) : undefined;
+            if (maskedResult) {
+                // A masked column came back under another name: withhold the rows
+                result = this.failure(request.source, options, maskedResult, Date.now() - startTime, 'masked_column');
+            } else if (result.success) {
                 filterListing(result, options, request.query);
                 applyColumnPolicy(result, options);
             }

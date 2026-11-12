@@ -627,24 +627,39 @@ describe('SQL providers on read-only sources', () => {
         mockMssqlPoolClose.mockResolvedValue(undefined);
     });
 
-    it('Postgres runs the query in BEGIN READ ONLY and rolls back', async () => {
+    it('Postgres runs the query in BEGIN READ ONLY, one statement (extended protocol), and rolls back', async () => {
         mockPgQuery.mockResolvedValue({ fields: [{ name: 'id' }], rows: [{ id: 1 }] });
         const provider = new PostgresDataExplorerProvider({ connectionString: 'postgresql://x' });
         const result = await provider.executeAsync(readOnlyContext('SELECT 1 AS id'));
         expect(result.success).toBe(true);
-        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual(['BEGIN READ ONLY', 'SELECT 1 AS id', 'ROLLBACK']);
+        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual([
+            'BEGIN READ ONLY',
+            { text: 'SELECT 1 AS id', queryMode: 'extended' },
+            'ROLLBACK',
+        ]);
     });
 
     it('Postgres rolls back when the query fails', async () => {
-        mockPgQuery.mockImplementation(async (q: string) => {
-            if (q.startsWith('DELETE')) throw new Error('cannot execute DELETE in a read-only transaction');
+        mockPgQuery.mockImplementation(async (q: string | { text: string }) => {
+            if ((typeof q === 'string' ? q : q.text).startsWith('DELETE')) throw new Error('cannot execute DELETE in a read-only transaction');
             return { fields: [], rows: [] };
         });
         const provider = new PostgresDataExplorerProvider({ connectionString: 'postgresql://x' });
         const result = await provider.executeAsync(readOnlyContext('DELETE FROM t'));
         expect(result.success).toBe(false);
         expect(result.error).toContain('read-only transaction');
-        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual(['BEGIN READ ONLY', 'DELETE FROM t', 'ROLLBACK']);
+        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual([
+            'BEGIN READ ONLY',
+            { text: 'DELETE FROM t', queryMode: 'extended' },
+            'ROLLBACK',
+        ]);
+    });
+
+    it('Postgres runs queries of writable sources as one statement too', async () => {
+        mockPgQuery.mockResolvedValue({ fields: [], rows: [] });
+        const provider = new PostgresDataExplorerProvider({ connectionString: 'postgresql://x' });
+        await provider.executeAsync(makeContext('UPDATE t SET a = 1'));
+        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual([{ text: 'UPDATE t SET a = 1', queryMode: 'extended' }]);
     });
 
     it('MySQL runs the query in START TRANSACTION READ ONLY and rolls back', async () => {

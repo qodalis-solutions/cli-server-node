@@ -26,6 +26,8 @@ import {
     filterSchema,
     isObjectAllowed,
     MASK,
+    maskedColumnError,
+    maskedResultError,
     objectsError,
     readOnlyError,
     sqlObjects,
@@ -91,6 +93,10 @@ describe('read-only rules', () => {
             'SHOW TABLES',
             "SELECT 'it''s'",
             'SELECT 1 # trailing MySQL comment',
+            "SELECT E'it\\'s' AS s",
+            'SELECT "a""b", [c]]d], `e``f` FROM t',
+            'SELECT 1 /* a /* nested */ b */',
+            'SELECT $1::int',
         ]) {
             expect(readOnlyError(L.Sql, q), q).toBeUndefined();
         }
@@ -110,6 +116,15 @@ describe('read-only rules', () => {
             'SELECT * FROM #t; DROP TABLE users',
             // $$ quotes only in Postgres
             'SELECT $$; DROP TABLE users; $$',
+            // MySQL: `--` needs a space (`1 --1` is 1 - -1), /*! ... */ runs, "..." is a string
+            'SELECT 1 --1; COMMIT; DELETE FROM users',
+            "SELECT 1 /*! INTO OUTFILE '/tmp/x' */",
+            'SELECT "\\"" INTO OUTFILE \'/tmp/f\' -- "',
+            // Postgres and SQL Server comments nest; SQL Server escapes ] as ]]
+            "SELECT 1 /* /* */ ' */ COMMIT DROP TABLE users --'",
+            "SELECT [x]]'] , 1 DROP TABLE users --'",
+            // # is a comment only in MySQL
+            'SELECT 1 # x\n; DROP TABLE users',
         ]) {
             expect(readOnlyError(L.Sql, q), q).toBeDefined();
         }
@@ -152,6 +167,10 @@ describe('read-only rules', () => {
 describe('allowed objects', () => {
     it('reads the tables a SQL query names', () => {
         expect(sqlObjects('SELECT * FROM public.users u JOIN orders o ON o.uid = u.id').sort()).toEqual(['orders', 'public.users']);
+        expect(sqlObjects('SELECT * FROM "Users", [dbo].[orders]')).toEqual(['Users', 'dbo.orders']);
+        // Read as each dialect reads its comments and brackets
+        expect(sqlObjects("SELECT * FROM allowed /* /* */ ' */ , secret --'")).toContain('secret');
+        expect(sqlObjects('SELECT arr[(SELECT 1 FROM secret)] FROM allowed')).toContain('secret');
     });
 
     it('matches qualified and unqualified patterns', () => {
@@ -167,6 +186,33 @@ describe('allowed objects', () => {
         expect(objectsError(o, 'SELECT * FROM users JOIN secrets ON 1=1')).toContain("'secrets'");
         expect(objectsError(opts({ language: L.Redis, allowedObjects: ['rates:*'] }), 'GET session:1')).toContain('session:1');
         expect(objectsError(opts({ language: L.Shell, allowedObjects: ['users'] }), 'db.secrets.find()')).toContain('secrets');
+    });
+
+    it('sees through quotes and comments the way MySQL and Postgres read them', () => {
+        const o = opts({ allowedObjects: ['users'] });
+        for (const q of [
+            // MySQL: `$x$` is an identifier, `\'` an escape
+            "SELECT 1 $x$, '\\'' a FROM secrets WHERE ''='' -- $x$",
+            // Postgres: a backslash is no escape, `$x$` a quote
+            "SELECT '\\', $x$ ' $x$ FROM secrets -- '",
+            "SELECT $a1$ ' $a1$ FROM secrets -- '",
+            "SELECT E'\\'' FROM secrets -- '",
+            // Postgres: `#` is an operator, `[` a subscript
+            'SELECT 1 # 2 FROM secrets',
+            "SELECT (ARRAY[1,2])[(SELECT length(']'))] FROM secrets",
+            // MySQL: `"…"` is a string with escapes, `#'` a comment, `--1` no comment, `/*! … */` runs
+            'SELECT "\\"" a FROM secrets WHERE ""=""',
+            "SELECT 1 #'\n FROM secrets -- '",
+            'SELECT a--1, b FROM secrets',
+            'SELECT 1 /*! FROM secrets */',
+        ]) {
+            expect(objectsError(o, q), q).toContain("'secrets'");
+            expect(readOnlyError(L.Sql, q.replace('FROM secrets', 'FROM secrets; DELETE FROM users')), q).toBeDefined();
+        }
+        for (const q of ["SELECT $$ a ' b $$ FROM users", 'SELECT `name` FROM `users` WHERE x = "a"', 'SELECT * FROM [dbo].[users]']) {
+            expect(objectsError(o, q), q).toBeUndefined();
+            expect(readOnlyError(L.Sql, q), q).toBeUndefined();
+        }
     });
 
     it('filters the schema: allowed tables, no dropped columns', () => {
@@ -195,6 +241,175 @@ describe('allowed objects', () => {
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
+
+describe('rules shared with the .NET server', () => {
+    const exposesSecret = (q: string) => sqlObjects(q).some((o) => o.split('.').pop() === 'secret');
+
+    it('SQL tokenizer: dollar tags, Unicode names, lone carriage returns, COMMIT/ROLLBACK/DENY', () => {
+        for (const q of [
+            "SELECT $a1$ ' $a1$; DELETE FROM users; -- '",
+            'SELECT 1 --x\r; DELETE FROM users',
+            'SELECT 1 COMMIT',
+            'SELECT 1 ROLLBACK',
+            "SELECT 1 /* /* */ ' */ COMMIT DROP TABLE users --'",
+            'SELECT 1 DENY SELECT ON users TO public',
+        ]) {
+            expect(readOnlyError(L.Sql, q), JSON.stringify(q)).toBeDefined();
+        }
+        expect(readOnlyError(L.Sql, 'SELECT 1 --x\r; DELETE FROM users')).toBe('Read-only source: end lines with \\n or \\r\\n');
+        expect(readOnlyError(L.Sql, 'SELECT 1 COMMIT')).toBe('Read-only source: COMMIT is not allowed');
+        for (const q of ['SELECT $1::int', 'SELECT café FROM t', 'SELECT 1\r\nFROM t']) {
+            expect(readOnlyError(L.Sql, q), JSON.stringify(q)).toBeUndefined();
+        }
+        expect(exposesSecret("SELECT $a1$ ' $a1$ FROM secret -- '")).toBe(true);
+        expect(sqlObjects('SELECT * FROM état')).toContain('état');
+        expect(objectsError(opts({ allowedObjects: ['t'] }), 'SELECT 1\rFROM t')).toBe(
+            'This source only accepts queries that name the objects they read',
+        );
+    });
+
+    it('SQL allowed objects: FROM and USING lists, CTE scope, db..table, DESCRIBE and EXPLAIN', () => {
+        for (const q of [
+            'SELECT * FROM (SELECT 1) a, secret',
+            'SELECT * FROM allowed a, generate_series(1, 2) g, secret',
+            'DELETE FROM allowed USING secret WHERE 1=1',
+            'SELECT * FROM allowed WHERE EXISTS (WITH secret AS (SELECT 1) SELECT 1) UNION SELECT * FROM secret',
+            'SELECT * FROM allowed..secret',
+            'DESCRIBE secret',
+            'EXPLAIN secret',
+        ]) {
+            expect(exposesSecret(q), q).toBe(true);
+            expect(objectsError(opts({ allowedObjects: ['allowed'] }), q), q).toBeDefined();
+        }
+        expect(sqlObjects('SELECT EXTRACT(YEAR FROM day) AS y')).toEqual([]);
+        expect(sqlObjects('WITH recent AS (SELECT * FROM users) SELECT * FROM recent')).toEqual(['users']);
+        expect(sqlObjects('EXPLAIN ANALYZE SELECT 1')).toEqual([]);
+        expect(sqlObjects('SELECT * FROM "sec""ret"')).toEqual(['sec"ret']);
+    });
+
+    it('MongoDB: JSON escapes and the collections pipeline stages read', () => {
+        expect(readOnlyError(L.Shell, 'db.users.aggregate([{ "\\u0024out": "x" }])')).toBe('Read-only source: $out and $merge are not allowed');
+        const o = opts({ language: L.Shell, allowedObjects: ['users'] });
+        expect(objectsError(o, 'db.users.aggregate([{ $match: {} }])')).toBeUndefined();
+        for (const q of [
+            'db.users.aggregate([{ $lookup: { from: "secret", localField: "a", foreignField: "b", as: "s" } }])',
+            'db.users.aggregate([{ "$unionWith": "secret" }])',
+            'db.users.aggregate([{ "$unionWith": { "coll": "secret" } }])',
+            'db.users.aggregate([{ "\\u0024lookup": { "from": "secret" } }])',
+            'db.users.aggregate([{ $graphLookup: { from: "secret", startWith: "$a", connectFromField: "a", connectToField: "b", as: "s" } }])',
+        ]) {
+            expect(objectsError(o, q), q).toBe("'secret' is not available on this source");
+        }
+        expect(objectsError(o, 'db.users.aggregate([{ $lookup: { from: name, as: "s" } }])')).toBe(
+            'This source only accepts queries that name the objects they read',
+        );
+    });
+
+    it('Elasticsearch: reads, bare paths and indices', () => {
+        for (const q of ['GET /logs/_search', 'POST /logs/_search\n{}', 'POST /_all/_search\n{}', 'POST /logs/_validate/query\n{}']) {
+            expect(readOnlyError(L.Elasticsearch, q), q).toBeUndefined();
+        }
+        for (const q of ['DELETE /logs', 'POST /logs/_doc\n{}', 'POST /logs/_delete_by_query#/_search\n{}', 'POST /logs/_doc/_search\n{}']) {
+            expect(readOnlyError(L.Elasticsearch, q), q).toBeDefined();
+        }
+        expect(readOnlyError(L.Elasticsearch, 'POST /logs/_delete_by_query#/_search\n{}')).toBe(
+            'Read-only source: POST /logs/_delete_by_query is not allowed',
+        );
+        const o = opts({ language: L.Elasticsearch, allowedObjects: ['logs'] });
+        expect(objectsError(o, 'POST /logs/_search\n{"query":{"match_all":{}}}')).toBeUndefined();
+        expect(objectsError(o, 'POST /logs/_msearch\n{"index":"secret"}\n{}')).toBe(
+            'This source only accepts queries that name the objects they read',
+        );
+        expect(objectsError(opts({ language: L.Elasticsearch, allowedObjects: ['metrics-*'] }), 'GET /logs/_search')).toContain('logs');
+    });
+
+    it('Redis: words split as the provider splits them', () => {
+        expect(objectsError(opts({ language: L.Redis, allowedObjects: ['rates:usd'] }), 'GET rates:usd')).toBeUndefined();
+        expect(objectsError(opts({ language: L.Redis, allowedObjects: ['rates:usd'] }), "GET 'rates:usd'x")).toContain('rates:usdx');
+        // A newline separates words, in the check and in the provider alike
+        expect(objectsError(opts({ language: L.Redis, allowedObjects: ['rates:usd'] }), 'MGET rates:usd\nsecret')).toContain('secret');
+        const o = opts({ language: L.Redis, allowedObjects: ['rates:*'] });
+        expect(objectsError(o, 'GET session:1')).toContain('session:1');
+        expect(objectsError(o, 'SCAN 0')).toBe('This source only accepts queries that name the objects they read');
+        expect(readOnlyError(L.Redis, '')).toBe('Read-only source: this command is not allowed');
+    });
+
+    it('masks JSON text like a document', () => {
+        const o = opts({ maskColumns: ['email'], dropColumns: ['pass*'] });
+        const res = applyColumnPolicy(
+            result(['response'], [['{"_source":{"email":"a@x.io","password":"h","id":1}}'], ['[not json']]),
+            o,
+        );
+        expect(res.rows).toEqual([['{"_source":{"email":"***","id":1}}'], ['[not json']]);
+    });
+});
+
+describe('masked columns', () => {
+    const o = opts({ maskColumns: ['email', '*phone*'], dropColumns: ['password_hash'] });
+
+    it('allows masked columns as plain items of the select list', () => {
+        for (const q of [
+            'SELECT * FROM users',
+            'SELECT email FROM users',
+            'SELECT DISTINCT u.email, name FROM users u',
+            'SELECT TOP 5 email FROM users',
+            'SELECT password_hash FROM users;',
+            'SELECT * FROM phones',
+            'SELECT p.number FROM phones AS p',
+            'WITH x AS (SELECT 1 AS a) SELECT a FROM x',
+        ]) {
+            expect(maskedColumnError(o, q), q).toBeUndefined();
+        }
+    });
+
+    it('refuses every other use', () => {
+        for (const q of [
+            'SELECT email AS e FROM users',
+            'SELECT email e FROM users',
+            'SELECT upper(email) FROM users',
+            "SELECT email || '' FROM users",
+            "SELECT id FROM users WHERE email = 'a@x.io'",
+            "SELECT * FROM users u WHERE u.email LIKE 'a%'",
+            'SELECT * FROM users ORDER BY email',
+            'SELECT name AS email, email AS name FROM users',
+            'SELECT id FROM t UNION SELECT email FROM users',
+            'SELECT (SELECT email FROM users LIMIT 1)',
+            "SELECT CASE WHEN home_phone LIKE '5%' THEN 1 END FROM users",
+            'SELECT password_hash AS h FROM users',
+            // Under the MySQL reading the # comment hides nothing: the alias counts
+            'SELECT email # x\nAS e FROM users',
+        ]) {
+            expect(maskedColumnError(o, q), q).toContain('can only be selected by its own name');
+        }
+        expect(maskedColumnError(o, 'SELECT email AS e FROM users')).toBe("Masked column 'email' can only be selected by its own name");
+    });
+
+    it('refuses whole rows and Unicode-escaped names', () => {
+        for (const q of [
+            'SELECT u FROM users u',
+            'SELECT row_to_json(u) FROM users AS u',
+            "SELECT * FROM users WHERE users::text LIKE '%@%'",
+            'WITH x AS (SELECT * FROM users) SELECT x FROM x',
+        ]) {
+            expect(maskedColumnError(o, q), q).toContain('is a whole row');
+        }
+        expect(maskedColumnError(o, 'SELECT u FROM users u')).toBe("'u' is a whole row and this source masks columns: select its columns by name");
+        expect(maskedColumnError(o, 'SELECT U&"\\0065mail" AS e FROM users')).toBe(
+            'This source masks columns: write names without Unicode escapes (U&"...")',
+        );
+    });
+
+    it('applies to SQL sources with a mask or drop policy only', () => {
+        expect(maskedColumnError(opts(), 'SELECT email AS e FROM users')).toBeUndefined();
+        expect(maskedColumnError(opts({ language: L.Shell, maskColumns: ['email'] }), "db.users.find({email: 'a'})")).toBeUndefined();
+    });
+
+    it('needs the result to carry a selected masked column under its own name', () => {
+        expect(maskedResultError(o, 'SELECT email FROM users', ['EMAIL'])).toBeUndefined();
+        expect(maskedResultError(o, 'SELECT email FROM users FOR JSON PATH', ['JSON_F52E'])).toBeDefined();
+        expect(maskedResultError(o, 'SELECT * FROM users', ['x'])).toBeUndefined();
+    });
+});
 
 describe('DataExplorerExecutor', () => {
     function setup(o: Partial<DataExplorerProviderOptions>, now?: () => number) {
@@ -254,6 +469,16 @@ describe('DataExplorerExecutor', () => {
         expect((await run('a')).success).toBe(true);
     });
 
+    it('forgets callers whose window has passed once many are tracked', () => {
+        let t = 0;
+        const limiter = new DataExplorerRateLimiter(() => t);
+        const o = opts({ rateLimit: { maxQueries: 1, windowSeconds: 1 } });
+        for (let i = 0; i < 10_000; i++) limiter.tryAcquire(o, { remoteAddress: `10.0.${i >> 8}.${i & 255}` });
+        t = 2_000;
+        limiter.tryAcquire(o, { remoteAddress: '10.1.0.1' });
+        expect((limiter as any).hits.size).toBe(1);
+    });
+
     it('masks columns and audits every query, refusals included', async () => {
         const { executor, audit } = setup({ maskColumns: ['email'], dropColumns: ['password'] });
         const res = await executor.executeAsync({ source: 'db', query: 'SELECT * FROM users' }, { userId: 'u1', userName: 'ann', remoteAddress: '10.0.0.1' });
@@ -268,6 +493,22 @@ describe('DataExplorerExecutor', () => {
             metadata: { source: 'db', query: 'SELECT * FROM users', success: true, rowCount: 1, remoteAddress: '10.0.0.1' },
         });
         expect(audit[1].metadata).toMatchObject({ success: false, error: expect.stringContaining('Read-only') });
+    });
+
+    it('refuses masked columns under another name before the provider runs, and audits it', async () => {
+        const { executor, audit, executeAsync } = setup({ maskColumns: ['email'] });
+        const res = await executor.executeAsync({ source: 'db', query: 'SELECT email AS e FROM users' }, { userId: 'u1' });
+        expect(res).toMatchObject({ success: false, errorCode: 'masked_column', error: "Masked column 'email' can only be selected by its own name" });
+        expect(executeAsync).not.toHaveBeenCalled();
+        expect(audit[0].metadata.error).toBe(res.error);
+    });
+
+    it('withholds rows that bring a masked column back under another name', async () => {
+        const registry = new DataExplorerRegistry();
+        registry.register(provider(() => result(['JSON_F52E'], [['[{"email":"a@x.io"}]']])).provider, opts({ maskColumns: ['email'] }));
+        const executor = new DataExplorerExecutor(registry);
+        const res = await executor.executeAsync({ source: 'db', query: 'SELECT email FROM users FOR JSON PATH' });
+        expect(res).toMatchObject({ success: false, rows: [], errorCode: 'masked_column' });
     });
 
     it('truncates long queries in the audit and skips sources with audit: false', async () => {

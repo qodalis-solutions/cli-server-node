@@ -38,7 +38,8 @@ function parseCommandArgs(input: string): string[] {
             }
         } else if (ch === '"' || ch === "'") {
             inQuote = ch;
-        } else if (ch === ' ' || ch === '\t') {
+        } else if (/\s/.test(ch)) {
+            // Any whitespace, as the data explorer's allowed-keys check splits it
             if (current.length > 0) {
                 args.push(current);
                 current = '';
