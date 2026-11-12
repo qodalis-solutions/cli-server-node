@@ -25,7 +25,7 @@ import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
 import { createTokensController } from './controllers/tokens-controller';
-import { createLinkController } from './controllers/link-controller';
+import { createLinkController, LINK_CREATE_RATE_LIMIT } from './controllers/link-controller';
 import { DEFAULT_LINK_APPROVAL_URL, LinkService } from './services/link-service';
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
@@ -379,12 +379,14 @@ export class CliUsersBuilder {
         router.use('/audit', auditPlugin.router);
         router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
-        router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy }));
+        const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
+        router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy, limiter: linkLimiter }));
         router.use(scoped, errorHandler);
 
         const cleanupInterval = setInterval(() => {
             ipLimiter.sweep();
             linkService.sweep();
+            linkLimiter.sweep();
             authService.sweepLockouts();
             authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
         }, options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS);

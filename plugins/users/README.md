@@ -195,7 +195,7 @@ claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header
 2. The user opens the page, signs in, compares the code and approves. Approving creates an API token for that user named `link <client>`, with the requested permissions (never more than the user has), listed and revocable like any token.
 3. The terminal polls `GET /link/:linkId` every `interval` seconds and receives the token once.
 
-Requests expire after 10 minutes, are single-use and live in memory. Approvals and denials are audited (`link_approved`, `link_denied`). Hosts with their own page set `setLinkApprovalUrl`.
+Requests expire after 10 minutes, are single-use and live in memory; a request that expires while it is approved answers 404 and its new token is revoked. Approvals and denials are audited (`link_approved`, `link_denied`). Hosts with their own page set `setLinkApprovalUrl`.
 
 ## Custom storage
 

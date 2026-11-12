@@ -22,7 +22,7 @@ const CODE_LENGTH = 8;
 const MAX_CLIENT_LENGTH = 100;
 const TOKEN_NAME_MAX = 64;
 
-type LinkStatus = 'pending' | 'approved' | 'denied';
+type LinkStatus = 'pending' | 'approving' | 'approved' | 'denied';
 
 interface LinkRequest {
     linkId: string;
@@ -197,19 +197,31 @@ export class LinkService {
     async approve(ctx: AuthContext, userCode: string): Promise<{ tokenId: string; tokenName: string }> {
         const link = this.findPending(userCode);
         if (!link) throw notFound('link request not found or expired');
+        // Claimed before the token exists, so a parallel approval or deny gets 404
+        // instead of leaving a second token behind
+        link.status = 'approving';
         let created: Awaited<ReturnType<AuthService['createApiToken']>> | undefined;
-        for (let suffix = 0; !created; suffix++) {
-            try {
-                created = await this.authService.createApiToken(ctx, {
-                    name: linkTokenName(link.client, suffix),
-                    ...(link.permissions ? { permissions: link.permissions } : {}),
-                });
-            } catch (err) {
-                if (!(err instanceof HttpError && err.status === 409) || suffix >= 20) throw err;
+        try {
+            for (let suffix = 0; !created; suffix++) {
+                try {
+                    created = await this.authService.createApiToken(ctx, {
+                        name: linkTokenName(link.client, suffix),
+                        ...(link.permissions ? { permissions: link.permissions } : {}),
+                    });
+                } catch (err) {
+                    if (!(err instanceof HttpError && err.status === 409) || suffix >= 20) throw err;
+                }
             }
+        } catch (err) {
+            // Another approver (with the permissions, or a free token slot) can still approve it
+            link.status = 'pending';
+            throw err;
         }
-        // Approved while the request was waiting: it may have been approved twice in parallel
-        if (link.status !== 'pending' || !this.links.has(link.linkId)) {
+        // Expired (or dropped by the cap) while the token was created: no terminal can collect it,
+        // so the token goes again, as an ordinary revocation (audited, token:revoked)
+        this.sweep();
+        if (!this.links.has(link.linkId)) {
+            await this.authService.revokeApiToken(ctx, created.apiToken.id, false);
             throw notFound('link request not found or expired');
         }
         link.status = 'approved';
