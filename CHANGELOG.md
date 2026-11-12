@@ -40,6 +40,12 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
     (default true: a `data_query` audit entry per execute), `rateLimit { maxQueries, windowSeconds }` (429) and `exportPermissions`.
   - `GET /sources` adds `readOnly` and `canExport`; the schema lists only allowed tables without dropped columns; results carry `errorCode` when refused.
   - `DataExplorerExecutor.executeAsync(request, caller?)`, `createDataExplorerController(registry, executor, { caller })`; providers that only read can set `readOnlyQueries`.
+- **Link a terminal through the browser** (users plugin), the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-12-server-linking-design.md`): `POST /api/v1/qcli/link` (public,
+  rate limited) returns a code and the approval page, `GET /link/{linkId}` hands the terminal its API token once the
+  user approved at `/qcli/admin/link?code=…` (`GET /link/code/{code}`, `POST …/approve`, `POST …/deny`). The token is
+  the approver's, named `link <client>`, scoped to the requested permissions. `setLinkApprovalUrl` points to a host's
+  own page; `link_approved` and `link_denied` are audited.
 
 ## 1.0.0-beta.24
 
