@@ -36,7 +36,7 @@ export interface UsersServerAttachment {
     serverOptions?: { externalAuthentication: boolean };
 }
 
-const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens)(\/.*)?$/;
+const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens|link)(\/.*)?$/;
 
 /**
  * The users plugin as the CLI server's auth provider (implements

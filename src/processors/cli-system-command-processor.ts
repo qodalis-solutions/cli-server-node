@@ -8,6 +8,11 @@ const startTime = Date.now();
 export class CliSystemCommandProcessor extends CliCommandProcessor {
     command = 'system';
     description = 'Shows server system information';
+    examples = [
+        { command: 'system', description: 'Operating system, CPU and memory of the server' },
+    ];
+    documentation =
+        'Shows the operating system, CPU, memory and runtime of the machine the server runs on.';
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
         const uptimeSecs = Math.floor((Date.now() - startTime) / 1000);

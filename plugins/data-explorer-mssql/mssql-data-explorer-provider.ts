@@ -31,7 +31,20 @@ export class MssqlDataExplorerProvider implements IDataExplorerProvider {
         let pool: sql.ConnectionPool | null = null;
         try {
             pool = await sql.connect(this.connectionOptions.connectionString);
-            const result = await pool.request().query(context.query);
+            // Read-only sources (the default): SQL Server has no read-only transaction, so the
+            // query runs in a transaction that is always rolled back
+            let result: sql.IResult<any>;
+            if ((context.options as { readOnly?: boolean }).readOnly !== false) {
+                const transaction = new sql.Transaction(pool);
+                await transaction.begin();
+                try {
+                    result = await new sql.Request(transaction).query(context.query);
+                } finally {
+                    await transaction.rollback().catch(() => undefined);
+                }
+            } else {
+                result = await pool.request().query(context.query);
+            }
 
             const recordset = result.recordset ?? [];
             const columns =

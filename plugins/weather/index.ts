@@ -82,12 +82,17 @@ const locationParam: ICliCommandParameterDescriptor = new CliCommandParameterDes
     'string',
     ['-l'],
     'London',
+    undefined,
+    ['Paris', 'New York'],
 );
 
 /** Processor for the `weather current` sub-command. */
 class WeatherCurrentProcessor extends CliCommandProcessor {
     command = 'current';
     description = 'Shows current weather conditions';
+    examples = [
+        { command: 'weather current Berlin', description: 'Current weather in Berlin' },
+    ];
     parameters = [locationParam];
     acceptsValue = true;
 
@@ -100,6 +105,10 @@ class WeatherCurrentProcessor extends CliCommandProcessor {
 class WeatherForecastProcessor extends CliCommandProcessor {
     command = 'forecast';
     description = 'Shows a 3-day weather forecast';
+    aliases = ['fc'];
+    examples = [
+        { command: 'weather forecast Tokyo', description: 'Three-day forecast for Tokyo' },
+    ];
     parameters = [locationParam];
     acceptsValue = true;
 
@@ -112,6 +121,14 @@ class WeatherForecastProcessor extends CliCommandProcessor {
 class CliWeatherCommandProcessor extends CliCommandProcessor {
     command = 'weather';
     description = 'Shows weather information for a location';
+    module = 'weather';
+    icon = '🌤';
+    examples = [
+        { command: 'weather London', description: 'Current weather in London' },
+        { command: 'weather forecast --location Paris', description: 'Three-day forecast for Paris' },
+    ];
+    documentation =
+        'Weather from wttr.in, fetched by the server. Give the place as the value or with --location; the default is London.';
     parameters = [locationParam];
     acceptsValue = true;
     processors: ICliCommandProcessor[] = [

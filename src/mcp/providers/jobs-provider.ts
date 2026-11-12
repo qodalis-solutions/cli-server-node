@@ -1,4 +1,4 @@
-import { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
+import { CliJobScheduler, jobHasTags } from '@qodalis/cli-server-plugin-jobs';
 import { CliEventPermissions, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliServerPermissions as P } from '../../auth/cli-server-auth';
 import { McpTool, McpToolAnnotations, McpToolCallContext, McpToolProvider, mcpError, mcpJson, mcpObjectSchema } from '../mcp-types';
@@ -72,13 +72,18 @@ export class JobsMcpToolProvider implements McpToolProvider {
         return [
             {
                 name: 'jobs_list',
-                description: 'List the scheduled jobs',
-                inputSchema: mcpObjectSchema(),
+                description: 'List the scheduled jobs, optionally only those with every given tag',
+                inputSchema: mcpObjectSchema({
+                    tags: { type: 'array', items: { type: 'string' }, description: 'Only jobs that have every one of these tags (ignoring case)' },
+                }),
                 requiredPermissions: [P.JobsRead],
                 annotations: { readOnlyHint: true },
-                call: async () => {
-                    const jobs = s.getAll();
-                    const text = jobs.map((j) => `${j.id} | ${j.name} | ${j.status}${j.schedule ? ` | ${j.schedule}` : j.interval ? ` | every ${j.interval}` : ''}`).join('\n');
+                call: async (args) => {
+                    const tags = ((args.tags as string[] | undefined) ?? []).map((t) => t.trim()).filter(Boolean);
+                    const jobs = s.getAll().filter((j) => jobHasTags(j, tags));
+                    const text = jobs
+                        .map((j) => `${j.id} | ${j.name} | ${j.status}${j.schedule ? ` | ${j.schedule}` : j.interval ? ` | every ${j.interval}` : ''}${j.tags.length ? ` | tags: ${j.tags.join(', ')}` : ''}`)
+                        .join('\n');
                     return mcpJson({ jobs }, text || 'No jobs');
                 },
             },

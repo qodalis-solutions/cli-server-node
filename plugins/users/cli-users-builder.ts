@@ -25,6 +25,8 @@ import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
 import { createTokensController } from './controllers/tokens-controller';
+import { createLinkController, LINK_CREATE_RATE_LIMIT } from './controllers/link-controller';
+import { DEFAULT_LINK_APPROVAL_URL, LinkService } from './services/link-service';
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP } from './permissions';
 import { CliInstalledPlugin, usersInstalledPlugin } from './package-info';
@@ -112,6 +114,19 @@ export class CliUsersBuilder {
 
     setCredentialStore(store: ICliCredentialStore): this {
         this.options.credentialStore = store;
+        return this;
+    }
+
+    /**
+     * The page where users approve a terminal's link request (`server add` in the web CLI):
+     * absolute or root-relative, `{code}` replaced by the code (otherwise `?code=` is appended).
+     * Defaults to the admin dashboard's `/qcli/admin/link`.
+     */
+    setLinkApprovalUrl(url: string): this {
+        if (!/^(https?:\/\/[^\s]+|\/(?![\/\\])[^\s]*)$/.test(url)) {
+            throw new Error('[users] linkApprovalUrl must be an http(s) URL or a root-relative path');
+        }
+        this.options.linkApprovalUrl = url;
         return this;
     }
 
@@ -344,7 +359,7 @@ export class CliUsersBuilder {
         const readOnly = { usersReadOnly, groupsReadOnly, externalAuth };
         router.use('/users', createReadOnlyStoresGuard('users', readOnly));
         router.use('/groups', createReadOnlyStoresGuard('groups', readOnly));
-        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens'];
+        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens', '/link'];
         router.use(scoped, json({ limit: '1mb' }), waitReady);
         router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
         router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
@@ -363,10 +378,15 @@ export class CliUsersBuilder {
         auditPlugin.protect(auditGuard);
         router.use('/audit', auditPlugin.router);
         router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
+        const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
+        const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
+        router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy, limiter: linkLimiter }));
         router.use(scoped, errorHandler);
 
         const cleanupInterval = setInterval(() => {
             ipLimiter.sweep();
+            linkService.sweep();
+            linkLimiter.sweep();
             authService.sweepLockouts();
             authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
         }, options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS);

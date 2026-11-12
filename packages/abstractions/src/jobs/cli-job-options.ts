@@ -19,6 +19,12 @@ export interface CliJobOptions {
     description?: string;
     /** Optional grouping key (e.g., "maintenance"). */
     group?: string;
+    /**
+     * Free-form labels besides the single `group` (e.g. `country:ro`, `bank`), to filter jobs by
+     * (`GET /jobs?tag=...` lists the jobs that have every tag given, ignoring case). Each tag is
+     * 1-64 characters without commas; at most 20; duplicates (ignoring case) are dropped.
+     */
+    tags?: string[];
     /** Cron expression for scheduling. Mutually exclusive with `interval`. */
     schedule?: string;
     /**

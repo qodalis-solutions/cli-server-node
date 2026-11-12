@@ -47,6 +47,8 @@ export function commandInputSchema(processor: ICliCommandProcessor): McpInputSch
         const prop = propertyType(param.type);
         if (param.description) prop.description = param.description;
         if (param.defaultValue !== undefined && param.defaultValue !== null) prop.default = param.defaultValue;
+        if (param.allowedValues?.length && prop.type === 'string') prop.enum = [...param.allowedValues];
+        if (param.examples?.length) prop.examples = [...param.examples];
         properties[param.name] = prop;
         if (param.required) required.push(param.name);
     }

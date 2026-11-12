@@ -2,7 +2,7 @@ export { ICliCommandAuthor, CliCommandAuthor, DefaultLibraryAuthor } from './cli
 export { CliProcessCommand } from './cli-process-command';
 export { splitShellWords, joinShellWords, getPositionals, getPositionalText, quoteShellWord } from './shell-words';
 export { ICliCommandParameterDescriptor, CliCommandParameterDescriptor } from './cli-command-parameter-descriptor';
-export { ICliCommandProcessor, CliCommandProcessor } from './cli-command-processor';
+export { ICliCommandProcessor, CliCommandProcessor, CliCommandExample, commandMatches } from './cli-command-processor';
 export { ICliModule, CliModule } from './cli-module';
 export { CliStructuredOutput, CliStructuredResponse, CliTablePage } from './cli-structured-response';
 export { CliPageRequest, CliPaging, DEFAULT_TAKE, MAX_TAKE } from './cli-paging';
@@ -40,6 +40,11 @@ export {
     DataExplorerSchemaColumn,
     DataExplorerSchemaTable,
     DataExplorerSchemaResult,
+    DataExplorerRateLimit,
+    DataExplorerCaller,
+    DataExplorerAuditEntry,
+    DataExplorerErrorCode,
+    isReadOnlySource,
 } from './data-explorer-types';
 export { IDataExplorerProvider } from './data-explorer-provider';
 export { ICliProcessorFilter } from './cli-processor-filter';

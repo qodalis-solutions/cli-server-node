@@ -9,7 +9,16 @@ import { createFilesystemRouter } from './controllers/filesystem-controller';
 import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
-import { CliServerRuntimeOptions, ICliServerAuth, isOriginAllowed, isSameOrigin, trustedProxyHops } from './auth/cli-server-auth';
+import {
+    CliServerAuthContext,
+    CliServerRuntimeOptions,
+    ICliServerAuth,
+    clientAddress,
+    isOriginAllowed,
+    isSameOrigin,
+    trustedProxyHops,
+} from './auth/cli-server-auth';
+import { DataExplorerCaller } from '@qodalis/cli-server-abstractions';
 import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
@@ -321,9 +330,42 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // Data Explorer API
     const deBuilder = builder.dataExplorerBuilder;
     if (deBuilder && deBuilder.registry.size > 0) {
-        const deExecutor = new DataExplorerExecutor(deBuilder.registry);
-        app.use('/api/qcli/data-explorer', createDataExplorerController(deBuilder.registry, deExecutor));
-        mcpFeatureProviders.push(new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor));
+        // The sign-in provider can be set later (setAuth, mountPlugin): read it per request
+        const deExecutor = new DataExplorerExecutor(deBuilder.registry, {
+            audit: () => {
+                const auth = serverAuth;
+                return auth?.audit
+                    ? (entry) =>
+                          auth.audit!({
+                              event: entry.event,
+                              userId: entry.userId,
+                              userName: entry.userName,
+                              details: String(entry.metadata.source ?? ''),
+                              metadata: entry.metadata,
+                          })
+                    : undefined;
+            },
+        });
+        const dataCaller = (ctx: CliServerAuthContext | undefined, remoteAddress?: string): DataExplorerCaller => {
+            const auth = serverAuth;
+            return {
+                userId: ctx?.userId,
+                userName: ctx?.userName,
+                remoteAddress,
+                hasPermission: auth?.protectServer && ctx ? (p: string) => auth.hasPermission(ctx, p) : undefined,
+            };
+        };
+        app.use(
+            '/api/qcli/data-explorer',
+            createDataExplorerController(deBuilder.registry, deExecutor, {
+                caller: (req) => dataCaller(req.qcliServerAuth, clientAddress(req, trustProxy)),
+            }),
+        );
+        mcpFeatureProviders.push(
+            new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor, (context) =>
+                dataCaller(context.auth, clientAddress(context.request, trustProxy)),
+            ),
+        );
         mcpFeatures.add('data-explorer');
     }
 

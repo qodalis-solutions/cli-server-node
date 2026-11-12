@@ -90,10 +90,19 @@ import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand }
 class TimeProcessor extends CliCommandProcessor {
     command = 'time';
     description = 'Shows the current server time';
+    // Help in the web CLI: everything below is optional
+    aliases = ['now'];
+    module = 'clock';
+    icon = '🕒';
+    documentation = 'Prints the server clock, in local time or UTC.\n\nUse --format to pick the layout.';
+    examples = [
+        { command: 'time', description: 'Local time' },
+        { command: 'time --utc --format iso', description: 'UTC as ISO 8601' },
+    ];
     parameters = [
-        //                               name     description       required type       aliases
+        //                               name     description       required type       aliases  default  allowed values
         new CliCommandParameterDescriptor('utc', 'Show UTC time', false, 'boolean'),
-        new CliCommandParameterDescriptor('format', 'Output format', false, 'string', ['-f'], 'ISO'),
+        new CliCommandParameterDescriptor('format', 'Output format', false, 'string', ['-f'], 'iso', ['iso', 'locale']),
     ];
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
@@ -110,7 +119,11 @@ Nest processors with `processors = [new AddProcessor(), new MultiplyProcessor()]
 | `command`, `description` | required | Name and help text |
 | `handleAsync(command, signal?)` | required | Execution logic, returns text |
 | `handleStructuredAsync(command, signal?)` | none | Returns `{ exitCode, outputs }`; takes precedence over `handleAsync` |
-| `parameters` | none | `CliCommandParameterDescriptor[]` (`string`, `number`, `boolean`, ...) |
+| `parameters` | none | `CliCommandParameterDescriptor[]` (`string`, `number`, `boolean`, ...); `allowedValues` lists the only values a parameter takes (help, Tab completion and a check in the web CLI, `enum` in MCP); `examples` lists example values (help, `examples` in MCP) |
+| `aliases` | none | Other names; the server resolves them (and their permissions) like the command |
+| `examples` | none | `{ command, description? }[]` shown by `help <command>` in the web CLI |
+| `documentation` | none | Longer help text for `help <command>` (paragraphs separated by a blank line) |
+| `module`, `icon` | `server:<name>`, 🖥 | The group and emoji the web CLI's `help` lists the command under |
 | `processors` | none | Sub-commands |
 | `allowUnlistedCommands` | none | Accept sub-commands not listed in `processors` |
 | `valueRequired` / `acceptsValue` | none | Positional value is required / optional (MCP exposes it as `value`) |
@@ -362,6 +375,8 @@ builder.addDataExplorerProvider(new SqlDataExplorerProvider({ type: 'sqlite', fi
 
 The same provider class can be registered several times under different names. Implement `IDataExplorerProvider` for other sources.
 
+Sources are **read-only by default**: set `readOnly: false` on a source that must write. Per source you can also require permissions (`requiredPermissions`), limit the tables, collections or keys it shows (`allowedObjects`), mask or drop columns (`maskColumns`, `dropColumns`), limit queries per user (`rateLimit`) and gate exports (`exportPermissions`). Every query is written to the audit log as `data_query` unless `audit: false`. See the [data explorer README](plugins/data-explorer/README.md#read-only-sources).
+
 ## Security
 
 When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth`), every `/api/...` route and WebSocket requires a session or an API token; login, version discovery and capabilities stay public.
@@ -373,7 +388,7 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth
 | `POST /api/qcli/mcp` | `commands:execute` (each tool then checks its own) |
 | fs `ls` / `cat` / `stat` / `download` | `files:read` |
 | fs `upload` / `mkdir` / `rm` | `files:write` |
-| data explorer | `data:query` |
+| data explorer | `data:query` plus the source's `requiredPermissions` |
 | jobs read / manage | `jobs:read` / `jobs:manage` |
 | events / logs / shell WebSocket | authenticated / `logs:read` / `shell:execute` |
 | admin dashboard | `admin:access` |
@@ -560,7 +575,7 @@ The image runs the standalone server and accepts the same environment variables.
 
 ## Versioning
 
-Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.24` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
+Every package in this repository (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions` and every `@qodalis/cli-server-plugin-*`) has the same version, and so do the .NET and Python servers' packages: `1.0.0-beta.25` today. A release bumps all of them together, even packages that did not change, so one version number describes a whole server release. Install the same version of every `@qodalis/cli-server-*` package you use.
 
 ## Development
 

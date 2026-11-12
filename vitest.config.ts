@@ -40,6 +40,14 @@ export default defineConfig({
                 __dirname,
                 'plugins/users/index.ts',
             ),
+            '@qodalis/cli-server-plugin-data-explorer': path.resolve(
+                __dirname,
+                'plugins/data-explorer/index.ts',
+            ),
+            '@qodalis/cli-server-plugin-data-explorer-sql': path.resolve(
+                __dirname,
+                'plugins/data-explorer-sql/index.ts',
+            ),
             '@qodalis/cli-server-plugin-data-explorer-redis': path.resolve(
                 __dirname,
                 'plugins/data-explorer-redis/index.ts',
