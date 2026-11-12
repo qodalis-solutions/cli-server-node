@@ -1,44 +1,83 @@
 import {
+    DataExplorerAuditEntry,
+    DataExplorerCaller,
+    DataExplorerErrorCode,
     DataExplorerExecuteRequest,
     DataExplorerExecutionContext,
     DataExplorerResult,
     DataExplorerLanguage,
     DataExplorerOutputFormat,
+    DataExplorerProviderOptions,
 } from '@qodalis/cli-server-abstractions';
 import { DataExplorerRegistry } from './data-explorer-registry';
+import {
+    applyColumnPolicy,
+    DataExplorerRateLimiter,
+    filterListing,
+    isReadOnly,
+    missingPermissions,
+    objectsError,
+    readOnlyError,
+} from './data-explorer-policy';
+
+/** Writes an audit entry (the server's audit log); absent when the server keeps none. */
+export type DataExplorerAuditSink = (entry: DataExplorerAuditEntry) => Promise<void>;
+
+/** Options of the executor: where audit entries go (read on every query, so a later sign-in provider counts). */
+export interface DataExplorerExecutorOptions {
+    audit?: () => DataExplorerAuditSink | undefined;
+    rateLimiter?: DataExplorerRateLimiter;
+}
+
+/** Longest query text kept in an audit entry. */
+export const AUDIT_QUERY_MAX_LENGTH = 2000;
 
 /**
- * Executes data explorer queries with timeout enforcement and row-limit truncation.
+ * Executes data explorer queries: the source's permissions, rate limit, read-only rules and
+ * allowed objects first, then the provider with a timeout, then the row limit, column masking
+ * and the audit entry.
  */
 export class DataExplorerExecutor {
-    constructor(private readonly registry: DataExplorerRegistry) {}
+    private readonly rateLimiter: DataExplorerRateLimiter;
+
+    constructor(
+        private readonly registry: DataExplorerRegistry,
+        private readonly options: DataExplorerExecutorOptions = {},
+    ) {
+        this.rateLimiter = options.rateLimiter ?? new DataExplorerRateLimiter();
+    }
 
     /**
-     * Execute a query against the named data source.
+     * Execute a query against the named data source as `caller`.
      *
      * @param request - Contains the source name, query string, and optional parameters.
-     * @returns The query result, including rows and metadata. Never throws; errors are returned in the result.
+     * @param caller - Who runs it (permissions, rate limit, audit); absent for trusted code.
+     * @returns The query result. Never throws; errors (and refusals, with `errorCode`) are in the result.
      */
-    async executeAsync(request: DataExplorerExecuteRequest): Promise<DataExplorerResult> {
+    async executeAsync(request: DataExplorerExecuteRequest, caller?: DataExplorerCaller): Promise<DataExplorerResult> {
         const entry = this.registry.get(request.source);
         if (!entry) {
-            return {
-                success: false,
-                source: request.source,
-                language: DataExplorerLanguage.Sql,
-                defaultOutputFormat: DataExplorerOutputFormat.Table,
-                executionTime: 0,
-                columns: null,
-                rows: [],
-                rowCount: 0,
-                truncated: false,
-                error: `Unknown data source: '${request.source}'`,
-            };
+            return this.failure(request.source, undefined, `Unknown data source: '${request.source}'`, 0, 'unknown_source');
         }
-
         const { provider, options } = entry;
-        const timeoutMs = options.timeout ?? 30000;
+        const startTime = Date.now();
 
+        const missing = missingPermissions(options.requiredPermissions, caller);
+        if (missing.length) {
+            return this.refuse(request, options, caller, `forbidden: missing permission ${missing.join(', ')}`, 'forbidden');
+        }
+        if (!this.rateLimiter.tryAcquire(options, caller)) {
+            const limit = options.rateLimit!;
+            return this.refuse(request, options, caller, `Too many queries: at most ${limit.maxQueries} per ${limit.windowSeconds} s`, 'rate_limited');
+        }
+        if (isReadOnly(options) && !provider.readOnlyQueries) {
+            const error = readOnlyError(options.language, request.query);
+            if (error) return this.refuse(request, options, caller, error, 'read_only');
+        }
+        const objects = objectsError(options, request.query);
+        if (objects) return this.refuse(request, options, caller, objects, 'object_not_allowed');
+
+        const timeoutMs = options.timeout ?? 30000;
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
@@ -49,10 +88,9 @@ export class DataExplorerExecutor {
             signal: abortController.signal,
         };
 
-        const startTime = Date.now();
-
+        let result: DataExplorerResult;
         try {
-            const result = await provider.executeAsync(context);
+            result = await provider.executeAsync(context);
             clearTimeout(timer);
 
             // Enforce maxRows
@@ -61,27 +99,82 @@ export class DataExplorerExecutor {
                 result.rowCount = result.rows.length;
                 result.truncated = true;
             }
-
-            return result;
+            if (result.success) {
+                filterListing(result, options, request.query);
+                applyColumnPolicy(result, options);
+            }
         } catch (err: any) {
             clearTimeout(timer);
-
             const message = abortController.signal.aborted
                 ? `Query timed out after ${timeoutMs}ms`
                 : err.message ?? String(err);
-
-            return {
-                success: false,
-                source: request.source,
-                language: options.language,
-                defaultOutputFormat: options.defaultOutputFormat,
-                executionTime: Date.now() - startTime,
-                columns: null,
-                rows: [],
-                rowCount: 0,
-                truncated: false,
-                error: message,
-            };
+            result = this.failure(request.source, options, message, Date.now() - startTime);
         }
+        this.audit(request, options, caller, result, Date.now() - startTime);
+        return result;
+    }
+
+    private refuse(
+        request: DataExplorerExecuteRequest,
+        options: DataExplorerProviderOptions,
+        caller: DataExplorerCaller | undefined,
+        error: string,
+        code: DataExplorerErrorCode,
+    ): DataExplorerResult {
+        const result = this.failure(request.source, options, error, 0, code);
+        this.audit(request, options, caller, result, 0);
+        return result;
+    }
+
+    private failure(
+        source: string,
+        options: DataExplorerProviderOptions | undefined,
+        error: string,
+        executionTime: number,
+        errorCode?: DataExplorerErrorCode,
+    ): DataExplorerResult {
+        return {
+            success: false,
+            source,
+            language: options?.language ?? DataExplorerLanguage.Sql,
+            defaultOutputFormat: options?.defaultOutputFormat ?? DataExplorerOutputFormat.Table,
+            executionTime,
+            columns: null,
+            rows: [],
+            rowCount: 0,
+            truncated: false,
+            error,
+            ...(errorCode ? { errorCode } : {}),
+        };
+    }
+
+    /** Writes the `data_query` audit entry (never awaited: a failing audit log does not fail the query). */
+    private audit(
+        request: DataExplorerExecuteRequest,
+        options: DataExplorerProviderOptions,
+        caller: DataExplorerCaller | undefined,
+        result: DataExplorerResult,
+        durationMs: number,
+    ): void {
+        if (options.audit === false) return;
+        const sink = this.options.audit?.();
+        if (!sink) return;
+        const query = request.query.length > AUDIT_QUERY_MAX_LENGTH
+            ? `${request.query.slice(0, AUDIT_QUERY_MAX_LENGTH)}…`
+            : request.query;
+        sink({
+            event: 'data_query',
+            userId: caller?.userId ?? '',
+            userName: caller?.userName ?? 'anonymous',
+            metadata: {
+                source: options.name,
+                query,
+                success: result.success,
+                rowCount: result.rowCount,
+                durationMs,
+                ...(result.error ? { error: result.error } : {}),
+                ...(caller?.remoteAddress ? { remoteAddress: caller.remoteAddress } : {}),
+            },
+        }).catch(() => undefined);
     }
 }

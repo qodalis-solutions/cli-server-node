@@ -1,8 +1,10 @@
 import {
     IDataExplorerProvider,
+    DataExplorerCaller,
     DataExplorerProviderOptions,
     DataExplorerSourceInfo,
 } from '@qodalis/cli-server-abstractions';
+import { canExport, canUseSource, isReadOnly } from './data-explorer-policy';
 
 /** A registered data explorer provider paired with its configuration. */
 export interface DataExplorerRegistryEntry {
@@ -24,15 +26,19 @@ export class DataExplorerRegistry {
         return this._providers.get(name);
     }
 
-    /** Return summary information for all registered sources. */
-    getSources(): DataExplorerSourceInfo[] {
-        return Array.from(this._providers.values()).map(({ options }) => ({
+    /** Summary information of the sources `caller` may use (every source without a caller). */
+    getSources(caller?: DataExplorerCaller): DataExplorerSourceInfo[] {
+        return Array.from(this._providers.values())
+            .filter(({ options }) => canUseSource(options, caller))
+            .map(({ options }) => ({
             name: options.name,
             description: options.description,
             language: options.language,
             defaultOutputFormat: options.defaultOutputFormat,
             templates: options.templates ?? [],
             parameters: options.parameters ?? [],
+            readOnly: isReadOnly(options),
+            canExport: canExport(options, caller),
         }));
     }
 

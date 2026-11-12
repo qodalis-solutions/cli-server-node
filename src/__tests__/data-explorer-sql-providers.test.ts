@@ -10,9 +10,12 @@ const {
     mockPgQuery,
     mockPgEnd,
     mockMysqlExecute,
+    mockMysqlQuery,
     mockMysqlEnd,
     mockMysqlConnection,
     mockMssqlQuery,
+    mockMssqlBegin,
+    mockMssqlRollback,
     mockMssqlPoolClose,
     mockPool,
     mockRequest,
@@ -22,11 +25,15 @@ const {
     const mockPgEnd = vi.fn();
 
     const mockMysqlExecute = vi.fn();
+    const mockMysqlQuery = vi.fn();
     const mockMysqlEnd = vi.fn();
     const mockMysqlConnection = {
         execute: mockMysqlExecute,
+        query: mockMysqlQuery,
         end: mockMysqlEnd,
     };
+    const mockMssqlBegin = vi.fn();
+    const mockMssqlRollback = vi.fn();
 
     const mockMssqlQuery = vi.fn();
     const mockMssqlPoolClose = vi.fn();
@@ -44,9 +51,12 @@ const {
         mockPgQuery,
         mockPgEnd,
         mockMysqlExecute,
+        mockMysqlQuery,
         mockMysqlEnd,
         mockMysqlConnection,
         mockMssqlQuery,
+        mockMssqlBegin,
+        mockMssqlRollback,
         mockMssqlPoolClose,
         mockPool,
         mockRequest,
@@ -81,6 +91,13 @@ vi.mock('mysql2/promise', () => ({
 vi.mock('mssql', () => ({
     connect: vi.fn().mockResolvedValue(mockPool),
     NVarChar: 'NVarChar',
+    Transaction: vi.fn(function (this: any) {
+        this.begin = mockMssqlBegin;
+        this.rollback = mockMssqlRollback;
+    }),
+    Request: vi.fn(function (this: any) {
+        this.query = mockMssqlQuery;
+    }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -103,8 +120,14 @@ function makeContext(query: string, name = 'test-db'): DataExplorerExecutionCont
             name,
             language: 'sql',
             defaultOutputFormat: 'table',
+            // These tests cover the plain query path; read-only sources are tested below
+            readOnly: false,
         },
     } as DataExplorerExecutionContext;
+}
+
+function readOnlyContext(query: string): DataExplorerExecutionContext {
+    return { query, options: { name: 'test-db', language: 'sql', defaultOutputFormat: 'table' } } as DataExplorerExecutionContext;
 }
 
 function makeProviderOptions(name = 'test-db'): DataExplorerProviderOptions {
@@ -588,5 +611,60 @@ describe('MssqlDataExplorerProvider', () => {
         await provider.getSchemaAsync(makeProviderOptions());
 
         expect(mockMssqlPoolClose).toHaveBeenCalledOnce();
+    });
+});
+
+// ===========================================================================
+// Read-only sources (the default): a read-only transaction, always rolled back
+// ===========================================================================
+
+describe('SQL providers on read-only sources', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockPgConnect.mockResolvedValue(undefined);
+        mockPgEnd.mockResolvedValue(undefined);
+        mockMysqlEnd.mockResolvedValue(undefined);
+        mockMssqlPoolClose.mockResolvedValue(undefined);
+    });
+
+    it('Postgres runs the query in BEGIN READ ONLY and rolls back', async () => {
+        mockPgQuery.mockResolvedValue({ fields: [{ name: 'id' }], rows: [{ id: 1 }] });
+        const provider = new PostgresDataExplorerProvider({ connectionString: 'postgresql://x' });
+        const result = await provider.executeAsync(readOnlyContext('SELECT 1 AS id'));
+        expect(result.success).toBe(true);
+        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual(['BEGIN READ ONLY', 'SELECT 1 AS id', 'ROLLBACK']);
+    });
+
+    it('Postgres rolls back when the query fails', async () => {
+        mockPgQuery.mockImplementation(async (q: string) => {
+            if (q.startsWith('DELETE')) throw new Error('cannot execute DELETE in a read-only transaction');
+            return { fields: [], rows: [] };
+        });
+        const provider = new PostgresDataExplorerProvider({ connectionString: 'postgresql://x' });
+        const result = await provider.executeAsync(readOnlyContext('DELETE FROM t'));
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('read-only transaction');
+        expect(mockPgQuery.mock.calls.map((c) => c[0])).toEqual(['BEGIN READ ONLY', 'DELETE FROM t', 'ROLLBACK']);
+    });
+
+    it('MySQL runs the query in START TRANSACTION READ ONLY and rolls back', async () => {
+        mockMysqlQuery.mockResolvedValue([[], []]);
+        mockMysqlExecute.mockResolvedValue([[{ id: 1 }], [{ name: 'id' }]]);
+        const provider = new MysqlDataExplorerProvider({ connectionString: 'mysql://x' });
+        const result = await provider.executeAsync(readOnlyContext('SELECT 1 AS id'));
+        expect(result.success).toBe(true);
+        expect(mockMysqlQuery.mock.calls.map((c) => c[0])).toEqual(['START TRANSACTION READ ONLY', 'ROLLBACK']);
+    });
+
+    it('SQL Server runs the query in a transaction that is rolled back', async () => {
+        mockMssqlBegin.mockResolvedValue(undefined);
+        mockMssqlRollback.mockResolvedValue(undefined);
+        mockMssqlQuery.mockResolvedValue({ recordset: Object.assign([{ id: 1 }], { columns: { id: {} } }) });
+        const provider = new MssqlDataExplorerProvider({ connectionString: 'mssql://x' });
+        const result = await provider.executeAsync(readOnlyContext('SELECT 1 AS id'));
+        expect(result.success).toBe(true);
+        expect(mockMssqlBegin).toHaveBeenCalledTimes(1);
+        expect(mockMssqlRollback).toHaveBeenCalledTimes(1);
+        expect(mockPool.request).not.toHaveBeenCalled();
     });
 });

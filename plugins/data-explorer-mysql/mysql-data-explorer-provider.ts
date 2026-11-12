@@ -31,7 +31,16 @@ export class MysqlDataExplorerProvider implements IDataExplorerProvider {
         const startTime = Date.now();
         const connection = await mysql.createConnection(this.connectionOptions.connectionString);
         try {
-            const [rows, fields] = await connection.execute<RowDataPacket[]>(context.query);
+            // Read-only sources (the default): a read-only transaction, always rolled back
+            const readOnly = (context.options as { readOnly?: boolean }).readOnly !== false;
+            if (readOnly) await connection.query('START TRANSACTION READ ONLY');
+            let rows: RowDataPacket[];
+            let fields: FieldPacket[];
+            try {
+                [rows, fields] = await connection.execute<RowDataPacket[]>(context.query);
+            } finally {
+                if (readOnly) await connection.query('ROLLBACK').catch(() => undefined);
+            }
             const typedFields = fields as FieldPacket[];
             const columns = typedFields.map((f) => f.name);
             const arrayRows = (rows as Record<string, unknown>[]).map((row) =>

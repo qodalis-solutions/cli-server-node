@@ -40,6 +40,11 @@ export {
     DataExplorerSchemaColumn,
     DataExplorerSchemaTable,
     DataExplorerSchemaResult,
+    DataExplorerRateLimit,
+    DataExplorerCaller,
+    DataExplorerAuditEntry,
+    DataExplorerErrorCode,
+    isReadOnlySource,
 } from './data-explorer-types';
 export { IDataExplorerProvider } from './data-explorer-provider';
 export { ICliProcessorFilter } from './cli-processor-filter';
