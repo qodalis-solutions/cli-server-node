@@ -3,6 +3,52 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## 1.0.0-beta.25
+
+- The admin plugin embeds dashboard 1.0.0-beta.20: job tags, command metadata, the terminal link page, API tokens, a data explorer page and audit details.
+
+- **Jobs: tags.** `tags` on a job (`CliJobOptions.tags`: free-form labels such as `country:ro`, `bank`; each 1-64
+  characters without commas, at most 20, duplicates ignoring case dropped), always present in job info (`[]` when
+  none). `GET /api/v1/qcli/jobs?tag=a&tag=b` (repeatable or comma-separated) lists the jobs that have every tag,
+  ignoring case; `/executions` and `/stats` take `tag=` too. `PUT /jobs/{id}` accepts `tags` (replaces them, `null`
+  clears, invalid ones are 400 `INVALID_VALUE`). MCP `jobs_list` takes `tags` and shows them. Same on the .NET and
+  Python servers.
+- **Commands as rich as web commands.** Processors may set `aliases`, `examples` (`{ command, description? }`),
+  `documentation`, `module` and `icon`, and parameters `allowedValues` and `examples` (example values); `GET /api/v1/qcli/commands` sends them (absent
+  when unset), so the web CLI's `help` shows examples and documentation, groups and decorates the command, and completes
+  and checks allowed values. The server resolves aliases of commands and sub-commands for `/execute`, streaming and
+  permission checks (a command name wins over another command's alias). MCP command tools list allowed values as an
+  `enum` (and parameter examples as `examples`) and refuse other values. The built-in processors and the weather plugin carry examples and documentation
+  (`hash --algorithm` its algorithms). Same on the .NET and Python servers (spec: web-cli
+  `docs/superpowers/specs/2026-11-12-server-command-metadata-design.md`).
+- **Data explorer: per-source permissions, read-only mode, masking, audit and limits**, the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-12-data-explorer-hardening-design.md`):
+  - **Breaking:** sources are read-only by default. Writes, DDL and several statements are refused before the provider runs
+    (`errorCode: 'read_only'`), and the SQL providers run queries in a read-only transaction. Set `readOnly: false` on a source that must write.
+    The SQL check reads quotes and comments as MySQL (`--` before a space, `#`, `/*! ... */`, `"..."` strings), Postgres
+    (`E'...'`, `$$...$$`, nested comments), SQL Server (nested comments, `[...]`) and SQLite each do, and a query must
+    pass under every reading, so a quote or comment one database skips cannot hide a statement another runs. The Postgres
+    provider runs one statement per query. `COMMIT`, `ROLLBACK` and `DENY` count as writes, and a lone carriage return is refused.
+  - `allowedObjects` reads every item of a SQL `FROM`/`USING` list, `db..table`, `DESCRIBE`/`EXPLAIN <table>`, CTE names only in
+    their scope, the collections of MongoDB `$lookup`/`$graphLookup`/`$unionWith`/`$out`/`$merge` (JSON escapes decoded) and
+    Elasticsearch indices named in the body; Elasticsearch `POST …/_search` is a read only after index names (the path is
+    cut at `?` and `#`); Redis keys are split as the provider splits them. JSON text in results is masked like a document.
+  - On SQL sources with `maskColumns` or `dropColumns`, those columns can only be selected by their own name (a plain
+    item of the outer select list, or `*`): aliases, expressions, filters, sorts, subqueries, set operations, Postgres
+    whole-row values and `U&"..."` names are refused before the query runs (`errorCode: 'masked_column'`, `Masked column
+    'email' can only be selected by its own name`), and a result that returns such a column under another name is withheld.
+  - New source options: `requiredPermissions` (403, and the source is hidden from `/sources` and MCP `data_sources`),
+    `allowedObjects` (globs of tables, collections, keys or indices), `maskColumns` (`***`), `dropColumns`, `audit`
+    (default true: a `data_query` audit entry per execute), `rateLimit { maxQueries, windowSeconds }` (429) and `exportPermissions`.
+  - `GET /sources` adds `readOnly` and `canExport`; the schema lists only allowed tables without dropped columns; results carry `errorCode` when refused.
+  - `DataExplorerExecutor.executeAsync(request, caller?)`, `createDataExplorerController(registry, executor, { caller })`; providers that only read can set `readOnlyQueries`.
+- **Link a terminal through the browser** (users plugin), the same on the .NET and Python servers
+  (spec: web-cli `docs/superpowers/specs/2026-11-12-server-linking-design.md`): `POST /api/v1/qcli/link` (public,
+  rate limited) returns a code and the approval page, `GET /link/{linkId}` hands the terminal its API token once the
+  user approved at `/qcli/admin/link?code=…` (`GET /link/code/{code}`, `POST …/approve`, `POST …/deny`). The token is
+  the approver's, named `link <client>`, scoped to the requested permissions. `setLinkApprovalUrl` points to a host's
+  own page; `link_approved` and `link_denied` are audited.
+
 ## 1.0.0-beta.24
 
 - The admin plugin embeds dashboard 1.0.0-beta.19: a phone layout (below 768 px the sidebar is a drawer, stat cards wrap, panels stack and tables scroll in their container) and tests for the live log tail.

@@ -39,7 +39,9 @@ class HttpPostProcessor extends CliCommandProcessor implements ICliStreamCommand
     acceptsValue = true;
     description = 'Performs an HTTP POST request';
     parameters = [
-        new CliCommandParameterDescriptor('body', 'Request body (JSON string)', false, 'string', ['-b']),
+        new CliCommandParameterDescriptor('body', 'Request body (JSON string)', false, 'string', ['-b'], undefined, undefined, [
+            '{"name":"qodalis"}',
+        ]),
         new CliCommandParameterDescriptor('headers', 'Show response headers', false, 'boolean'),
     ];
 
@@ -182,6 +184,12 @@ async function doStreamRequest(
 export class CliHttpCommandProcessor extends CliCommandProcessor {
     command = 'http';
     description = 'Makes HTTP requests from the server';
+    examples = [
+        { command: 'http get https://example.com', description: 'Fetches a page from the server' },
+        { command: 'http post https://httpbin.org/post --body \'{"a":1}\'', description: 'Posts JSON from the server' },
+    ];
+    documentation =
+        'Sends the request from the server, not from the browser, so it reaches hosts on the server\'s network and is not limited by the browser\'s CORS rules. Prints the status and the body; --headers adds the response headers.';
     allowUnlistedCommands = false;
     processors: ICliCommandProcessor[] = [new HttpGetProcessor(), new HttpPostProcessor()];
 

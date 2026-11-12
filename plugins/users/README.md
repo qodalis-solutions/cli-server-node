@@ -41,6 +41,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setUserStore(store)` / `setSessionStore` / `setCredentialStore` / `setAuditStore` / `setGroupStore` / `setApiTokenStore` | in-memory | Custom storage (`setAuditStore`: the store of the audit plugin it adds) |
 | `setAuditPlugin(plugin)` | built by the plugin | Record events in, and serve, the host's own audit plugin (`new CliAuditBuilder()...build()`) |
 | `setAllowNonExpiringTokens(bool)` | `false` | Allow API tokens created with `expiresInDays: null` (never expire) |
+| `setLinkApprovalUrl(url)` | `/qcli/admin/link` | The page where users approve a terminal's link request (absolute or root-relative; `{code}` is replaced, otherwise `?code=` is appended) |
 | `setAuthAdapter(fn)` | — | Delegate authentication to the host app; `fn` may be sync or async (see below) |
 | `setReadOnlyUsers(bool = true)` | `false` | The host owns the users: user writes answer `501` (see [Read-only stores](#read-only-stores)) |
 | `setReadOnlyGroups(bool = true)` | `false` | The host owns the groups: group writes answer `501` |
@@ -130,6 +131,10 @@ Mounted under `/api/v1/qcli`; protected routes expect `Authorization: Bearer <to
 | `GET /tokens` | authenticated | Own API tokens; `?all=true` (requires `tokens:read`) lists every user's |
 | `POST /tokens` | authenticated, **session only** | `{ name, expiresInDays?, permissions? }` → `201 { token, apiToken }` (see [API tokens](#api-tokens)) |
 | `DELETE /tokens/:id` | owner or `tokens:revoke` | 204; unknown or someone else's token without `tokens:revoke` → 404 |
+| `POST /link` | public, 10 per minute per address | `{ client, permissions? }` → `201 { linkId, userCode, verificationUrl, expiresIn, interval }` (see [Linking a terminal](#linking-a-terminal)) |
+| `GET /link/:linkId` | public | `{ status: 'pending' \| 'denied' }`, or `{ status: 'approved', token, userName, expiresAt }` once; 404 `{ status: 'expired' }` |
+| `GET /link/code/:userCode` | authenticated | The request the approval page shows |
+| `POST /link/code/:userCode/approve` \| `deny` | **session only** (approve) | Approve creates the approver's API token for the terminal; deny → 204 |
 | `GET /audit` | `audit:read` | The audit plugin's API: `?event=&username=&actor=&limit=&offset=`, newest first (`actor`: who did it, case-insensitive); without a `limit` the newest 100, at most 1000 |
 | `DELETE /audit` | `audit:clear` | 204; records `audit_cleared` with the caller |
 
@@ -181,6 +186,16 @@ To use a token with an MCP client, see the core server's [MCP endpoint](../../RE
 ```bash
 claude mcp add --transport http qcli http://localhost:8047/api/qcli/mcp --header "Authorization: Bearer <token>"
 ```
+
+## Linking a terminal
+
+`server add` in the web CLI links a terminal to the server through the browser, like the OAuth device flow:
+
+1. The terminal sends `POST /link` with its name (`{ "client": "Qodalis CLI on Pixel 7" }`, optionally `permissions` for a scoped token) and gets a `linkId` (secret), a code such as `ABCD-2345` and the approval page (`/qcli/admin/link?code=ABCD-2345`, the admin dashboard).
+2. The user opens the page, signs in, compares the code and approves. Approving creates an API token for that user named `link <client>`, with the requested permissions (never more than the user has), listed and revocable like any token.
+3. The terminal polls `GET /link/:linkId` every `interval` seconds and receives the token once.
+
+Requests expire after 10 minutes, are single-use and live in memory; a request that expires while it is approved answers 404 and its new token is revoked. Approvals and denials are audited (`link_approved`, `link_denied`). Hosts with their own page set `setLinkApprovalUrl`.
 
 ## Custom storage
 

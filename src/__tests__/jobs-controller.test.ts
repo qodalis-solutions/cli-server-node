@@ -405,3 +405,71 @@ describe('DELETE /api/v1/qcli/jobs/:id/history', () => {
         expect(await keepAll.getExecution('k1')).not.toBeNull();
     });
 });
+
+describe('Job tags', () => {
+    let tagged: CliJobsPluginResult;
+    let tagApp: express.Express;
+
+    beforeEach(() => {
+        tagged = new CliJobsBuilder()
+            .addJob(new QuickJob(), { id: 'ro-bnr', name: 'bnr', interval: '999s', tags: ['country:ro', 'Official', ' official '] })
+            .addJob(new QuickJob(), { id: 'ro-bt', name: 'bt', interval: '999s', tags: ['country:ro', 'bank'] })
+            .addJob(new QuickJob(), { id: 'md-maib', name: 'maib', group: 'banks', interval: '999s', tags: ['country:md', 'bank'] })
+            .addJob(new QuickJob(), { id: 'cleanup', name: 'cleanup', interval: '999s' })
+            .build();
+        tagApp = express();
+        tagApp.use(express.json());
+        tagApp.use(tagged.prefix, tagged.router);
+    });
+
+    afterEach(async () => {
+        await tagged.scheduler.stop();
+    });
+
+    it('returns tags in job info, trimmed and without duplicates (ignoring case)', async () => {
+        const res = await request(tagApp).get('/api/v1/qcli/jobs/ro-bnr');
+        expect(res.body.tags).toEqual(['country:ro', 'Official']);
+        const none = await request(tagApp).get('/api/v1/qcli/jobs/cleanup');
+        expect(none.body.tags).toEqual([]);
+    });
+
+    it('lists the jobs that have every tag given, ignoring case', async () => {
+        const ids = async (query: string) => (await request(tagApp).get(`/api/v1/qcli/jobs${query}`)).body.map((j: any) => j.id).sort();
+        expect(await ids('')).toEqual(['cleanup', 'md-maib', 'ro-bnr', 'ro-bt']);
+        expect(await ids('?tag=COUNTRY:RO')).toEqual(['ro-bnr', 'ro-bt']);
+        expect(await ids('?tag=country:ro&tag=bank')).toEqual(['ro-bt']);
+        expect(await ids('?tag=country:ro,bank')).toEqual(['ro-bt']);
+        expect(await ids('?tag=missing')).toEqual([]);
+    });
+
+    it('filters executions by tag, with group', async () => {
+        await tagged.scheduler.triggerAsync('ro-bt');
+        await tagged.scheduler.triggerAsync('md-maib');
+        await new Promise((r) => setTimeout(r, 50));
+        const byTag = await request(tagApp).get('/api/v1/qcli/jobs/executions?tag=bank');
+        expect(byTag.body.items.map((e: any) => e.jobId).sort()).toEqual(['md-maib', 'ro-bt']);
+        const withGroup = await request(tagApp).get('/api/v1/qcli/jobs/executions?tag=bank&group=banks');
+        expect(withGroup.body.items.map((e: any) => e.jobId)).toEqual(['md-maib']);
+        const none = await request(tagApp).get('/api/v1/qcli/jobs/executions?tag=missing');
+        expect(none.body).toMatchObject({ items: [], total: 0 });
+    });
+
+    it('PUT replaces the tags, null clears them, invalid tags are 400 INVALID_VALUE', async () => {
+        const put = (body: unknown) => request(tagApp).put('/api/v1/qcli/jobs/cleanup').send(body);
+        expect((await put({ tags: ['maintenance', 'Maintenance', 'nightly'] })).body.tags).toEqual(['maintenance', 'nightly']);
+        expect((await request(tagApp).get('/api/v1/qcli/jobs?tag=nightly')).body.map((j: any) => j.id)).toEqual(['cleanup']);
+        expect((await put({ tags: null })).body.tags).toEqual([]);
+        for (const tags of ['nightly', ['a,b'], [''], [1], ['x'.repeat(65)], Array.from({ length: 21 }, (_, i) => `t${i}`)]) {
+            const res = await put({ tags });
+            expect(res.status, JSON.stringify(tags)).toBe(400);
+            expect(res.body.code).toBe('INVALID_VALUE');
+        }
+        // Leaving tags out keeps them
+        await put({ tags: ['kept'] });
+        expect((await put({ description: 'd' })).body.tags).toEqual(['kept']);
+    });
+
+    it('refuses invalid tags at registration', () => {
+        expect(() => new CliJobsBuilder().addJob(new QuickJob(), { name: 'x', tags: ['a,b'] }).build()).toThrow(/Invalid tag/);
+    });
+});

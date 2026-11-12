@@ -12,6 +12,13 @@ export interface ICliCommandParameterDescriptor {
     type: string;
     /** Default value used when the parameter is omitted. */
     defaultValue?: any;
+    /**
+     * The only values the parameter takes. Clients show them in help, offer them in completion
+     * and check them before sending (ignoring case); MCP lists them as the property's `enum`.
+     */
+    allowedValues?: string[];
+    /** Example values (e.g. `["Paris", "New York"]`): shown in help; MCP lists them as the property's `examples`. */
+    examples?: string[];
 }
 
 /** Concrete implementation of {@link ICliCommandParameterDescriptor}. */
@@ -23,6 +30,8 @@ export class CliCommandParameterDescriptor implements ICliCommandParameterDescri
      * @param type - Expected value type.
      * @param aliases - Short alias flags.
      * @param defaultValue - Default value when omitted.
+     * @param allowedValues - The only values the parameter takes.
+     * @param examples - Example values.
      */
     constructor(
         public name: string,
@@ -31,5 +40,7 @@ export class CliCommandParameterDescriptor implements ICliCommandParameterDescri
         public type: string = 'string',
         public aliases?: string[],
         public defaultValue?: any,
+        public allowedValues?: string[],
+        public examples?: string[],
     ) {}
 }

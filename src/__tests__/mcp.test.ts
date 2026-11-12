@@ -557,7 +557,7 @@ describe('MCP: tool providers', () => {
                 b.addDataExplorerProvider(
                     {
                         executeAsync: async (ctx) => {
-                            if (ctx.query === 'bad') throw new Error('syntax error');
+                            if (ctx.query === 'SELECT bad') throw new Error('syntax error');
                             return {
                                 success: true, source: 'mem', language: DataExplorerLanguage.Sql, defaultOutputFormat: DataExplorerOutputFormat.Table,
                                 executionTime: 1, columns: ['id', 'name'], rows: [[1, 'a'], [2, 'b'], [3, 'c']], rowCount: 3, truncated: false,
@@ -576,7 +576,7 @@ describe('MCP: tool providers', () => {
         const q = await call(s.app, 'data_query', { source: 'mem', query: 'select', parameters: { a: 1 } });
         expect(q.result.isError).toBe(false);
         expect(q.result.content[0].text).toBe('id | name\n1 | a\n2 | b\n(2 rows, truncated)'); // maxRows applied
-        const bad = await call(s.app, 'data_query', { source: 'mem', query: 'bad' });
+        const bad = await call(s.app, 'data_query', { source: 'mem', query: 'SELECT bad' });
         expect(bad.result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'syntax error' }] });
     });
 
@@ -584,13 +584,15 @@ describe('MCP: tool providers', () => {
         const s = server();
         let runs = 0;
         const jobs = new CliJobsBuilder()
-            .addJob({ executeAsync: async () => { runs++; } } as any, { name: 'tick', description: 'Tick', interval: '1h' })
+            .addJob({ executeAsync: async () => { runs++; } } as any, { name: 'tick', description: 'Tick', interval: '1h', tags: ['Clock'] })
             .build();
         s.mountPlugin(jobs);
         const names = (await listTools(s.app)).map((t) => t.name);
         expect(names).toEqual(expect.arrayContaining(['jobs_list', 'jobs_get', 'jobs_history', 'jobs_trigger', 'jobs_pause', 'jobs_resume', 'jobs_stop', 'jobs_cancel', 'jobs_delete_runs']));
         const list = await call(s.app, 'jobs_list');
         const id = list.result.structuredContent.jobs[0].id;
+        expect(list.result.content[0].text).toContain('tags: Clock');
+        expect((await call(s.app, 'jobs_list', { tags: ['clock'] })).result.structuredContent.jobs.map((j: any) => j.id)).toEqual([id]);
         expect((await call(s.app, 'jobs_get', { id })).result.structuredContent.name).toBe('tick');
         expect((await call(s.app, 'jobs_get', { id: 'missing' })).result.isError).toBe(true);
         expect((await call(s.app, 'jobs_trigger', { id: 'missing' })).result.isError).toBe(true);
@@ -598,6 +600,7 @@ describe('MCP: tool providers', () => {
         await new Promise((r) => setTimeout(r, 50));
         expect(runs).toBe(1);
         const history = await call(s.app, 'jobs_history', { id, limit: 5 });
+        expect((await call(s.app, 'jobs_list', { tags: ['nope'] })).result.structuredContent.jobs).toEqual([]);
         expect(history.result.structuredContent.limit).toBe(5);
         const execId = history.result.structuredContent.items[0].id;
         expect((await call(s.app, 'jobs_delete_runs', { id, executionId: 'missing' })).result.isError).toBe(true);
@@ -737,7 +740,7 @@ describe('MCP: authentication', () => {
         const a = await names(analyst);
         expect(a).toEqual(expect.arrayContaining(['data_sources', 'data_schema', 'data_query', 'jobs_list', 'jobs_get', 'jobs_history']));
         expect(a).not.toContain('jobs_trigger');
-        expect((await call(s.app, 'data_query', { source: 'mem', query: 'q' }, bearer(analyst))).result.content[0].text).toBe('x\n1\n(1 row)');
+        expect((await call(s.app, 'data_query', { source: 'mem', query: 'SELECT 1' }, bearer(analyst))).result.content[0].text).toBe('x\n1\n(1 row)');
         expect((await call(s.app, 'jobs_trigger', { id: 'x' }, bearer(analyst))).error.code).toBe(-32602);
 
         const r = await names(root);

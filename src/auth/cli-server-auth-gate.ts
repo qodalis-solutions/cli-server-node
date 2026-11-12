@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
-import { ICliCommandProcessor } from '../abstractions';
+import { ICliCommandProcessor, commandMatches } from '../abstractions';
 import { ICliCommandRegistry } from '../services/cli-command-registry';
 import { CliServerAuthContext, CliServerPermissions as P, ICliServerAuth } from './cli-server-auth';
 import { createLogger } from '../utils/logger';
@@ -52,16 +52,17 @@ export function processorPermissions(
     chain: unknown,
 ): string[] {
     if (typeof command !== 'string') return [];
-    const root = registry.processors.find((p) => p.command.toLowerCase() === command.toLowerCase());
+    // The processor the registry runs (a name or an alias), so an alias carries the same permissions
+    const root = registry.findProcessor(command);
     if (!root) return [];
     const out: string[] = [...(root.requiredPermissions ?? [])];
     let current: ICliCommandProcessor = root;
     if (Array.isArray(chain)) {
         for (const sub of chain) {
             if (typeof sub !== 'string') break;
-            const child: ICliCommandProcessor | undefined = current.processors?.find(
-                (p) => p.command.toLowerCase() === sub.toLowerCase(),
-            );
+            const child: ICliCommandProcessor | undefined =
+                current.processors?.find((p) => p.command.toLowerCase() === sub.toLowerCase()) ??
+                current.processors?.find((p) => commandMatches(p, sub));
             if (!child) break;
             out.push(...(child.requiredPermissions ?? []));
             current = child;

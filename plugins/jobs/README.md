@@ -34,6 +34,7 @@ const jobsPlugin = new CliJobsBuilder()
         name: 'health-check',
         description: 'Periodic health check',
         group: 'monitoring',
+        tags: ['health', 'nightly'],
         interval: '30s',
     })
     .build(); // mountPlugin hands it the server's event bus; or build(eventBus)
@@ -76,6 +77,7 @@ scheduler's `setEventBus(bus)`, `eventBus` and `publishEvent(type, data)` are pu
 | `name` | `string?` | Class name | Job display name |
 | `description` | `string?` | Name | Human-readable description |
 | `group` | `string?` | — | Logical grouping |
+| `tags` | `string[]?` | `[]` | Free-form labels to filter jobs by (`country:ro`, `bank`): each 1-64 characters without commas, at most 20, trimmed, duplicates (ignoring case) dropped. Job info always carries `tags` |
 | `schedule` | `string?` | — | Cron expression (5-field) |
 | `interval` | `string?` | — | Fixed interval (`30s`, `5m`, `1h`, `1d`); the next run is the last run plus the interval, across restarts and pauses (right away when that has passed) |
 | `runOnStart` | `boolean` | `false` | Run when the scheduler starts unless the job ran recently: an interval job when it never ran or its next run is due, a cron job when it never ran or missed an occurrence since its last run, a job without a schedule on every start. Not for paused or stopped jobs; it takes a run slot like any due run |
@@ -115,16 +117,16 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli/jobs`).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/` | List all jobs |
-| GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
-| GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
+| GET | `/` | List the jobs; `?tag=a&tag=b` (repeatable or comma-separated) lists only those that have every tag, ignoring case |
+| GET | `/executions` | Executions across jobs, newest first: `?job=a,b` (repeatable), `group=`, `tag=` (as in `/`), `status=`, `since=` (ISO 8601), `limit=` (1-100), `offset=` → `{ items, total, limit, offset }` |
+| GET | `/stats` | Run statistics for charts: `?since=&until=` (ISO 8601, default the last 24 hours), `buckets=` (1-200, default 24), `job=`, `group=`, `tag=` as in `/executions` → `{ since, until, bucketMs, buckets: [{ start, succeeded, failed, cancelled, running }], totals, jobs }`; `totals` and each job carry counts, `successRate`, `avgDuration`, `p95Duration`, `maxDuration`, `lastFailureAt`, and each job its 12 latest runs (`recent`). Built from every run in the range, read page by page through the storage's execution query, so it works with any storage provider |
 | GET | `/:id` | Get job details |
 | POST | `/:id/trigger` | Trigger a run; answers at once, without waiting for it to finish: `{ "ok": true, "message": "Job triggered", "queued": false }`, or `{ "ok": true, "message": "Job queued", "queued": true }` when queued; 409 `JOB_ALREADY_RUNNING` when every slot is taken and the policy is `skip` |
 | POST | `/:id/pause` | Pause scheduled execution |
 | POST | `/:id/resume` | Resume a paused job |
 | POST | `/:id/stop` | Stop job: cancel its runs, drop a queued one, disable the schedule |
 | POST | `/:id/cancel` | Cancel every running run and drop a queued one; 409 `JOB_NOT_RUNNING` when idle |
-| PUT | `/:id` | Update job options: `description`, `group`, `schedule`, `interval`, `maxRetries`, `retryDelay`, `retryStrategy`, `timeout`, `overlapPolicy`, `maxConcurrentRuns` (integer >= 1, else 400 `INVALID_VALUE`) |
+| PUT | `/:id` | Update job options: `description`, `group`, `tags` (replaces them; `null` clears; invalid tags are 400 `INVALID_VALUE`), `schedule`, `interval`, `maxRetries`, `retryDelay`, `retryStrategy`, `timeout`, `overlapPolicy`, `maxConcurrentRuns` (integer >= 1, else 400 `INVALID_VALUE`) |
 | GET | `/:id/history` | Paginated execution history |
 | GET | `/:id/history/:execId` | Execution detail with logs |
 | DELETE | `/:id/history/:execId` | Delete one run and its logs → `{ message: "Run deleted" }`; 404 `JOB_NOT_FOUND` / `EXECUTION_NOT_FOUND` (missing or another job's run), 409 `EXECUTION_RUNNING`, 501 `NOT_SUPPORTED` (the storage has no `deleteExecution`) |
