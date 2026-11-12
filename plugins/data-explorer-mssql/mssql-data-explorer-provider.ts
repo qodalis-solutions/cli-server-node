@@ -26,6 +26,11 @@ export class MssqlDataExplorerProvider implements IDataExplorerProvider {
         this.connectionOptions = connectionOptions;
     }
 
+    /** SQL Server quotes names in brackets: `[Users]`. */
+    quoteName(name: string): string {
+        return `[${name.replace(/]/g, ']]')}]`;
+    }
+
     async executeAsync(context: DataExplorerExecutionContext): Promise<DataExplorerResult> {
         const startTime = Date.now();
         let pool: sql.ConnectionPool | null = null;

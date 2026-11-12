@@ -27,6 +27,11 @@ export class MysqlDataExplorerProvider implements IDataExplorerProvider {
         this.connectionOptions = connectionOptions;
     }
 
+    /** MySQL quotes names in backticks (double quotes are strings without `ANSI_QUOTES`). */
+    quoteName(name: string): string {
+        return `\`${name.replace(/`/g, '``')}\``;
+    }
+
     async executeAsync(context: DataExplorerExecutionContext): Promise<DataExplorerResult> {
         const startTime = Date.now();
         const connection = await mysql.createConnection(this.connectionOptions.connectionString);

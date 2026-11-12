@@ -84,6 +84,13 @@ export interface DataExplorerProviderOptions {
     rateLimit?: DataExplorerRateLimit;
     /** Permissions needed to export results (`json`/`csv` output in the web CLI). Advisory. */
     exportPermissions?: string[];
+    /**
+     * A read-only SQL query that fails because a table or column without quotes does not exist
+     * (PostgreSQL folds such names to lower case) runs again with the name as the schema spells it,
+     * quoted (`select * from Users` runs as `select * from "Users"`), when exactly one visible name
+     * matches. `DataExplorerResult.executedQuery` then shows the query that ran. Default true.
+     */
+    fixNameCase?: boolean;
 }
 
 /** Why the server refused a data explorer query. */
@@ -165,6 +172,8 @@ export interface DataExplorerResult {
      * `rate_limited` (429), `read_only`, `object_not_allowed`, `masked_column`, `unknown_source`.
      */
     errorCode?: DataExplorerErrorCode;
+    /** The query as the server ran it, when it differs from the one sent (see `DataExplorerProviderOptions.fixNameCase`). */
+    executedQuery?: string;
 }
 
 /** Request payload for executing a data explorer query. */

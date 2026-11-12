@@ -28,6 +28,7 @@ import {
     MASK,
     maskedColumnError,
     maskedResultError,
+    fixNameCase,
     nameCaseHint,
     objectsError,
     readOnlyError,
@@ -420,6 +421,112 @@ describe('name case hint', () => {
 
     it('leaves sources of other languages alone', async () => {
         expect((await hinted('relation "users" does not exist', { language: L.Shell, readOnly: false })).error).toBe('relation "users" does not exist');
+    });
+});
+
+describe('fixNameCase', () => {
+    const schema = {
+        source: 'db',
+        tables: [
+            {
+                name: 'public.Users',
+                type: 'table',
+                columns: [{ name: 'CountryCode', type: 'text', nullable: true }, { name: 'Count', type: 'int', nullable: true }],
+            },
+            { name: 'job_states', type: 'table', columns: [{ name: 'status', type: 'text', nullable: true }] },
+        ],
+    };
+
+    it.each([
+        ['select count(*) from Users', 'relation "users" does not exist', 'select count(*) from "Users"'],
+        ['SELECT * FROM USERS -- Users\nWHERE 1 = 1', 'relation "users" does not exist', 'SELECT * FROM "Users" -- Users\nWHERE 1 = 1'],
+        [
+            `SELECT * FROM "Users" u WHERE u.countrycode = 'countrycode'`,
+            'column u.countrycode does not exist',
+            `SELECT * FROM "Users" u WHERE u."CountryCode" = 'countrycode'`,
+        ],
+        ['SELECT count(*), count FROM "Users"', 'column "count" does not exist', 'SELECT count(*), "Count" FROM "Users"'],
+    ])('writes the name as the schema spells it: %s', (query, error, fixed) => {
+        expect(fixNameCase(query, error, schema)).toBe(fixed);
+    });
+
+    it('quotes the way the source does', () => {
+        expect(fixNameCase('select * from users', "Invalid object name 'users'.", schema, (n) => `[${n}]`)).toBe('select * from [Users]');
+        expect(fixNameCase('select * from users', "Table 'shop.users' doesn't exist", schema, (n) => `\`${n}\``)).toBe('select * from `Users`');
+    });
+
+    it.each([
+        // No name differing only in case, a name already quoted, a hidden table, another error
+        ['select * from job_states', 'relation "job_states" does not exist'],
+        ['select * from "users"', 'relation "users" does not exist'],
+        ['select * from onetimecodes', 'relation "onetimecodes" does not exist'],
+        ['select * form Users', 'syntax error at or near "form"'],
+        // Only inside a string under some dialect's reading (MySQL backslash escapes)
+        ["select 'it\\' Users' from t", 'relation "users" does not exist'],
+    ])('leaves other queries alone: %s', (query, error) => {
+        expect(fixNameCase(query, error, schema)).toBeUndefined();
+    });
+});
+
+describe('DataExplorerExecutor name case', () => {
+    /** A PostgreSQL-like source: names without quotes are folded to lower case and the table is "Users". */
+    function create(o: Partial<DataExplorerProviderOptions> = {}) {
+        const queries: string[] = [];
+        const p: IDataExplorerProvider = {
+            executeAsync: async (context) => {
+                queries.push(context.query);
+                if (!context.query.includes('"Users"')) throw new Error('42P01: relation "users" does not exist');
+                if (/countrycode/i.test(context.query) && !context.query.includes('"CountryCode"')) {
+                    // Node providers answer failures in the result
+                    return { ...result(null, []), success: false, error: '42703: column "countrycode" does not exist' };
+                }
+                return result(['n'], [[3]]);
+            },
+            getSchemaAsync: async () => ({
+                source: 'db',
+                tables: [{ name: 'public.Users', type: 'table', columns: [{ name: 'CountryCode', type: 'text', nullable: true }] }],
+            }),
+        };
+        const registry = new DataExplorerRegistry();
+        registry.register(p, opts(o));
+        const audit: DataExplorerAuditEntry[] = [];
+        const executor = new DataExplorerExecutor(registry, { audit: () => async (e) => void audit.push(e) });
+        return { executor, queries, audit };
+    }
+
+    it('runs again with each name as the schema spells it', async () => {
+        const { executor, queries, audit } = create();
+
+        const res = await executor.executeAsync({ source: 'db', query: "select count(*) from Users where countrycode = 'MD'" });
+
+        expect(res.error).toBeFalsy();
+        expect(res.success).toBe(true);
+        expect(res.executedQuery).toBe(`select count(*) from "Users" where "CountryCode" = 'MD'`);
+        expect(queries).toHaveLength(3);
+        await new Promise((r) => setImmediate(r));
+        expect(audit).toHaveLength(1);
+        expect(audit[0].metadata.query).toBe("select count(*) from Users where countrycode = 'MD'");
+        expect(audit[0].metadata.executedQuery).toBe(res.executedQuery);
+    });
+
+    it('leaves a query that ran as sent alone', async () => {
+        const { executor } = create();
+        const res = await executor.executeAsync({ source: 'db', query: 'select count(*) from "Users"' });
+        expect(res.success).toBe(true);
+        expect(res.executedQuery).toBeUndefined();
+    });
+
+    it.each([
+        [false, true],
+        [true, false],
+    ])('only hints on a writable source or when turned off (readOnly %s, fixNameCase %s)', async (readOnly, fix) => {
+        const { executor, queries } = create({ readOnly, fixNameCase: fix });
+
+        const res = await executor.executeAsync({ source: 'db', query: 'select count(*) from Users' });
+
+        expect(res.success).toBe(false);
+        expect(res.error!.endsWith('Names with capital letters need double quotes: "Users"')).toBe(true);
+        expect(queries).toHaveLength(1);
     });
 });
 
