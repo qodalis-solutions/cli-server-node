@@ -217,6 +217,7 @@ describe('job history retention', () => {
             const job = scheduler.get(HISTORY_PRUNE_JOB_ID)!;
             expect(job).toMatchObject({ id: 'jobs:prune-history', name: 'jobs:prune-history', group: 'system', interval: '6h', status: 'active' });
             expect(job.tags).toContain('system');
+            expect(scheduler.jobs.get(HISTORY_PRUNE_JOB_ID)!.options.runOnStart).toBe(true);
             // Its own history follows the global limits
             expect(job.historyRetention).toEqual({
                 maxAge: '30d', maxRunsPerJob: null, failedMaxAge: null, failedMaxRunsPerJob: null, overridden: false, keepAll: false,
@@ -241,6 +242,41 @@ describe('job history retention', () => {
             expect(scheduler.get(HISTORY_PRUNE_JOB_ID)).toBeDefined();
         });
 
+        it('runs on start when it never ran', async () => {
+            const storage = new InMemoryJobStorageProvider();
+            const plugin = new CliJobsBuilder({ history: { maxRunsPerJob: 1 } })
+                .setStorageProvider(storage)
+                .addJob(new NoopJob(), { id: 'a' })
+                .build();
+            scheduler = plugin.scheduler;
+            await seed(storage, 'a', 2000);
+            await seed(storage, 'a', 1000);
+            await scheduler.start();
+            const start = Date.now();
+            while ((await storage.getExecutions(HISTORY_PRUNE_JOB_ID)).items[0]?.status !== 'completed') {
+                if (Date.now() - start > 5_000) throw new Error('prune job did not run on start');
+                await new Promise((r) => setTimeout(r, 5));
+            }
+            expect(await idsOf(storage, 'a')).toHaveLength(1);
+        });
+
+        it('does not run on start when it ran within pruneInterval', async () => {
+            const storage = new InMemoryJobStorageProvider();
+            await storage.saveJobState(HISTORY_PRUNE_JOB_ID, {
+                status: 'active',
+                lastRunAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            });
+            const plugin = new CliJobsBuilder({ history: { maxRunsPerJob: 1 } })
+                .setStorageProvider(storage)
+                .addJob(new NoopJob(), { id: 'a' })
+                .build();
+            scheduler = plugin.scheduler;
+            await scheduler.start();
+            await new Promise((r) => setTimeout(r, 50));
+            expect((await storage.getExecutions(HISTORY_PRUNE_JOB_ID)).total).toBe(0);
+        });
+
         it('records how many runs it deleted in the deleted property and its log', async () => {
             const storage = new InMemoryJobStorageProvider();
             const plugin = new CliJobsBuilder({ history: { maxRunsPerJob: 1 } })
@@ -249,8 +285,8 @@ describe('job history retention', () => {
                 .build();
             scheduler = plugin.scheduler;
             for (let i = 3; i >= 1; i--) await seed(storage, 'a', i * 1000);
-            await scheduler.start();
 
+            // Triggered without starting the scheduler, so its run on start does not interfere
             await scheduler.triggerAsync(HISTORY_PRUNE_JOB_ID);
             await untilIdle(scheduler, HISTORY_PRUNE_JOB_ID);
             const [run] = (await storage.getExecutions(HISTORY_PRUNE_JOB_ID)).items;

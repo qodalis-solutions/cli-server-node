@@ -116,7 +116,7 @@ an invalid value throws when the plugin is built or the job registered.
   counted on their own and the other runs against `maxRunsPerJob`; without it every run counts against `maxRunsPerJob`.
 - A job's own `history` replaces the global limits field by field; `keepAll: true` keeps every run of the job.
 - Running runs and the latest run of each job are never deleted. Runs of jobs no longer registered follow the global limits.
-- Pruning is the built-in job `jobs:prune-history` (group `system`, tag `system`, every `pruneInterval`), registered
+- Pruning is the built-in job `jobs:prune-history` (group `system`, tag `system`, every `pruneInterval`, and on start when it never ran or its next run is due), registered
   only when some retention is configured (globally or on a job). Each run records how many runs it deleted in its
   `deleted` property and its log. It can be paused, resumed and triggered like any job; its own history follows the
   global limits. `scheduler.pruneHistoryAsync()` prunes once from the host's code.
