@@ -11,6 +11,8 @@ export interface CliInstalledPlugin {
     name: string;
     version?: string;
     description?: string;
+    /** One emoji or an image URL shown for the package. */
+    icon?: string;
 }
 
 const PACKAGE_NAME = '@qodalis/cli-server-plugin-admin';
@@ -38,4 +40,5 @@ export const adminInstalledPlugin: CliInstalledPlugin = {
     name: 'Admin',
     version: pkg.version,
     description: pkg.description,
+    icon: '🎛️',
 };

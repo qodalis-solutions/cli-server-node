@@ -4,7 +4,8 @@ import { dirname, join } from 'path';
 /**
  * A server plugin package the host installed (users, admin, jobs, a storage
  * provider, ...), as listed by the admin dashboard's plugins page
- * (`GET /api/v1/qcli/plugins/installed`). Read from the package's `package.json`.
+ * (`GET /api/v1/qcli/plugins/installed`). Read from the package's `package.json`;
+ * a plugin adds its `icon` (`{ ...readInstalledPlugin(__dirname)!, icon: '💳' }`).
  */
 export interface CliInstalledPlugin {
     /** The npm package name, e.g. `@qodalis/cli-server-plugin-users`. */
@@ -15,6 +16,8 @@ export interface CliInstalledPlugin {
     version?: string;
     /** The package description. */
     description?: string;
+    /** One emoji or an image URL shown for the package; undefined = none (the dashboard shows a default). */
+    icon?: string;
 }
 
 /**

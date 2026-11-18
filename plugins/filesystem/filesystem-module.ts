@@ -10,5 +10,6 @@ export class FileSystemModule extends CliModule {
     name = 'filesystem';
     version = '1.0.0';
     description = 'Provides pluggable file storage with in-memory and OS providers';
+    icon = '📁';
     processors: ICliCommandProcessor[] = [];
 }

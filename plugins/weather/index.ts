@@ -149,5 +149,6 @@ export class WeatherModule extends CliModule {
     name = 'weather';
     version = '1.0.0';
     description = 'Provides weather information commands';
+    icon = '🌤️';
     processors: ICliCommandProcessor[] = [new CliWeatherCommandProcessor()];
 }

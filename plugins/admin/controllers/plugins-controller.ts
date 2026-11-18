@@ -8,7 +8,7 @@ import type { CliInstalledPlugin } from '../services/package-info';
  * Routes:
  * - GET  /          — list all registered modules (and the groups of commands added on their own)
  * - GET  /:id       — one module (case-insensitive id)
- * - GET  /installed — list the installed server plugin packages (id, name, version, description)
+ * - GET  /installed — list the installed server plugin packages (id, name, version, description, icon)
  * - POST /:id/toggle — toggle a module enabled/disabled
  */
 export function createPluginsController(
