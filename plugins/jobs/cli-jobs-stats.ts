@@ -108,7 +108,8 @@ export interface JobStatsBucket {
 export interface JobStatsJob extends JobRunSummary {
     jobId: string;
     jobName: string;
-    recent: { status: string; startedAt: string; duration: number | null }[];
+    /** The job's latest runs, newest first; `id` is the execution id (`GET /:jobId/history/:id`). */
+    recent: { id: string; status: string; startedAt: string; duration: number | null }[];
 }
 
 /** `GET /api/v1/qcli/jobs/stats` */
@@ -172,6 +173,7 @@ export function buildJobStats(runs: JobExecution[], range: StatsRange): JobStats
                 jobName: jobRuns[0].jobName ?? jobId,
                 ...summarize(jobRuns),
                 recent: jobRuns.slice(0, RECENT_RUNS).map((r) => ({
+                    id: r.id,
                     status: r.status,
                     startedAt: new Date(r.startedAt).toISOString(),
                     duration: typeof r.duration === 'number' ? r.duration : null,
