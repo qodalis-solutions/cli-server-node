@@ -3,8 +3,11 @@ import {
     JobExecution,
     JobExecutionQuery,
     JobExecutionStatus,
+    JobHistoryRetention,
     JobState,
+    jobHistoryRuleFor,
     matchesJobExecutionQuery,
+    selectRunsBreakingRetention,
 } from '@qodalis/cli-server-abstractions';
 
 /** Volatile, in-memory storage for job executions and state (lost on restart). */
@@ -64,6 +67,24 @@ export class InMemoryJobStorageProvider implements ICliJobStorageProvider {
         for (const execution of Array.from(this._executions.values())) {
             if (new Date(execution.startedAt).getTime() < before.getTime() && this._remove(execution.id)) {
                 removed++;
+            }
+        }
+        return removed;
+    }
+
+    async pruneHistory(retention: JobHistoryRetention): Promise<number> {
+        let removed = 0;
+        for (const [jobId, ids] of Array.from(this._jobExecutions)) {
+            const rule = jobHistoryRuleFor(retention, jobId);
+            if (!rule) continue;
+            // Newest inserted first, so runs that started at the same time keep that order
+            const newestFirst = [...ids]
+                .reverse()
+                .map((id) => this._executions.get(id)!)
+                .filter(Boolean)
+                .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+            for (const execution of selectRunsBreakingRetention(newestFirst, rule, retention.now)) {
+                if (this._remove(execution.id)) removed++;
             }
         }
         return removed;
