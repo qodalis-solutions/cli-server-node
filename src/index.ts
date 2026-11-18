@@ -186,4 +186,5 @@ export { CliBase64CommandProcessor } from './processors/cli-base64-command-proce
 export { Logger, createLogger } from './utils/logger';
 
 // Server factory
+export { getCliCaller, runAsCliCaller } from './auth/cli-caller';
 export { createCliServer, CliServerOptions, CliServerResult, CliServerMcp, MountablePlugin } from './create-cli-server';
