@@ -409,7 +409,7 @@ export class CliJobScheduler implements ICliJobScheduler {
     }
 
     /**
-     * Registers the built-in `jobs:prune-history` job (group `system`, every `history.pruneInterval`)
+     * Registers the built-in `jobs:prune-history` job (group `system`, every `history.pruneInterval`, run on start)
      * when some history retention is configured, globally or on a job, unless it is registered
      * already. `build()` and `start()` call it. Returns whether the job is registered.
      */
@@ -428,6 +428,8 @@ export class CliJobScheduler implements ICliJobScheduler {
             group: 'system',
             tags: ['system'],
             interval: formatDuration(this._pruneIntervalMs),
+            // Prunes at startup when it never ran or its next run is due
+            runOnStart: true,
         });
         return true;
     }
