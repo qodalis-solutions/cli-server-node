@@ -10,6 +10,7 @@ export class AwsModule extends CliModule {
     name = 'aws';
     version = '1.0.0';
     description = 'AWS cloud resource management';
+    icon = '☁️';
     processors: ICliCommandProcessor[];
 
     constructor() {

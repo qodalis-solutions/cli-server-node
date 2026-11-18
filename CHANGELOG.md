@@ -3,6 +3,10 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## Unreleased
+
+- **Icons for the installed plugins.** `/api/v1/qcli/plugins/installed` returns each package's `icon` (one emoji or an image URL; absent when it has none): `CliInstalledPlugin.icon`, set by the plugin where it describes its package (`{ ...readInstalledPlugin(__dirname)!, icon: '💳' }`). Every package has one: Core 🖥️, Admin 🎛️, Audit 🛡️, Aws ☁️, Jobs ⏱️, Users 👥, Weather 🌤️, DataExplorer 📊, FileSystem 📁 (Json 📄, Sqlite 🪶, S3 🪣) and the data explorer providers (Sql 🪶, Postgres 🐘, Mysql 🐬, Mssql 🗃️, Mongo 🍃, Redis 🔴, Elasticsearch 🔍). The weather, aws and filesystem modules have icons too (`ICliModule.icon`: 🌤️, ☁️, 📁).
+
 ## 1.0.0-beta.27
 
 - The admin plugin embeds dashboard 1.0.0-beta.23: built with Qodalis CLI 2.5.2; New token dialog, SQL editor with completion, the query as run ("Ran as"), module icons on the Plugins page, and the return to the dashboard after an external sign-in.

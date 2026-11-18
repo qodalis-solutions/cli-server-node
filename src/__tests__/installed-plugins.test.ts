@@ -87,6 +87,34 @@ describe('installed plugins', () => {
         });
     });
 
+    it('gives every first-party package and module an icon', async () => {
+        const cli = createCliServer();
+        cli.builder.addModule(new WeatherModule());
+        cli.builder.setFileStorageProvider(new JsonFileStorageProvider({ filePath: path.join(ROOT, 'dist', 'unused-fs.json') }));
+        const admin = adminPlugin(cli);
+        const users = new CliUsersBuilder().setDefaultAdminPassword('rootpass1').setProtectServer(false).build();
+        track(cli, admin, users);
+        cli.mountPlugin(admin);
+        cli.mountPlugin(users);
+        cli.mountPlugin(new CliJobsBuilder().build());
+        const token = await adminToken(cli);
+
+        const installed = await request(cli.app).get(`${V1}/plugins/installed`).set('Authorization', `Bearer ${token}`);
+        expect(Object.fromEntries(installed.body.map((p: { name: string; icon?: string }) => [p.name, p.icon]))).toEqual({
+            Core: '🖥️',
+            Weather: '🌤️',
+            FileSystem: '📁',
+            'FileSystem.Json': '📄',
+            Admin: '🎛️',
+            Users: '👥',
+            Audit: '🛡️',
+            Jobs: '⏱️',
+        });
+
+        const modules = await request(cli.app).get(`${V1}/plugins`).set('Authorization', `Bearer ${token}`);
+        expect(modules.body.find((m: { id: string }) => m.id === 'weather').icon).toBe('🌤️');
+    });
+
     it('lists the audit plugin once when mounted alone, again, or with the users plugin that serves it', async () => {
         const cli = createCliServer();
         const admin = adminPlugin(cli);

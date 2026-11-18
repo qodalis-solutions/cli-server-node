@@ -13,6 +13,8 @@ export interface CliInstalledPlugin {
     name: string;
     version?: string;
     description?: string;
+    /** One emoji or an image URL shown for the package. */
+    icon?: string;
 }
 
 const PACKAGE_NAME = '@qodalis/cli-server-plugin-data-explorer-elasticsearch';
@@ -40,4 +42,5 @@ export const dataExplorerElasticsearchInstalledPlugin: CliInstalledPlugin = {
     name: 'DataExplorer.Elasticsearch',
     version: pkg.version,
     description: pkg.description,
+    icon: '🔍',
 };

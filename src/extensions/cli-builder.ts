@@ -12,7 +12,10 @@ const FILESYSTEM_PACKAGE = '@qodalis/cli-server-plugin-filesystem';
 const DATA_EXPLORER_PACKAGE = '@qodalis/cli-server-plugin-data-explorer';
 
 /** The server itself, listed first among the installed plugins. */
-const corePlugin: CliInstalledPlugin = readInstalledPlugin(__dirname, CORE_PACKAGE, 'Core') ?? { id: CORE_PACKAGE, name: 'Core' };
+const corePlugin: CliInstalledPlugin = {
+    ...(readInstalledPlugin(__dirname, CORE_PACKAGE, 'Core') ?? { id: CORE_PACKAGE, name: 'Core' }),
+    icon: '🖥️',
+};
 
 /**
  * Fluent builder for configuring CLI server processors, modules, filesystem, and data explorer providers.
