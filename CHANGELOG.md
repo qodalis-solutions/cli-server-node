@@ -3,8 +3,12 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
-## Unreleased
+## 1.0.0-beta.28
 
+- The admin plugin embeds dashboard 1.0.0-beta.24: history retention on the job page and the pruning job's last run, collapsible job filters, Jobs and Recent runs tabs, paged lists, tag colours, run controls and row actions as button groups, last-runs tooltips that open the run, a navigation drawer on phones and tablets, shared selects, menus and dialogs, plugin icons, and uploads into folders.
+- **Jobs: built-in history retention** (#94). `new CliJobsBuilder({ history: { maxAge, maxRunsPerJob, failedMaxAge, failedMaxRunsPerJob, pruneInterval } })` or `.setHistory(...)`, off by default; a job overrides them with `history` (or keeps everything with `keepAll`). The built-in system job `jobs:prune-history` (group `system`, runs on start when due) deletes the runs past the limits and records how many in its run's `deleted` property. Failed runs are counted on their own when `failedMaxRunsPerJob` is set; running runs and each job's newest run are never deleted; runs of jobs no longer registered follow the global limits. Storage providers get an optional `pruneHistory(retention)`. Job info carries `historyRetention` (the limits in force, `null` when none apply), for the dashboard.
+- **Jobs: run ids in the statistics.** Each recent run in `GET /api/v1/qcli/jobs/stats` carries its execution `id`, so the dashboard's last-runs bars open the run.
+- **`getCliCaller()`**: code a CLI request runs (a processor and the services it calls) reads the authenticated caller (`{ userId, userName, permissions, sessionId?, tokenId? }`) for sessions, API tokens (a terminal linked with `server add`) and the host's adapter sign-ins; undefined outside an authenticated CLI request.
 - **Icons for the installed plugins.** `/api/v1/qcli/plugins/installed` returns each package's `icon` (one emoji or an image URL; absent when it has none): `CliInstalledPlugin.icon`, set by the plugin where it describes its package (`{ ...readInstalledPlugin(__dirname)!, icon: '💳' }`). Every package has one: Core 🖥️, Admin 🎛️, Audit 🛡️, Aws ☁️, Jobs ⏱️, Users 👥, Weather 🌤️, DataExplorer 📊, FileSystem 📁 (Json 📄, Sqlite 🪶, S3 🪣) and the data explorer providers (Sql 🪶, Postgres 🐘, Mysql 🐬, Mssql 🗃️, Mongo 🍃, Redis 🔴, Elasticsearch 🔍). The weather, aws and filesystem modules have icons too (`ICliModule.icon`: 🌤️, ☁️, 📁).
 
 ## 1.0.0-beta.27
