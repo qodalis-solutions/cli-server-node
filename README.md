@@ -502,6 +502,26 @@ The order matters: `createCliServer()` installs its auth gate inside `cli.app`, 
 
 Details: [plugins/users/README.md](plugins/users/README.md#external-auth-adapter).
 
+### The caller in your own code (`getCliCaller`)
+
+Code that a CLI request runs (a processor and the services it calls) reads the authenticated caller with
+`getCliCaller()`: `{ userId, userName, permissions, sessionId?, tokenId? }`, the identity your sign-in adapter or
+the users plugin established, whether it came from a session, an API token (`tokenId` set, e.g. a terminal linked
+with `server add`) or your adapter. It is undefined outside an authenticated CLI request (an unprotected server, a
+background job). A command's `requiredPermissions` are checked against the caller's permissions before it runs.
+
+```ts
+import { getCliCaller } from '@qodalis/cli-server-node';
+
+class MyCommand extends CliCommandProcessor {
+    async handleAsync() {
+        const caller = getCliCaller();
+        if (!caller) return 'not signed in';
+        return `hello ${caller.userName}`;
+    }
+}
+```
+
 ## MCP endpoint
 
 `POST {basePath}/mcp` (default `/api/qcli/mcp`) exposes the server to AI clients such as Claude Code over the [Model Context Protocol](https://modelcontextprotocol.io): stateless Streamable HTTP with JSON responses, methods `initialize`, `ping`, `tools/list`, `tools/call`. It is off by default.

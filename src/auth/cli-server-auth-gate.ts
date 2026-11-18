@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
+import { runAsCliCaller } from './cli-caller';
 import { ICliCommandProcessor, commandMatches } from '../abstractions';
 import { ICliCommandRegistry } from '../services/cli-command-registry';
 import { CliServerAuthContext, CliServerPermissions as P, ICliServerAuth } from './cli-server-auth';
@@ -141,7 +142,8 @@ export function createServerAuthGate(
                     return;
                 }
                 req.qcliServerAuth = ctx;
-                next();
+                // Host code (a processor's services) reads the caller with getCliCaller()
+                runAsCliCaller(ctx, next);
             },
             (err: { status?: number; message?: string }) => {
                 if (typeof err?.status !== 'number') {
