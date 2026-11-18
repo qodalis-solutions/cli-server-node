@@ -8,7 +8,7 @@ import {
     resolveCliEventBus,
 } from '@qodalis/cli-server-abstractions';
 import { Router } from 'express';
-import { CliJobScheduler } from './cli-job-scheduler';
+import { CliJobScheduler, CliJobsOptions } from './cli-job-scheduler';
 import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
 import { createCliJobsController } from './cli-jobs-controller';
 import { jobsInstalledPlugin } from './package-info';
@@ -47,6 +47,25 @@ export interface CliJobsPluginResult {
 export class CliJobsBuilder {
     private readonly _jobs: Array<{ job: ICliJob; options: CliJobOptions }> = [];
     private _storageProvider?: ICliJobStorageProvider;
+    private readonly _options: CliJobsOptions;
+
+    /**
+     * @param options The plugin's options, e.g. the history retention:
+     *   `new CliJobsBuilder({ history: { maxAge: '30d', maxRunsPerJob: 500 } })`.
+     */
+    constructor(options: CliJobsOptions = {}) {
+        this._options = { ...options };
+    }
+
+    /**
+     * Set the history retention (opt-in): `maxAge`, `maxRunsPerJob`, `failedMaxAge`,
+     * `failedMaxRunsPerJob` and `pruneInterval` (default 1 day), applied by the built-in
+     * `jobs:prune-history` job. A job's own `history` options replace them for that job.
+     */
+    setHistory(history: CliJobsOptions['history']): CliJobsBuilder {
+        this._options.history = history;
+        return this;
+    }
 
     /**
      * Register a job to be managed by the scheduler.
@@ -74,11 +93,12 @@ export class CliJobsBuilder {
      */
     build(events?: ICliEventBus | CliEventBroadcastFn): CliJobsPluginResult {
         const storage = this._storageProvider ?? new InMemoryJobStorageProvider();
-        const scheduler = new CliJobScheduler(storage);
+        const scheduler = new CliJobScheduler(storage, this._options);
 
         for (const { job, options } of this._jobs) {
             scheduler.register(job, options);
         }
+        scheduler.ensureHistoryPruneJob();
 
         const explicitBus = resolveCliEventBus(events);
         scheduler.setEventBus(explicitBus);

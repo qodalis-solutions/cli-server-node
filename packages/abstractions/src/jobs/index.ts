@@ -17,3 +17,13 @@ export {
 } from './job-execution-query';
 export { JobState, JobStatus } from './job-state';
 export { JobLogEntry, JobLogLevel } from './log-entry';
+export {
+    JobDuration,
+    JobHistoryLimits,
+    CliJobsHistoryOptions,
+    CliJobHistoryOptions,
+    JobHistoryRule,
+    JobHistoryRetention,
+    jobHistoryRuleFor,
+    selectRunsBreakingRetention,
+} from './job-history-retention';

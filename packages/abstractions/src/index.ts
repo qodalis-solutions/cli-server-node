@@ -26,6 +26,14 @@ export {
     JobStatus,
     JobLogEntry,
     JobLogLevel,
+    JobDuration,
+    JobHistoryLimits,
+    CliJobsHistoryOptions,
+    CliJobHistoryOptions,
+    JobHistoryRule,
+    JobHistoryRetention,
+    jobHistoryRuleFor,
+    selectRunsBreakingRetention,
 } from './jobs';
 export {
     DataExplorerLanguage,

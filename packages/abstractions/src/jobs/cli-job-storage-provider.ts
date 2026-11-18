@@ -1,6 +1,7 @@
 import { JobExecution, JobExecutionStatus } from './job-execution';
 import { JobExecutionQuery, mergeJobExecutions } from './job-execution-query';
 import { JobState } from './job-state';
+import { JobHistoryRetention } from './job-history-retention';
 
 /** Persistence provider for job execution records and job state. */
 export interface ICliJobStorageProvider {
@@ -28,6 +29,14 @@ export interface ICliJobStorageProvider {
      * it nothing is deleted ({@link pruneJobExecutions} returns 0).
      */
     prune?(before: Date): Promise<number>;
+    /**
+     * Deletes the executions (and their logs) that break the history retention: per job, the
+     * runs older than its age limit or beyond its count limit (failed runs under the failed
+     * limits when set). Never a running execution or the newest execution of a job. Returns how
+     * many. Optional: without it the jobs plugin falls back to an age-only {@link prune}.
+     * Database providers should delete set-based (e.g. runs not among the newest N).
+     */
+    pruneHistory?(retention: JobHistoryRetention): Promise<number>;
     /**
      * Deletes an execution (a run the job discarded, see `context.discard()`);
      * returns whether it was deleted. Optional: without it every execution is kept.

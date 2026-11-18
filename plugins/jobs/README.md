@@ -86,6 +86,47 @@ scheduler's `setEventBus(bus)`, `eventBus` and `publishEvent(type, data)` are pu
 | `timeout` | `string?` | — | Max execution duration (same format as interval); a run past it ends as `timed_out`, a run cancelled by hand as `cancelled` |
 | `maxConcurrentRuns` | `number` | `1` | Up to this many runs of the job at the same time (integer >= 1) |
 | `overlapPolicy` | `string` | `skip` | What a due run does when `maxConcurrentRuns` runs are going: `skip`, `queue`, or `cancel` (see below) |
+| `history` | `object?` | — | This job's history limits (`maxAge`, `maxRunsPerJob`, `failedMaxAge`, `failedMaxRunsPerJob`), replacing the global ones field by field, or `keepAll: true` to keep every run (see [History retention](#history-retention)) |
+
+## History retention
+
+The scheduler keeps every run unless history retention is configured (opt-in, off by default). Set it on the plugin:
+
+```typescript
+const jobsPlugin = new CliJobsBuilder({
+    history: {
+        maxAge: '30d',            // delete runs older than this
+        maxRunsPerJob: 500,       // keep at most this many runs per job (the newest)
+        failedMaxAge: '90d',      // optional: failed runs kept longer
+        failedMaxRunsPerJob: 100, // optional: failed runs counted on their own
+        pruneInterval: '6h',      // how often to prune (default 1 day)
+    },
+})
+    .addJob(new FetchJob(), { name: 'fetch', interval: '30m', history: { maxRunsPerJob: 50 } })
+    .addJob(new ReportJob(), { name: 'monthly-report', schedule: '0 0 1 * *', history: { keepAll: true } })
+    .build();
+```
+
+`setHistory({ ... })` on the builder does the same, and `new CliJobScheduler(storage, { history })` for a scheduler
+of your own. Durations are interval strings (`30s`, `5m`, `6h`, `30d`) or milliseconds; counts are integers >= 1;
+an invalid value throws when the plugin is built or the job registered.
+
+- A run is deleted when it breaks any limit that is set. Failed runs (status `failed`) use `failedMaxAge` and
+  `failedMaxRunsPerJob` when set, else `maxAge` and `maxRunsPerJob`. With `failedMaxRunsPerJob`, failed runs are
+  counted on their own and the other runs against `maxRunsPerJob`; without it every run counts against `maxRunsPerJob`.
+- A job's own `history` replaces the global limits field by field; `keepAll: true` keeps every run of the job.
+- Running runs and the latest run of each job are never deleted. Runs of jobs no longer registered follow the global limits.
+- Pruning is the built-in job `jobs:prune-history` (group `system`, tag `system`, every `pruneInterval`), registered
+  only when some retention is configured (globally or on a job). Each run records how many runs it deleted in its
+  `deleted` property and its log. It can be paused, resumed and triggered like any job; its own history follows the
+  global limits. `scheduler.pruneHistoryAsync()` prunes once from the host's code.
+
+Job info (`GET /`, `GET /:id`, MCP `jobs_list` / `jobs_get`) carries the limits that apply to each job as
+`historyRetention`, or `null` when none do:
+
+```json
+{ "maxAge": "30d", "maxRunsPerJob": 50, "failedMaxAge": "90d", "failedMaxRunsPerJob": null, "overridden": true, "keepAll": false }
+```
 
 ## Concurrent runs
 
@@ -159,7 +200,7 @@ const plugin = new CliJobsBuilder()
     .build();
 ```
 
-Besides the required methods, a storage may implement `queryExecutions(query)` (listing across jobs in one query; without it the scheduler merges the per-job listings), `prune(before)` (delete old executions; call it on a schedule, e.g. `pruneJobExecutions(storage, new Date(Date.now() - 30 * 86_400_000))`) and `deleteExecution(id)` (used by `discard()`; without it discarded runs are kept). The in-memory storage implements all three.
+Besides the required methods, a storage may implement `queryExecutions(query)` (listing across jobs in one query; without it the scheduler merges the per-job listings), `pruneHistory(retention)` (the [history retention](#history-retention): per job, delete the runs past its age or count limits, never a running run or the job's newest run; database storages should delete set-based, e.g. the runs not among the newest N, `selectRunsBreakingRetention` does it for runs held in memory), `prune(before)` (delete the executions started before a date; the history retention falls back to it when `pruneHistory` is missing and every job has an age limit) and `deleteExecution(id)` (used by `discard()`; without it discarded runs are kept). The in-memory storage implements all four.
 
 ## License
 

@@ -14,9 +14,14 @@ import {
     JobExecutionQuery,
     mergeJobExecutions,
     deleteJobExecution,
+    CliJobsHistoryOptions,
+    JobHistoryLimits,
+    JobHistoryRetention,
+    JobHistoryRule,
 } from '@qodalis/cli-server-abstractions';
 import { CliJobExecutionContext } from './cli-job-execution-context';
-import { parseInterval } from './interval-parser';
+import { formatDuration, parseDuration, parseInterval } from './interval-parser';
+import { HISTORY_PRUNE_JOB_ID, JobHistoryPruneJob } from './job-history-prune-job';
 
 /** Characters a job id may not have: it is part of the jobs API's URLs. */
 const UNSAFE_ID_CHARS = /[/\\?#]/;
@@ -81,6 +86,66 @@ export interface JobDto {
     lastRunAt?: string;
     lastRunStatus?: string;
     lastRunDuration?: number;
+    /** The history limits that apply to the job, or null when its runs are all kept. */
+    historyRetention: JobHistoryRetentionInfo | null;
+}
+
+/** A job's effective history limits in job info (durations as interval strings, unset limits null). */
+export interface JobHistoryRetentionInfo {
+    maxAge: string | null;
+    maxRunsPerJob: number | null;
+    failedMaxAge: string | null;
+    failedMaxRunsPerJob: number | null;
+    /** The job sets its own `history` options. */
+    overridden: boolean;
+    /** The job keeps every run (`history.keepAll`). */
+    keepAll: boolean;
+}
+
+/** Options of the jobs plugin. */
+export interface CliJobsOptions {
+    /**
+     * History retention (opt-in, off by default): `maxAge`, `maxRunsPerJob`, `failedMaxAge`,
+     * `failedMaxRunsPerJob` for every job, applied by the built-in `jobs:prune-history` job every
+     * `pruneInterval` (default 1 day). A job's own `history` options replace them for that job.
+     */
+    history?: CliJobsHistoryOptions;
+}
+
+/** Default `history.pruneInterval`: 1 day. */
+const DEFAULT_PRUNE_INTERVAL_MS = 86_400_000;
+
+/**
+ * Validates history limits and resolves them to milliseconds and counts.
+ * @throws {Error} When a duration is not positive or a count is not an integer >= 1.
+ */
+function resolveHistoryLimits(limits: JobHistoryLimits, where: string): JobHistoryRule {
+    const duration = (name: keyof JobHistoryLimits): number | undefined => {
+        const value = limits[name];
+        if (value === undefined || value === null) return undefined;
+        const ms = parseDuration(value);
+        if (ms === null) throw new Error(`${where}: history.${name} must be a duration like '30d' or milliseconds > 0`);
+        return ms;
+    };
+    const count = (name: keyof JobHistoryLimits): number | undefined => {
+        const value = limits[name];
+        if (value === undefined || value === null) return undefined;
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+            throw new Error(`${where}: history.${name} must be an integer >= 1`);
+        }
+        return value;
+    };
+    return {
+        maxAgeMs: duration('maxAge'),
+        maxRuns: count('maxRunsPerJob'),
+        failedMaxAgeMs: duration('failedMaxAge'),
+        failedMaxRuns: count('failedMaxRunsPerJob'),
+    };
+}
+
+function hasHistoryLimit(rule: JobHistoryRule): boolean {
+    return rule.maxAgeMs !== undefined || rule.maxRuns !== undefined
+        || rule.failedMaxAgeMs !== undefined || rule.failedMaxRuns !== undefined;
 }
 
 type BroadcastFn = (message: Record<string, unknown>) => void;
@@ -246,9 +311,25 @@ export class CliJobScheduler implements ICliJobScheduler {
     private readonly _storage: ICliJobStorageProvider;
     private _eventBus: ICliEventBus | null = null;
     private _running = false;
+    /** The global history limits, undefined when none is set. */
+    private readonly _historyRule?: JobHistoryRule;
+    private readonly _pruneIntervalMs: number;
 
-    constructor(storage: ICliJobStorageProvider) {
+    /**
+     * @throws {Error} When `options.history` has an invalid limit or `pruneInterval`.
+     */
+    constructor(storage: ICliJobStorageProvider, options?: CliJobsOptions) {
         this._storage = storage;
+        const history = options?.history;
+        const rule = history ? resolveHistoryLimits(history, 'Jobs') : undefined;
+        this._historyRule = rule && hasHistoryLimit(rule) ? rule : undefined;
+        if (history?.pruneInterval !== undefined) {
+            const ms = parseDuration(history.pruneInterval);
+            if (ms === null) throw new Error(`Jobs: history.pruneInterval must be a duration like '6h' or milliseconds > 0`);
+            this._pruneIntervalMs = ms;
+        } else {
+            this._pruneIntervalMs = DEFAULT_PRUNE_INTERVAL_MS;
+        }
     }
 
     /**
@@ -313,6 +394,7 @@ export class CliJobScheduler implements ICliJobScheduler {
         if ('error' in tags) {
             throw new Error(`Job '${id}': ${tags.error}`);
         }
+        if (options.history) resolveHistoryLimits(options.history, `Job '${id}'`);
         const enabled = options.enabled !== false;
         const reg: JobRegistration = {
             id,
@@ -326,9 +408,98 @@ export class CliJobScheduler implements ICliJobScheduler {
         return id;
     }
 
+    /**
+     * Registers the built-in `jobs:prune-history` job (group `system`, every `history.pruneInterval`)
+     * when some history retention is configured, globally or on a job, unless it is registered
+     * already. `build()` and `start()` call it. Returns whether the job is registered.
+     */
+    ensureHistoryPruneJob(): boolean {
+        if (this._registrations.has(HISTORY_PRUNE_JOB_ID)) return true;
+        const configured = this._historyRule !== undefined
+            || Array.from(this._registrations.values()).some((reg) => {
+                const history = this._historyOf(reg.options);
+                return history !== null && !history.keepAll;
+            });
+        if (!configured) return false;
+        this.register(new JobHistoryPruneJob(() => this.pruneHistoryAsync()), {
+            id: HISTORY_PRUNE_JOB_ID,
+            name: HISTORY_PRUNE_JOB_ID,
+            description: 'Deletes the job runs past the history retention',
+            group: 'system',
+            tags: ['system'],
+            interval: formatDuration(this._pruneIntervalMs),
+        });
+        return true;
+    }
+
+    /**
+     * The history retention of every registered job (a keep-all job or one without limits maps to
+     * null) and the global limits for the runs of jobs no longer registered.
+     */
+    historyRetention(now = new Date()): JobHistoryRetention {
+        const jobs: Record<string, JobHistoryRule | null> = {};
+        for (const reg of this._registrations.values()) {
+            const history = this._historyOf(reg.options);
+            jobs[reg.id] = history && !history.keepAll ? history.rule : null;
+        }
+        return { now, jobs, ...(this._historyRule ? { defaults: { ...this._historyRule } } : {}) };
+    }
+
+    /**
+     * Deletes the runs past the history retention (what the `jobs:prune-history` job runs);
+     * returns how many. Uses the storage's `pruneHistory`, else an age-only `prune` when every
+     * job has an age limit (the oldest limit wins), else deletes nothing.
+     */
+    async pruneHistoryAsync(): Promise<number> {
+        const retention = this.historyRetention();
+        if (this._storage.pruneHistory) return this._storage.pruneHistory(retention);
+        if (!this._storage.prune) return 0;
+        const rules = [...Object.values(retention.jobs), ...(retention.defaults ? [retention.defaults] : [])];
+        let maxAgeMs = 0;
+        for (const rule of rules) {
+            const ages = [rule?.maxAgeMs, rule?.failedMaxAgeMs ?? rule?.maxAgeMs];
+            // A job without an age limit (or keeping everything) would lose runs to an age-only prune
+            if (!rule || ages.some((a) => a === undefined)) return 0;
+            maxAgeMs = Math.max(maxAgeMs, ...(ages as number[]));
+        }
+        if (rules.length === 0) return 0;
+        return this._storage.prune(new Date(retention.now.getTime() - maxAgeMs));
+    }
+
+    /** A job's effective history limits: its own `history` fields over the global ones; null when none apply. */
+    private _historyOf(options: CliJobOptions): { rule: JobHistoryRule; overridden: boolean; keepAll: boolean } | null {
+        const own = options.history;
+        if (own?.keepAll) return { rule: {}, overridden: true, keepAll: true };
+        const ownRule = own ? resolveHistoryLimits(own, `Job '${options.id ?? options.name}'`) : {};
+        const global = this._historyRule ?? {};
+        const rule: JobHistoryRule = {
+            maxAgeMs: ownRule.maxAgeMs ?? global.maxAgeMs,
+            maxRuns: ownRule.maxRuns ?? global.maxRuns,
+            failedMaxAgeMs: ownRule.failedMaxAgeMs ?? global.failedMaxAgeMs,
+            failedMaxRuns: ownRule.failedMaxRuns ?? global.failedMaxRuns,
+        };
+        if (!hasHistoryLimit(rule)) return null;
+        return { rule, overridden: hasHistoryLimit(ownRule), keepAll: false };
+    }
+
+    private _historyRetentionInfo(options: CliJobOptions): JobHistoryRetentionInfo | null {
+        const history = this._historyOf(options);
+        if (!history) return null;
+        const { rule } = history;
+        return {
+            maxAge: rule.maxAgeMs !== undefined ? formatDuration(rule.maxAgeMs) : null,
+            maxRunsPerJob: rule.maxRuns ?? null,
+            failedMaxAge: rule.failedMaxAgeMs !== undefined ? formatDuration(rule.failedMaxAgeMs) : null,
+            failedMaxRunsPerJob: rule.failedMaxRuns ?? null,
+            overridden: history.overridden,
+            keepAll: history.keepAll,
+        };
+    }
+
     /** Load persisted job states and start timers for all active jobs. */
     async start(): Promise<void> {
         this._running = true;
+        this.ensureHistoryPruneJob();
 
         // Load persisted states
         const states = await this._storage.getAllJobStates();
@@ -673,6 +844,7 @@ export class CliJobScheduler implements ICliJobScheduler {
             lastRunAt: reg.lastRunAt,
             lastRunStatus: reg.lastRunStatus,
             lastRunDuration: reg.lastRunDuration,
+            historyRetention: this._historyRetentionInfo(reg.options),
         };
     }
 

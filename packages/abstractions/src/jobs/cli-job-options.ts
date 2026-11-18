@@ -1,3 +1,5 @@
+import { CliJobHistoryOptions } from './job-history-retention';
+
 /** Behavior when a job's timer fires while the previous execution is still running. */
 export type JobOverlapPolicy = 'skip' | 'queue' | 'cancel';
 
@@ -61,4 +63,10 @@ export interface CliJobOptions {
      * from its start until it ends, its retries and the delays between them included. Default 1.
      */
     maxConcurrentRuns?: number;
+    /**
+     * This job's history limits (`maxAge`, `maxRunsPerJob`, `failedMaxAge`, `failedMaxRunsPerJob`):
+     * a set field replaces the plugin's global `history` one for this job; `keepAll: true` keeps
+     * every run of the job.
+     */
+    history?: CliJobHistoryOptions;
 }
