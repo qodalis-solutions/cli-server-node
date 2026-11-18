@@ -153,7 +153,8 @@ describe('GET /api/v1/qcli/jobs/stats', () => {
         await storage.saveExecution(run(fetch, at(0, 5), 'completed', 1000, 'Fetch rates'));
         await storage.saveExecution(run(fetch, at(0, 30), 'failed', 3000, 'Fetch rates'));
         await storage.saveExecution(run(fetch, at(5), 'timed_out', 5000, 'Fetch rates'));
-        await storage.saveExecution(run(fetch, at(23, 59), 'running', undefined, 'Fetch rates'));
+        const runningRun = run(fetch, at(23, 59), 'running', undefined, 'Fetch rates');
+        await storage.saveExecution(runningRun);
         await storage.saveExecution(run(cleanup, at(5, 10), 'cancelled', 200));
         // Outside the range: before since and at until (exclusive)
         await storage.saveExecution(run(fetch, '2026-11-03T23:59:59.000Z', 'completed', 10));
@@ -183,7 +184,7 @@ describe('GET /api/v1/qcli/jobs/stats', () => {
         const fetchStats = res.body.jobs.find((j: any) => j.jobId === fetch);
         expect(fetchStats).toMatchObject({ jobName: 'Fetch rates', total: 4, succeeded: 1, failed: 2, running: 1, p95Duration: 5000 });
         expect(fetchStats.recent.map((r: any) => r.status)).toEqual(['running', 'timed_out', 'failed', 'completed']);
-        expect(fetchStats.recent[0]).toEqual({ status: 'running', startedAt: at(23, 59), duration: null });
+        expect(fetchStats.recent[0]).toEqual({ id: runningRun.id, status: 'running', startedAt: at(23, 59), duration: null });
     });
 
     it('keeps at most 12 recent runs per job, newest first', async () => {
