@@ -31,6 +31,16 @@ export function isSafePathPrefix(prefix: string): boolean {
     return !prefix.startsWith('//') && !prefix.startsWith('/\\');
 }
 
+/** The CLI's own route prefixes (core's); a portal mount must neither hold nor sit inside one. */
+const CLI_PREFIXES = ['/api/qcli', '/api/v1/qcli', '/api/v2/qcli', '/api/cli', '/ws/qcli', '/ws/v1/qcli'];
+
+/** True for a mount (other than `/`) that holds CLI routes (`/api`, `/ws`) or lies inside them. */
+function holdsCliRoutes(path: string): boolean {
+    if (path === '/') return false;
+    const mount = path.toLowerCase();
+    return CLI_PREFIXES.some((cli) => cli === mount || cli.startsWith(`${mount}/`) || mount.startsWith(`${cli}/`));
+}
+
 const escapeAttribute = (value: string) =>
     value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -114,7 +124,7 @@ export class CliPortalBuilder {
 
     /** Validates the options (startup errors are thrown here) and reads the site once. */
     build(): PortalPluginResult {
-        if (!isValidPortalPath(this.path)) {
+        if (!isValidPortalPath(this.path) || holdsCliRoutes(this.path)) {
             throw new Error(`invalid portal path: ${this.path}`);
         }
         const mount = this.path;
@@ -222,6 +232,15 @@ export class CliPortalBuilder {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
             res.sendFile(join(assetsDir, file), (err) => err && !res.headersSent && next());
         });
+
+        // Every path under a prefix the gate opens is the portal's: its own 404, never a host
+        // route behind it. At the root mount (never under /api, so nothing is opened there)
+        // unknown paths keep falling through to the host.
+        if (mount !== '/') {
+            router.get(['/assets', '/assets/*', '/guides', '/guides/*', '/reference/*'], (_req, res) => {
+                res.status(404).json({ error: 'not found' });
+            });
+        }
 
         const at = (p: string) => (mount === '/' ? p : `${mount}${p}`);
         const fixed = ['', '/', '/reference', '/portal.json', '/favicon.svg'].map((p) => (p === '' ? mount : at(p)));

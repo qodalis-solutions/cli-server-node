@@ -19,7 +19,7 @@ import {
     trustedProxyHops,
 } from './auth/cli-server-auth';
 import { DataExplorerCaller } from '@qodalis/cli-server-abstractions';
-import { createServerAuthGate, normalizePath } from './auth/cli-server-auth-gate';
+import { createServerAuthGate, isUnderPrefix, normalizePath } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
 import {
@@ -57,7 +57,10 @@ export interface MountablePlugin {
     serverAuth?: ICliServerAuth;
     /**
      * Routes that stay public under server protection, as `"METHOD /path"` (e.g. a plugin's
-     * login); `"GET /prefix/*"` makes every GET and HEAD under the prefix public (never a CLI route).
+     * login); `"GET /prefix/*"` makes every GET and HEAD under the prefix public. A plugin with
+     * `cliRoutes: false` may declare only paths under its own `prefix` (never a bare `/*`, only
+     * GET prefixes) and its entries never open a CLI route; any other entry fails startup with
+     * `invalid public route: <entry>`. Only host-route plugins may declare prefixes.
      */
     publicRoutes?: string[];
     /** MCP tool providers contributed by the plugin (used when the `mcp` option is on). */
@@ -266,8 +269,16 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;
     const publicRoutes = new Set<string>();
-    // `GET /prefix/*` entries: every GET and HEAD under the prefix is public
-    const publicPrefixes = new Set<string>();
+    // Public routes of host-route plugins (exact entries and `GET /prefix/*` entries): the gate
+    // hands such a request to that plugin's router alone, never to a host route
+    const hostPublic: Array<{ exact: Set<string>; prefixes: string[]; handler: Router }> = [];
+    const hostPublicHandler = (method: string, path: string) => {
+        for (const entry of hostPublic) {
+            if (entry.exact.has(`${method} ${path}`)) return entry.handler;
+            if ((method === 'GET' || method === 'HEAD') && entry.prefixes.some((p) => isUnderPrefix(path, p))) return entry.handler;
+        }
+        return undefined;
+    };
     // The CLI's own routes (host tokens are refused there); mountPlugin adds the plugins' prefixes
     const cliRoutePrefixes = new Set<string>([
         '/api/qcli',
@@ -283,7 +294,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             registry,
             cliPrefixes: Array.from(new Set(['/api/v1/qcli', normalizePath(basePath)])),
             publicRoutes,
-            publicPrefixes,
+            hostPublicHandler,
             mcpPaths: mcpOptions ? [mcpPath] : [],
             cliRoutePrefixes,
         }),
@@ -439,15 +450,40 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     }
 
     const mountPlugin = (plugin: MountablePlugin) => {
+        // Validated in full before anything is registered: a bad entry fails startup
+        const hostRoutes = plugin.cliRoutes === false;
+        const mount = normalizePath(plugin.prefix);
+        const underMount = (path: string) => mount === '/' || path === mount || path.startsWith(`${mount}/`);
+        const exact: string[] = [];
+        const prefixes: string[] = [];
         for (const route of plugin.publicRoutes ?? []) {
-            const [method, ...rest] = route.trim().split(/\s+/);
+            const [rawMethod, ...rest] = route.trim().split(/\s+/);
+            const method = (rawMethod ?? '').toUpperCase();
             const path = rest.join(' ');
             if (path.endsWith('/*')) {
-                // GET and HEAD under the prefix (only GET entries make a prefix public)
-                if (method.toUpperCase() === 'GET') publicPrefixes.add(normalizePath(path.slice(0, -2) || '/'));
+                // `GET <prefix>/*`: every GET and HEAD under a prefix of a host-route plugin's own mount
+                const prefix = normalizePath(path.slice(0, -2) || '/');
+                if (!hostRoutes || method !== 'GET' || prefix === '/' || !underMount(prefix)) {
+                    throw new Error(`invalid public route: ${route}`);
+                }
+                prefixes.push(prefix);
                 continue;
             }
-            publicRoutes.add(`${method.toUpperCase()} ${normalizePath(path)}`);
+            const exactPath = normalizePath(path);
+            // a host-route plugin declares only paths under its own mount
+            if (!method || !path.startsWith('/') || (hostRoutes && !underMount(exactPath))) {
+                throw new Error(`invalid public route: ${route}`);
+            }
+            exact.push(`${method} ${exactPath}`);
+        }
+        if (hostRoutes) {
+            if (exact.length > 0 || prefixes.length > 0) {
+                const handler = Router();
+                handler.use(plugin.prefix, plugin.router);
+                hostPublic.push({ exact: new Set(exact), prefixes, handler });
+            }
+        } else {
+            for (const entry of exact) publicRoutes.add(entry);
         }
         if (plugin.serverAuth && plugin.serverAuth !== serverAuth) {
             setAuth(plugin.serverAuth);
@@ -460,7 +496,6 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             builder.addInstalledPlugin(bundled);
         }
         plugin.setEventBus?.(eventBus);
-        const hostRoutes = plugin.cliRoutes === false;
         if (!cliRoutes && !hostRoutes) {
             // Installed (events, catalog, auth hooks above) but its CLI routes are not served
             console.warn(`[qcli] CLI routes are turned off; ${plugin.prefix} is not mounted`);

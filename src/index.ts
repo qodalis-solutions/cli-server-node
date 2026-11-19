@@ -94,7 +94,7 @@ export {
     rejectUpgrade,
     hostTokenRefusal,
     isCliRoute,
-    isPublicPrefixRoute,
+    isUnderPrefix,
 } from './auth';
 
 // MCP endpoint

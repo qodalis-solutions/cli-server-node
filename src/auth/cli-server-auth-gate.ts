@@ -51,10 +51,14 @@ export interface ServerAuthGateOptions {
     /** Extra public routes as `"METHOD /path"` (e.g. a plugin's own login). */
     publicRoutes: Set<string>;
     /**
-     * Prefixes (normalized) under which every GET and HEAD is public: a plugin's
-     * `"GET /prefix/*"` entries (the portal's assets and pages). Never a CLI route.
+     * Public routes of host-route plugins (`cliRoutes: false`: the portal, docs, public-api):
+     * returns the plugin's own router (mounted at its prefix) when `method path` is one of its
+     * public entries (an exact route, or a GET/HEAD under one of its `/*` prefixes) and not a
+     * CLI route. The gate hands the request to that router alone; when the plugin does not
+     * answer it, the request is authenticated as any other, so a public entry never opens a
+     * host route.
      */
-    publicPrefixes?: ReadonlySet<string>;
+    hostPublicHandler?: (method: string, path: string) => RequestHandler | undefined;
     /** MCP endpoint paths (normalized), requiring `commands:execute`. */
     mcpPaths?: string[];
     /**
@@ -74,21 +78,9 @@ export function isCliRoute(path: string, options: Pick<ServerAuthGateOptions, 'c
     return false;
 }
 
-/**
- * True for a GET or HEAD under one of the public prefixes (segment boundary), when the
- * path is not one of the CLI's own routes.
- */
-export function isPublicPrefixRoute(
-    method: string,
-    path: string,
-    options: Pick<ServerAuthGateOptions, 'publicPrefixes' | 'cliRoutePrefixes'>,
-): boolean {
-    if ((method !== 'GET' && method !== 'HEAD') || !options.publicPrefixes?.size) return false;
-    if (isCliRoute(path, options)) return false;
-    for (const prefix of options.publicPrefixes) {
-        if (path === prefix || path.startsWith(prefix === '/' ? '/' : `${prefix}/`)) return true;
-    }
-    return false;
+/** True when `path` (normalized) is `prefix` or under it, on a segment boundary. */
+export function isUnderPrefix(path: string, prefix: string): boolean {
+    return prefix === '/' || path === prefix || path.startsWith(`${prefix}/`);
 }
 
 /** Collects `requiredPermissions` along the resolved processor chain. */
@@ -202,44 +194,50 @@ export function createServerAuthGate(
             next();
             return;
         }
-        if (
-            options.publicRoutes.has(`${method} ${path}`) ||
-            isPublicPrefixRoute(method, path, options) ||
-            auth.handlesPath(path, method)
-        ) {
+        if (options.publicRoutes.has(`${method} ${path}`) || auth.handlesPath(path, method)) {
             next();
             return;
         }
+        const gateAuth = auth;
+        // A host-route plugin's public route: only that plugin may answer it without sign-in
+        const publicHandler = isCliRoute(path, options) ? undefined : options.hostPublicHandler?.(method, path);
+        if (publicHandler) {
+            publicHandler(req, res, (err?: unknown) => (err ? next(err) : authenticate()));
+            return;
+        }
+        authenticate();
 
-        auth.authenticateRequest(req).then(
-            (ctx) => {
-                const missing = requiredServerPermissions(method, path, req.body, options).filter(
-                    (p) => !auth.hasPermission(ctx, p),
-                );
-                if (missing.length > 0) {
-                    res.status(403).json({ error: `forbidden: missing permission ${missing.join(', ')}` });
-                    return;
-                }
-                req.qcliServerAuth = ctx;
-                // Host code (a processor's services) reads the caller with getCliCaller()
-                runAsCliCaller(ctx, next);
-            },
-            (err: { status?: number; message?: string; hostToken?: boolean }) => {
-                if (err?.hostToken === true && !isCliRoute(path, options)) {
-                    // A host token on the host's own route: its guard authenticates and decides
-                    req.qcliHostToken = true;
-                    next();
-                    return;
-                }
-                if (typeof err?.status !== 'number') {
-                    // not an auth error (e.g. a store failure): never expose its message
-                    logger.error('authentication failed unexpectedly:', err);
-                    res.status(500).json({ error: 'internal server error' });
-                    return;
-                }
-                const status = err.status;
-                res.status(status).json({ error: status === 401 ? err.message || 'unauthorized' : err.message || 'forbidden' });
-            },
-        );
+        function authenticate(): void {
+            gateAuth.authenticateRequest(req).then(
+                (ctx) => {
+                    const missing = requiredServerPermissions(method, path, req.body, options).filter(
+                        (p) => !gateAuth.hasPermission(ctx, p),
+                    );
+                    if (missing.length > 0) {
+                        res.status(403).json({ error: `forbidden: missing permission ${missing.join(', ')}` });
+                        return;
+                    }
+                    req.qcliServerAuth = ctx;
+                    // Host code (a processor's services) reads the caller with getCliCaller()
+                    runAsCliCaller(ctx, next);
+                },
+                (err: { status?: number; message?: string; hostToken?: boolean }) => {
+                    if (err?.hostToken === true && !isCliRoute(path, options)) {
+                        // A host token on the host's own route: its guard authenticates and decides
+                        req.qcliHostToken = true;
+                        next();
+                        return;
+                    }
+                    if (typeof err?.status !== 'number') {
+                        // not an auth error (e.g. a store failure): never expose its message
+                        logger.error('authentication failed unexpectedly:', err);
+                        res.status(500).json({ error: 'internal server error' });
+                        return;
+                    }
+                    const status = err.status;
+                    res.status(status).json({ error: status === 401 ? err.message || 'unauthorized' : err.message || 'forbidden' });
+                },
+            );
+        }
     };
 }

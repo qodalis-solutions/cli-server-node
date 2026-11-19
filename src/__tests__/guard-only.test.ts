@@ -301,6 +301,36 @@ describe('host-route plugins (cliRoutes: false)', () => {
         return { prefix, router, ...(cliRoutes === undefined ? {} : { cliRoutes }) };
     }
 
+    it.each([
+        ['a bare /*', ['GET /*']],
+        ['a prefix outside the mount', ['GET /qcli/other/*']],
+        ['a sibling with a longer name', ['GET /qcli/xy/*']],
+        ['an unsupported wildcard method', ['POST /qcli/x/files/*']],
+        ['an exact route outside the mount', ['GET /api/v1/qcli/commands']],
+    ])('mountPlugin refuses %s', async (_name, publicRoutes) => {
+        const { cli } = await unprotected();
+        const plugin = { ...stub('/qcli/x', false), publicRoutes };
+        expect(() => cli.mountPlugin(plugin)).toThrow(`invalid public route: ${publicRoutes[0]}`);
+    });
+
+    it('a CLI plugin cannot declare a public prefix', async () => {
+        const { cli } = await unprotected();
+        expect(() => cli.mountPlugin({ ...stub('/qcli/y'), publicRoutes: ['GET /qcli/y/files/*'] })).toThrow(
+            'invalid public route: GET /qcli/y/files/*',
+        );
+    });
+
+    it("a host-route plugin's exact public entry never opens a CLI route", async () => {
+        const cli = createCliServer({ configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
+        const users = new CliUsersBuilder().setOptions({ defaultAdminPassword: ROOT_PASS }).build();
+        await users.ready;
+        cli.mountPlugin(users);
+        track(cli, users);
+        // mounted at the CLI's own prefix: its entry lies under its mount but is a CLI route
+        cli.mountPlugin({ ...stub('/api/v1/qcli', false), publicRoutes: ['GET /api/v1/qcli/commands'] });
+        expect((await request(cli.app).get('/api/v1/qcli/commands')).status).toBe(401);
+    });
+
     it('a cliRoutes:false plugin prefix is not a CLI route', async () => {
         const { cli, token } = await unprotected();
         cli.mountPlugin(stub('/qcli/x', false));

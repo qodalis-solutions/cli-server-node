@@ -52,7 +52,9 @@ The portal answers exactly these paths under its mount (GET and HEAD) and nothin
 }
 ```
 
-`docs` and `api` are `null` when that plugin's section was not added (with neither, the site shows "Nothing published yet"). No sign-in is needed, on a protected server too, under `/api` as well: the portal declares its pages, `portal.json`, `/assets/*`, `/guides/*` and `/reference/*` as public routes (the server never opens one of the CLI's own routes this way).
+`docs` and `api` are `null` when that plugin's section was not added (with neither, the site shows "Nothing published yet"). No sign-in is needed, on a protected server too, under `/api` as well: the portal declares its pages, `portal.json`, `/assets/*`, `/guides/*` and `/reference/*` as public routes. The server hands such requests to the portal alone, never to one of your routes or a CLI route, and every path under those prefixes the portal does not serve is its own 404 `{ "error": "not found" }` (at a root mount, unknown paths still fall through to your routes).
+
+**The mount must be a path your app does not use for its own routes.** A mount holding the CLI's routes or inside them (`/api`, `/ws`, `/api/v1`, `/api/v1/qcli/...`) is refused with `invalid portal path: <path>`.
 
 When your app is mounted under a path (a parent Express app's `app.use('/prefix', cli.app)`), that prefix is added to the `portal.json` URLs and to `<base href>`. A prefix starting with `//` or `/\` (it would point them at another host) answers 400 `{ "error": "invalid path base" }` on the pages and `portal.json`.
 
