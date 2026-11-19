@@ -30,7 +30,17 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const COUNTED: unique symbol = Symbol('qcli.publicApi.counted');
 const RATE_LIMIT_HEADERS = ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'];
 
-type CountedRequest = Request & { qcliCaller?: QcliCaller; [COUNTED]?: { tokenId: string; windows: string[] } };
+/**
+ * The users plugin's take-back slot (`Symbol.for`, no import): set once a request is counted,
+ * run by any later guard (users or public-api) that refuses it.
+ */
+const ON_REFUSED: unique symbol = Symbol.for('qcli.onRefused') as never;
+
+type CountedRequest = Request & {
+    qcliCaller?: QcliCaller;
+    [COUNTED]?: { tokenId: string; windows: string[] };
+    [ON_REFUSED]?: () => Promise<void>;
+};
 
 const MINUTE_ROWS_KEPT = 2;
 export const INVALID_PATH_BASE = 'invalid path base';
@@ -328,7 +338,20 @@ export class CliPublicApiBuilder {
                     res.destroy();
                     return;
                 }
-                if (!outcome.refused) marked[COUNTED] = { tokenId, windows: [day, minute] };
+                if (!outcome.refused) {
+                    marked[COUNTED] = { tokenId, windows: [day, minute] };
+                    // a later guard refusing the request takes the count (and the headers) back
+                    marked[ON_REFUSED] = async () => {
+                        delete marked[ON_REFUSED];
+                        delete marked[COUNTED];
+                        for (const header of RATE_LIMIT_HEADERS) res.removeHeader(header);
+                        try {
+                            await Promise.all([day, minute].map((w) => store.decrement(tokenId, w)));
+                        } catch (err) {
+                            console.error('[public-api] usage store failed:', err);
+                        }
+                    };
+                }
                 pruneNow(at);
                 const headers = rateLimitHeaders({ perDay, perMinute }, outcome.dayCount, outcome.minuteCount, at);
                 if (headers) {
@@ -369,14 +392,11 @@ export class CliPublicApiBuilder {
                     next();
                     return;
                 }
-                delete marked[COUNTED];
-                Promise.all(counted.windows.map((w) => store.decrement(counted.tokenId, w)))
-                    .catch((err) => console.error('[public-api] usage store failed:', err))
-                    .finally(() => {
-                        for (const header of RATE_LIMIT_HEADERS) res.removeHeader(header);
-                        forgetCaller(req);
-                        res.status(403).json({ error: `forbidden: missing permission ${permission}` });
-                    });
+                const takeBack = marked[ON_REFUSED] ?? (async () => undefined);
+                takeBack().finally(() => {
+                    forgetCaller(req);
+                    res.status(403).json({ error: `forbidden: missing permission ${permission}` });
+                });
             };
             return [check, admit];
         };
@@ -386,7 +406,7 @@ export class CliPublicApiBuilder {
         router.get('/openapi.json', (req, res) => {
             const pathBase = mountPathBase(req, basePath);
             if (pathBase === undefined) {
-                res.status(400).json({ error: INVALID_PATH_BASE });
+                res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
                 return;
             }
             const url = serverUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}${pathBase}`;
@@ -397,7 +417,7 @@ export class CliPublicApiBuilder {
         router.get('/swagger', (req, res) => {
             const pathBase = mountPathBase(req, basePath);
             if (pathBase === undefined) {
-                res.status(400).json({ error: INVALID_PATH_BASE });
+                res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
                 return;
             }
             res.setHeader('Cache-Control', 'no-cache');
@@ -406,7 +426,7 @@ export class CliPublicApiBuilder {
         router.get('/swagger/assets/:file', swaggerAssets(swaggerUiDir()));
         // every other path under the public `/swagger/*` prefix is this plugin's 404, never a host route
         router.get('/swagger/*', (_req, res) => {
-            res.status(404).json({ error: 'not found' });
+            res.setHeader('Cache-Control', 'no-cache').status(404).json({ error: 'not found' });
         });
         // public on a protected server, under /api too (the gate never opens a CLI route this way)
         const publicRoutes = [

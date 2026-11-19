@@ -206,13 +206,13 @@ export class CliPortalBuilder {
 
         router.get(SITE_ROUTES, (req, res) => {
             const prefix = pathPrefix(req);
-            if (!isSafePathPrefix(prefix)) return void res.status(400).json({ error: INVALID_PATH_BASE });
+            if (!isSafePathPrefix(prefix)) return void res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
             res.setHeader('Cache-Control', 'no-cache');
             res.type('html').send(htmlFor(prefix));
         });
         router.get('/portal.json', (req, res) => {
             const prefix = pathPrefix(req);
-            if (!isSafePathPrefix(prefix)) return void res.status(400).json({ error: INVALID_PATH_BASE });
+            if (!isSafePathPrefix(prefix)) return void res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
             res.setHeader('Cache-Control', 'no-cache');
             res.type('json').send(portalJsonFor(prefix));
         });
@@ -238,7 +238,7 @@ export class CliPortalBuilder {
         // unknown paths keep falling through to the host.
         if (mount !== '/') {
             router.get(['/assets', '/assets/*', '/guides', '/guides/*', '/reference/*'], (_req, res) => {
-                res.status(404).json({ error: 'not found' });
+                res.setHeader('Cache-Control', 'no-cache').status(404).json({ error: 'not found' });
             });
         }
 
