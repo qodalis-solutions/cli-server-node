@@ -4,7 +4,7 @@ import { AuthService, AuthContext, UsersSessionEvent } from './services/auth-ser
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
-import { SessionMetadata } from './models';
+import { SessionMetadata, UsersPermissionCatalog } from './models';
 import { hashToken } from './security';
 
 /**
@@ -34,9 +34,11 @@ export interface UsersServerAttachment {
     eventBus?: import('@qodalis/cli-server-abstractions').ICliEventBus;
     /** The server's runtime options (`externalAuthentication` is set from the auth adapter). */
     serverOptions?: { externalAuthentication: boolean };
+    /** The server's permission catalog (structurally core's `CliPermissionCatalog`). */
+    permissions?: UsersPermissionCatalog;
 }
 
-const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens|link)(\/.*)?$/;
+const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens|link|permissions)(\/.*)?$/;
 
 /**
  * The users plugin as the CLI server's auth provider (implements

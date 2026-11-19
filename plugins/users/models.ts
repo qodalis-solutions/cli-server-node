@@ -126,9 +126,22 @@ export interface ApiToken {
     expiresAt: number | null;
     /** Updated at most once per 60 seconds. */
     lastUsedAt?: number;
+    /**
+     * Who accepts the token: `cli` (the CLI's routes) or `host` (only the host's guarded
+     * routes). Absent (tokens stored before it existed, stores that drop unknown
+     * fields) reads as `cli`.
+     */
+    audience?: ApiTokenAudience;
     /** Optional scope; absent when the token carries the user's full permissions. */
     permissions?: string[];
 }
+
+/**
+ * Who accepts an API token: `cli` (the default: the CLI's routes and the host's guards)
+ * or `host` (only the host's guarded routes; created by the host through
+ * `usersPlugin.apiTokens`, refused on every CLI route).
+ */
+export type ApiTokenAudience = 'cli' | 'host';
 
 /** API token as exposed by `GET /tokens` — never includes the token or its hash. */
 export interface ApiTokenView {
@@ -139,6 +152,7 @@ export interface ApiTokenView {
     createdAt: number;
     expiresAt: number | null;
     lastUsedAt: number | null;
+    audience: ApiTokenAudience;
     permissions?: string[];
 }
 
@@ -146,6 +160,28 @@ export interface ApiTokenView {
 export interface CreateApiTokenResult {
     token: string;
     apiToken: ApiTokenView;
+}
+
+/**
+ * A permission catalog entry (`GET /permissions`), the same shape as core's
+ * `CliPermission` in `@qodalis/cli-server-node`.
+ */
+export interface CliPermission {
+    name: string;
+    description: string;
+    group: string;
+    surface: 'cli' | 'host';
+}
+
+/**
+ * The permission catalog the plugin serves: the server's (`builder.permissions`,
+ * handed over by `attachToServer`), or the plugin's own entries when the router is
+ * mounted without a CLI server. Structurally satisfied by core's `CliPermissionCatalog`.
+ */
+export interface UsersPermissionCatalog {
+    add(entries: readonly Omit<CliPermission, 'surface'>[], surface: 'cli' | 'host'): void;
+    all(): CliPermission[];
+    find(name: string): CliPermission | undefined;
 }
 
 /** The audit log contract lives in `@qodalis/cli-server-abstractions` (re-exported by the audit plugin). */

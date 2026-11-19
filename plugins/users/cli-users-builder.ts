@@ -25,10 +25,11 @@ import { createUsersController } from './controllers/users-controller';
 import { createSessionsController } from './controllers/sessions-controller';
 import { createGroupsController } from './controllers/groups-controller';
 import { createTokensController } from './controllers/tokens-controller';
+import { createPermissionsController } from './controllers/permissions-controller';
 import { createLinkController, LINK_CREATE_RATE_LIMIT } from './controllers/link-controller';
 import { DEFAULT_LINK_APPROVAL_URL, LinkService } from './services/link-service';
 import { errorHandler, HttpError } from './errors';
-import { ADMIN_GROUP, USERS_GROUP } from './permissions';
+import { ADMIN_GROUP, USERS_GROUP, USERS_PERMISSION_ENTRIES } from './permissions';
 import { CliInstalledPlugin, usersInstalledPlugin } from './package-info';
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -367,6 +368,13 @@ export class CliUsersBuilder {
             if (server.serverOptions) {
                 server.serverOptions.externalAuthentication = externalAuth;
             }
+            // The server's catalog (core's entries, the host's): add this plugin's and serve it
+            if (server.permissions) {
+                if (!server.permissions.find(USERS_PERMISSION_ENTRIES[0].name)) {
+                    server.permissions.add(USERS_PERMISSION_ENTRIES, 'cli');
+                }
+                authService.setPermissionCatalog(server.permissions);
+            }
         });
 
         const router = Router();
@@ -374,7 +382,7 @@ export class CliUsersBuilder {
         const readOnly = { usersReadOnly, groupsReadOnly, externalAuth };
         router.use('/users', createReadOnlyStoresGuard('users', readOnly));
         router.use('/groups', createReadOnlyStoresGuard('groups', readOnly));
-        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens', '/link'];
+        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens', '/link', '/permissions'];
         router.use(scoped, json({ limit: '1mb' }), waitReady);
         router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
         router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
@@ -393,6 +401,7 @@ export class CliUsersBuilder {
         auditPlugin.protect(auditGuard);
         router.use('/audit', auditPlugin.router);
         router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
+        router.use('/permissions', authMiddleware, createPermissionsController(authService));
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
         const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
         router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy, limiter: linkLimiter }));

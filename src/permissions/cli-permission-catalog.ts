@@ -55,8 +55,8 @@ function isValidEntry(entry: CliPermissionInput, surface: CliPermissionSurface):
 }
 
 /**
- * The server's permission catalog, in registration order (core, then plugins in
- * the order they are added, then the host). Filled at startup; names are unique
+ * The server's permission catalog: core's entries, then the plugins' in the order
+ * they are added, then the host's. Filled at startup; names are unique
  * case-insensitively.
  */
 export class CliPermissionCatalog {
@@ -87,9 +87,16 @@ export class CliPermissionCatalog {
         }
     }
 
-    /** Every entry (copies), in registration order. */
+    /**
+     * Every entry (copies): the `cli` entries in registration order, then the `host`
+     * entries in registration order, so the host's come last even when it registers
+     * them before a plugin is mounted.
+     */
     all(): CliPermission[] {
-        return this.entries.map((p) => ({ ...p }));
+        return [
+            ...this.entries.filter((p) => p.surface === 'cli'),
+            ...this.entries.filter((p) => p.surface === 'host'),
+        ].map((p) => ({ ...p }));
     }
 
     /** The entry with this name (case-insensitive), as a copy. */

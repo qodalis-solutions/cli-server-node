@@ -24,8 +24,11 @@ export type {
     CreateGroupDto,
     UpdateGroupDto,
     ApiToken,
+    ApiTokenAudience,
     ApiTokenView,
     CreateApiTokenResult,
+    CliPermission,
+    UsersPermissionCatalog,
 } from './models';
 export type { ICliUserStore, ICliSessionStore, ICliCredentialStore, ICliAuditStore, ICliGroupStore, ICliApiTokenStore } from './stores/interfaces';
 export { pruneAudit } from './stores/interfaces';
@@ -39,9 +42,26 @@ export { InMemoryCredentialStore } from './stores/in-memory-credential-store';
 export { InMemoryAuditStore, CliAuditBuilder } from '@qodalis/cli-server-plugin-audit';
 export type { CliAuditPluginResult } from '@qodalis/cli-server-plugin-audit';
 export { InMemoryGroupStore } from './stores/in-memory-group-store';
-export { AuthService, toUserJson, isApiToken, API_TOKEN_PREFIX, MAX_API_TOKENS_PER_USER } from './services/auth-service';
+export {
+    AuthService,
+    toUserJson,
+    isApiToken,
+    tokenAudience,
+    API_TOKEN_PREFIX,
+    MAX_API_TOKENS_PER_USER,
+    HOST_TOKENS_CREATED_BY_HOST,
+    INVALID_AUDIENCE,
+} from './services/auth-service';
 export type { AuthContext, AuthServiceOptions, UsersSessionEvent } from './services/auth-service';
 export { DirectoryService } from './services/directory-service';
 export { hashPassword, verifyPasswordHash, PBKDF2_ITERATIONS } from './services/password-hasher';
-export { permissionMatches, hasPermission, mergePermissions, UsersPermissions } from './permissions';
+export {
+    permissionMatches,
+    hasPermission,
+    mergePermissions,
+    UsersPermissions,
+    USERS_PERMISSION_ENTRIES,
+    LocalPermissionCatalog,
+} from './permissions';
+export { createPermissionsController } from './controllers/permissions-controller';
 export { HttpError } from './errors';
