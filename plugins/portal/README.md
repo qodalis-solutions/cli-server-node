@@ -58,7 +58,7 @@ On a protected server, a request to a public route of the portal, docs or public
 
 **The mount must be a path your app does not use for its own routes.** A mount holding the CLI's routes or inside them (`/api`, `/ws`, `/api/v1`, `/api/v1/qcli/...`) is refused with `invalid portal path: <path>`.
 
-When your app is mounted under a path (a parent Express app's `app.use('/prefix', cli.app)`), that prefix is added to the `portal.json` URLs and to `<base href>`. A prefix starting with `//` or `/\` (it would point them at another host) answers 400 `{ "error": "invalid path base" }` on the pages and `portal.json`.
+When your app is mounted under a path (a parent Express app's `app.use('/prefix', cli.app)`), that prefix is added to the `portal.json` URLs and to `<base href>`. A prefix starting with `//` or `/\`, or holding whitespace or control characters (it would point them at another host) answers 400 `{ "error": "invalid path base" }` on the pages and `portal.json`.
 
 ## The site
 

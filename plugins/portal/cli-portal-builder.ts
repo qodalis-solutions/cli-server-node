@@ -26,9 +26,13 @@ const BASE_TAG = /<base href="\/"\s*\/?>/;
 /** The answer for a path base that would make `portal.json` URLs and `<base href>` point at another host. */
 export const INVALID_PATH_BASE = 'invalid path base';
 
-/** False for a path base (the path an app is mounted under) starting with `//` or `/\\` (another host). */
+/**
+ * False for a path base (the path an app is mounted under) starting with `//` or `/\\`, or
+ * holding whitespace or control characters: each could point URLs at another host.
+ */
 export function isSafePathPrefix(prefix: string): boolean {
-    return !prefix.startsWith('//') && !prefix.startsWith('/\\');
+    // whitespace and control characters too: browsers drop them, so `/\t/host` reads as `//host`
+    return !prefix.startsWith('//') && !prefix.startsWith('/\\') && !/[\s\u0000-\u001f\u007f]/.test(prefix);
 }
 
 /** The CLI's own route prefixes (core's); a portal mount must neither hold nor sit inside one. */

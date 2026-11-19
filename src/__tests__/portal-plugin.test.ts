@@ -202,19 +202,21 @@ describe('portal plugin', () => {
 
     it('a path base starting with // or /\\ answers 400 invalid path base', async () => {
         for (const ok of ['', '/proxy', '/a/b']) expect(isSafePathPrefix(ok), ok).toBe(true);
-        for (const bad of ['//evil.example.com', '/\\evil.example.com']) expect(isSafePathPrefix(bad), bad).toBe(false);
+        for (const bad of ['//evil.example.com', '/\\evil.example.com', '/\t/evil.example.com', '/\r/evil.example.com', '/\n/evil.example.com', '/proxy x', '/a\u0000b']) expect(isSafePathPrefix(bad), bad).toBe(false);
         const h = await start();
         h.cli.mountPlugin(portal().setPath('/').build());
         // what a parent app mounted at a protocol-relative path hands the portal
-        const outer = express();
-        outer.use((req, res, next) => {
-            Object.defineProperty(req, 'baseUrl', { get: () => '//evil.example.com', set: () => undefined, configurable: true });
-            h.cli.app(req, res, next);
-        });
-        for (const p of ['/portal.json', '/', '/guides/x']) {
-            const res = await request(outer).get(p);
-            expect(res.status, p).toBe(400);
-            expect(res.body).toEqual({ error: 'invalid path base' });
+        for (const base of ['//evil.example.com', '/\t/evil.example.com', '/\r/evil.example.com', '/\n/evil.example.com']) {
+            const outer = express();
+            outer.use((req, res, next) => {
+                Object.defineProperty(req, 'baseUrl', { get: () => base, set: () => undefined, configurable: true });
+                h.cli.app(req, res, next);
+            });
+            for (const p of ['/portal.json', '/', '/guides/x']) {
+                const res = await request(outer).get(p);
+                expect(res.status, `${JSON.stringify(base)} ${p}`).toBe(400);
+                expect(res.body).toEqual({ error: 'invalid path base' });
+            }
         }
     });
 
