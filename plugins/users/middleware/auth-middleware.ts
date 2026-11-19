@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthAdapter } from '../models';
-import { AuthService, AuthContext, isApiToken } from '../services/auth-service';
+import { AuthService, AuthContext, HOST_TOKENS_CANNOT_USE_CLI_ROUTES, isApiToken, isHostToken } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup, mergePermissions } from '../permissions';
 import { isOriginAllowed, isSameOrigin } from '../security';
@@ -126,11 +126,15 @@ function allowedDuringPasswordChange(req: Request): boolean {
 
 /**
  * Users-plugin route middleware: authenticates and attaches `req.qcliAuth`;
- * blocks everything but the password change while `mustChangePassword` is set.
+ * refuses `host` tokens (403, whatever the route requires); blocks everything but
+ * the password change while `mustChangePassword` is set.
  */
 export function createAuthMiddleware(authenticator: RequestAuthenticator): RequestHandler {
     return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
         const ctx = await authenticator.authenticate(req);
+        if (isHostToken(ctx)) {
+            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+        }
         if (ctx.user.mustChangePassword && !allowedDuringPasswordChange(req)) {
             throw forbidden(PASSWORD_CHANGE_REQUIRED);
         }
