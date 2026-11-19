@@ -15,6 +15,8 @@ import {
 } from './quota';
 import { ApiTokenUsage, PublicApiAccountUsage, PublicApiUsageService } from './usage-service';
 import { publicApiInstalledPlugin } from './package-info';
+import { documentTitle, loadOpenApiSource, publicDocument } from './openapi';
+import { SWAGGER_ASSETS, swaggerAssets, swaggerPage, swaggerUiDir } from './swagger';
 
 export const DEFAULT_PUBLIC_API_BASE_PATH = '/qcli/api';
 export const DEFAULT_PUBLIC_API_TITLE = 'API reference';
@@ -52,6 +54,8 @@ export interface PublicApiPluginResult {
     router: Router;
     /** Host routes: its prefix is not a CLI route (host tokens reach it). */
     cliRoutes: false;
+    /** The document and Swagger UI stay public on a protected server (`mountPlugin` reads them). */
+    publicRoutes: string[];
     /**
      * The guard for a public route: a `host` token holding `permission` (when given), within
      * the account's quota. Sets `req.qcliCaller` and the `X-RateLimit-*` headers.
@@ -93,6 +97,8 @@ export class CliPublicApiBuilder {
     private users?: PublicApiUsers;
     private basePath = DEFAULT_PUBLIC_API_BASE_PATH;
     private title = DEFAULT_PUBLIC_API_TITLE;
+    private serverUrl?: string;
+    private openApi?: object | string;
     private quota?: PublicApiQuotaResolver;
     private store?: IPublicApiUsageStore;
     private retentionDays = DEFAULT_USAGE_RETENTION_DAYS;
@@ -113,6 +119,24 @@ export class CliPublicApiBuilder {
     /** The portal's label for the API section (default `API reference`). */
     setTitle(title: string): this {
         this.title = title;
+        return this;
+    }
+
+    /**
+     * The public API's OpenAPI document: an object (served as given, with the additions), or
+     * a path to a JSON file (relative to the working directory) read once by `build()`.
+     */
+    setOpenApi(source: object | string): this {
+        this.openApi = source;
+        return this;
+    }
+
+    /** The document's `servers` URL when it has none (default: the request's `scheme://host`). */
+    setServerUrl(url: string): this {
+        if (!/^https?:\/\/[^\s]+$/.test(url)) {
+            throw new Error(`public-api: the server URL must be an http(s) URL: ${url}`);
+        }
+        this.serverUrl = url.replace(/\/+$/, '');
         return this;
     }
 
@@ -155,6 +179,8 @@ export class CliPublicApiBuilder {
             throw new Error(`invalid public-api base path: ${this.basePath}`);
         }
         const basePath = this.basePath;
+        const document = loadOpenApiSource(this.openApi);
+        const serverUrl = this.serverUrl;
         const store = this.store ?? new InMemoryPublicApiUsageStore();
         const now = this.clock;
         const retentionDays = this.retentionDays;
@@ -269,10 +295,26 @@ export class CliPublicApiBuilder {
             return [users.requireHostToken(...(permission ? [permission] : [])), admit];
         };
 
+        // The document and Swagger UI: no sign-in, credentials ignored
+        const router = Router();
+        router.get('/openapi.json', (req, res) => {
+            const url = serverUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}`;
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.json(publicDocument(document(), url));
+        });
+        router.get('/swagger', (_req, res) => {
+            res.setHeader('Cache-Control', 'no-cache');
+            res.type('html').send(swaggerPage(basePath, documentTitle(document())));
+        });
+        router.get('/swagger/assets/:file', swaggerAssets(swaggerUiDir()));
+        const publicPaths = ['/openapi.json', '/swagger', '/swagger/', ...SWAGGER_ASSETS.map((f) => `/swagger/assets/${f}`)];
+
         return {
             prefix: basePath,
-            router: Router(),
+            router,
             cliRoutes: false,
+            publicRoutes: publicPaths.flatMap((p) => [`GET ${basePath}${p}`, `HEAD ${basePath}${p}`]),
             guard,
             usage: { account: (userId: string) => usage.account(userId) },
             store,
