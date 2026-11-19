@@ -21,6 +21,7 @@
             "@qodalis/cli-server-plugin-jobs": ["./plugins/jobs/index.ts"],
             "@qodalis/cli-server-plugin-audit": ["./plugins/audit/index.ts"],
             "@qodalis/cli-server-plugin-docs": ["./plugins/docs/index.ts"],
+            "@qodalis/cli-server-plugin-portal": ["./plugins/portal/index.ts"],
             "@qodalis/cli-server-plugin-public-api": ["./plugins/public-api/index.ts"],
             "@qodalis/cli-server-plugin-weather": ["./plugins/weather/index.ts"],
             "@qodalis/cli-server-plugin-data-explorer": ["./plugins/data-explorer/index.ts"],

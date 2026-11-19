@@ -28,3 +28,6 @@ coverage/
 .env
 .env.local
 plugins/filesystem-sqlite/package-lock.json
+
+# Portal site copied into the portal plugin at build time
+plugins/portal/site/

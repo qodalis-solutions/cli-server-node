@@ -1,0 +1,46 @@
+{
+    "name": "@qodalis/cli-server-plugin-portal",
+    "version": "1.0.0-beta.29",
+    "description": "Portal plugin for Qodalis CLI server — the prebuilt documentation portal (guides and API reference) at one mount, with portal.json",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "site",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "copy-portal": "node scripts/copy-portal.js",
+        "prebuild": "npm run copy-portal",
+        "build": "tsc",
+        "prepublishOnly": "npm run copy-portal"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "portal",
+        "docs",
+        "api-reference",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/portal"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions",
+        "@qodalis/cli-server-portal": "^1.0.0-beta.26"
+    },
+    "peerDependencies": {
+        "express": "^4.18.0"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "typescript": "^5.6.0"
+    }
+}
