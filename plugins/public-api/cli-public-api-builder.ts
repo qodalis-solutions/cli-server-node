@@ -52,7 +52,8 @@ export const INVALID_PATH_BASE = 'invalid path base';
  */
 export function mountPathBase(req: Request, prefix: string): string | undefined {
     const base = prefix === '/' ? req.baseUrl : req.baseUrl.slice(0, Math.max(0, req.baseUrl.length - prefix.length));
-    return base.startsWith('//') || base.startsWith('/\\') ? undefined : base;
+    // `//`, `/\`, whitespace or control characters (`/\t/host` reads as `//host` in a browser)
+    return base.startsWith('//') || base.startsWith('/\\') || /[\s\u0000-\u001f\u007f]/.test(base) ? undefined : base;
 }
 
 /**

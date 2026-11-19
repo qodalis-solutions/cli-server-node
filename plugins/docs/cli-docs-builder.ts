@@ -150,7 +150,8 @@ export class CliDocsBuilder {
         // undefined (400) when it starts with `//` or `/\` and would point at another host
         const pathBaseOf = (req: Request): string | undefined => {
             const base = req.baseUrl.slice(0, Math.max(0, req.baseUrl.length - basePath.length));
-            return base.startsWith('//') || base.startsWith('/\\') ? undefined : base;
+            // `//`, `/\`, whitespace or control characters (`/\t/host` reads as `//host` in a browser)
+            return base.startsWith('//') || base.startsWith('/\\') || /[\s\u0000-\u001f\u007f]/.test(base) ? undefined : base;
         };
 
         // No sign-in, credentials ignored

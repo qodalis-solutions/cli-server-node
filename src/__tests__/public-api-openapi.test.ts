@@ -251,7 +251,7 @@ describe('public OpenAPI document', () => {
 
     it('a path base starting with // or /\\ answers 400', async () => {
         const h = await start();
-        for (const base of ['//evil.example.com', '/\\evil.example.com']) {
+        for (const base of ['//evil.example.com', '/\\evil.example.com', '/\t/evil.example.com', '/\r/evil.example.com', '/\n/evil.example.com', '/proxy x', '/a\u0000b']) {
             const outer = express();
             outer.use((req, res, next) => {
                 Object.defineProperty(req, 'baseUrl', { get: () => `${base}/qcli/api`, set: () => undefined, configurable: true });

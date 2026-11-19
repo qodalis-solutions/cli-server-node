@@ -152,7 +152,7 @@ describe('docs plugin', () => {
         outer.use('/proxy', cli.app);
         const page = await request(outer).get('/proxy/qcli/docs/pages/index').set('Host', 'localhost');
         expect(page.body.markdown).toBe('Call http://localhost/proxy/v1/rates with help@ratebell.app and {{unknown}}.\n');
-        for (const base of ['//evil.example.com', '/\\evil.example.com']) {
+        for (const base of ['//evil.example.com', '/\\evil.example.com', '/\t/evil.example.com', '/\r/evil.example.com', '/\n/evil.example.com', '/proxy x', '/a\u0000b']) {
             const bad = express();
             bad.use((req, res, next) => {
                 Object.defineProperty(req, 'baseUrl', { get: () => `${base}/qcli/docs`, set: () => undefined, configurable: true });
