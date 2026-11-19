@@ -13,6 +13,7 @@ import {
 import { InMemoryApiTokenStore } from '../stores/in-memory-api-token-store';
 import {
     ApiToken,
+    ApiTokenAudience,
     ApiTokenView,
     AuditEntry,
     LoginResult,
@@ -22,10 +23,11 @@ import {
     SessionView,
     User,
     UsersBroadcastFn,
+    UsersPermissionCatalog,
 } from '../models';
 import { HttpError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors';
 import { hashPassword, verifyPasswordHash, dummyVerify } from './password-hasher';
-import { UsersPermissions, hasPermission, mergePermissions } from '../permissions';
+import { LocalPermissionCatalog, USERS_PERMISSION_ENTRIES, UsersPermissions, hasPermission, mergePermissions } from '../permissions';
 import { hashToken, sanitize } from '../security';
 import { validatePermissions } from './permission-validation';
 
@@ -38,6 +40,8 @@ export const DEFAULT_MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 export const WS_TICKET_TTL_SECONDS = 30;
 
 export const LOCKED_MESSAGE = 'account locked, try again later';
+export const HOST_TOKENS_CREATED_BY_HOST = 'host tokens can only be created by the host application';
+export const INVALID_AUDIENCE = 'audience must be cli or host';
 
 /** Prefix of API tokens (`qcli_pat_` + 32 random bytes, base64url without padding). */
 export const API_TOKEN_PREFIX = 'qcli_pat_';
@@ -157,6 +161,8 @@ export class AuthService {
     private readonly lockouts = new Map<string, LockoutState>();
     private readonly tickets = new Map<string, TicketEntry>();
     private readonly sessionListeners = new Set<(event: UsersSessionEvent) => void>();
+    /** The plugin's own entries until the server's catalog is handed over (`attachToServer`). */
+    private catalog: UsersPermissionCatalog = new LocalPermissionCatalog(USERS_PERMISSION_ENTRIES);
 
     constructor(
         private readonly userStore: ICliUserStore,
@@ -194,6 +200,16 @@ export class AuthService {
 
     hasEventBus(): boolean {
         return !!this.eventBus;
+    }
+
+    /** Uses the server's permission catalog (which already holds the plugin's entries). */
+    setPermissionCatalog(catalog: UsersPermissionCatalog): void {
+        this.catalog = catalog;
+    }
+
+    /** The permission catalog served at `GET /permissions` and checked for host tokens. */
+    permissionCatalog(): UsersPermissionCatalog {
+        return this.catalog;
     }
 
     /**
@@ -636,6 +652,7 @@ export class AuthService {
             createdAt: token.createdAt,
             expiresAt: token.expiresAt ?? null,
             lastUsedAt: token.lastUsedAt ?? null,
+            audience: tokenAudience(token),
         };
         if (token.permissions) view.permissions = [...token.permissions];
         return view;
@@ -661,6 +678,9 @@ export class AuthService {
         // Adapter users have no session: they create tokens only with `apiTokensWithExternalAuth`
         if (!ctx.session && !this.apiTokensWithExternalAuth) {
             throw new HttpError(501, 'Authentication is managed by the host application');
+        }
+        if ('audience' in body && body.audience !== 'cli') {
+            throw badRequest(body.audience === 'host' ? HOST_TOKENS_CREATED_BY_HOST : INVALID_AUDIENCE);
         }
         const name = body.name;
         if (typeof name !== 'string' || !API_TOKEN_NAME_RE.test(name)) {
@@ -713,6 +733,7 @@ export class AuthService {
             tokenHash: hashToken(token),
             createdAt: now,
             expiresAt,
+            audience: 'cli',
             ...(permissions ? { permissions } : {}),
         });
         await this.audit({
@@ -965,6 +986,11 @@ export class AuthService {
         this.sweepTickets();
         this.emitSessionEvent({ type: 'access-changed' });
     }
+}
+
+/** The token's audience; anything but `host` (absent in older stores) reads as `cli`. */
+export function tokenAudience(token: Pick<ApiToken, 'audience'>): ApiTokenAudience {
+    return token.audience === 'host' ? 'host' : 'cli';
 }
 
 /** Serializes a user for the API: `disabled` always present, absent optionals omitted. */

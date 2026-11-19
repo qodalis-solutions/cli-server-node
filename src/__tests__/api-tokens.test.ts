@@ -9,7 +9,8 @@ import { WebSocket } from 'ws';
 import { AddressInfo } from 'net';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
-import { CliUsersBuilder, UsersPluginResult, hashToken } from '../../plugins/users/index';
+import { CliUsersBuilder, UsersPluginResult, hashToken, InMemoryApiTokenStore } from '../../plugins/users/index';
+import type { ApiToken, ICliApiTokenStore } from '../../plugins/users/index';
 import { BASE, ROOT_PASS, auth, createGroup, createTestServer, createUser, login } from './users-test-helpers';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -436,5 +437,82 @@ describe('API tokens on the protected server', () => {
         const events = await openSocket(h.port, `/ws/v1/qcli/events?ticket=${tk}`);
         await request(h.cli.app).put(`${BASE}/users/alice`).set(auth(root.token)).send({ disabled: true }).expect(200);
         expect(await within(events.closed)).toEqual({ code: 4401, reason: 'session ended' });
+    });
+});
+
+describe('API tokens: audience', () => {
+    it('created and listed views carry audience cli right after lastUsedAt', async () => {
+        const { app } = await createTestServer();
+        const root = await login(app, 'root', ROOT_PASS);
+        const created = await createToken(app, root.token, { name: 'ci', permissions: ['commands:execute'] });
+        expect(created.status).toBe(201);
+        expect(created.body.apiToken.audience).toBe('cli');
+        const keys = Object.keys(created.body.apiToken);
+        expect(keys.slice(keys.indexOf('lastUsedAt'))).toEqual(['lastUsedAt', 'audience', 'permissions']);
+
+        const unscoped = await createToken(app, root.token, { name: 'all' });
+        expect(Object.keys(unscoped.body.apiToken).pop()).toBe('audience');
+
+        const list = await request(app).get(`${BASE}/tokens`).set(auth(root.token));
+        expect(list.body.map((t: { audience: string }) => t.audience)).toEqual(['cli', 'cli']);
+        expect(Object.keys(list.body[0]).slice(-2)).toEqual(['audience', 'permissions']);
+        expect((await request(app).get(`${BASE}/tokens?all=true`).set(auth(root.token))).body[0].audience).toBe('cli');
+    });
+
+    it('body audience: absent or cli → 201; host → 400; anything else → 400', async () => {
+        const { app, plugin } = await createTestServer();
+        const root = await login(app, 'root', ROOT_PASS);
+        expect((await createToken(app, root.token, { name: 'a' })).status).toBe(201);
+        const cli = await createToken(app, root.token, { name: 'b', audience: 'cli' });
+        expect(cli.status).toBe(201);
+        expect((await plugin.apiTokenStore.getToken(cli.body.apiToken.id))!.audience).toBe('cli');
+
+        const host = await createToken(app, root.token, { name: 'c', audience: 'host', permissions: ['commands:execute'] });
+        expect(host.status).toBe(400);
+        expect(host.body).toEqual({ error: 'host tokens can only be created by the host application' });
+
+        for (const audience of ['HOST ', 'api', 1, null, 'Cli', {}]) {
+            const res = await createToken(app, root.token, { name: 'd', audience });
+            expect(res.status, JSON.stringify(audience)).toBe(400);
+            expect(res.body).toEqual({ error: 'audience must be cli or host' });
+        }
+        expect((await plugin.apiTokenStore.getTokens()).length).toBe(2);
+    });
+
+    it('a store returning a token without audience behaves as cli', async () => {
+        const inner = new InMemoryApiTokenStore();
+        const strip = (t: ApiToken | undefined) => {
+            if (!t) return t;
+            const { audience: _audience, ...rest } = t;
+            return rest as ApiToken;
+        };
+        const store: ICliApiTokenStore = {
+            createToken: async (t) => strip(await inner.createToken(t))!,
+            getTokenByHash: async (h) => strip(await inner.getTokenByHash(h)),
+            getToken: async (id) => strip(await inner.getToken(id)),
+            getTokens: async (userId) => (await inner.getTokens(userId)).map((t) => strip(t)!),
+            deleteToken: (id) => inner.deleteToken(id),
+            deleteUserTokens: (userId) => inner.deleteUserTokens(userId),
+            updateLastUsed: (id, at) => inner.updateLastUsed(id, at),
+        };
+        const cli = createCliServer({ configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
+        const users = new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).setIpRateLimit(10_000).setApiTokenStore(store).build();
+        await users.ready;
+        cli.mountPlugin(users);
+        try {
+            const root = await login(cli.app, 'root', ROOT_PASS);
+            const created = await createToken(cli.app, root.token, { name: 'old' });
+            expect(created.status).toBe(201);
+            expect(created.body.apiToken.audience).toBe('cli');
+            expect((await store.getToken(created.body.apiToken.id))!.audience).toBeUndefined();
+            const list = await request(cli.app).get(`${BASE}/tokens`).set(auth(root.token));
+            expect(list.body[0].audience).toBe('cli');
+            const commands = await request(cli.app).get('/api/v1/qcli/commands').set(auth(created.body.token));
+            expect(commands.status).toBe(200);
+            const perms = await request(cli.app).get(`${BASE}/permissions`).set(auth(created.body.token));
+            expect(perms.status).toBe(200);
+        } finally {
+            users.dispose();
+        }
     });
 });
