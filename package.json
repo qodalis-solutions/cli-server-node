@@ -39,6 +39,7 @@
     "dependencies": {
         "@qodalis/cli-server-abstractions": "file:packages/abstractions",
         "@qodalis/cli-server-plugin-data-explorer": "file:plugins/data-explorer",
+        "@qodalis/cli-server-plugin-docs": "file:plugins/docs",
         "@qodalis/cli-server-plugin-filesystem": "file:plugins/filesystem",
         "@qodalis/cli-server-plugin-jobs": "file:plugins/jobs",
         "@qodalis/cli-server-plugin-public-api": "file:plugins/public-api",
