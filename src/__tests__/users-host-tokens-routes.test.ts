@@ -409,3 +409,27 @@ describe('host tokens on an unprotected server', () => {
         expect(await open({ Authorization: `Bearer ${cli.token}` })).toBe('open');
     });
 });
+
+describe('the Bearer scheme is matched like the authenticator does (case-sensitive)', () => {
+    it('a host token sent as `bearer …` is no credential anywhere: not a host token, not authenticated', async () => {
+        const h = await start();
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const lower = { Authorization: `bearer ${host.token}` };
+        const commands = await request(h.cli.app).get(`${BASE}/commands`).set(lower);
+        expect(commands.status).toBe(401);
+        expect(commands.body).toEqual({ error: 'unauthorized' });
+        expect((await request(h.cli.app).get('/api/rates').set(lower)).status).toBe(401);
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', lower)).toEqual({ code: 4401, reason: 'login required' });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/events', lower)).toEqual({ status: 401 });
+        // the exact scheme is refused as a host token
+        expect((await request(h.cli.app).get(`${BASE}/commands`).set(auth(host.token))).body).toEqual({ error: HOST_TEXT });
+    });
+
+    it('on an unprotected server a `bearer …` host token is treated like no token', async () => {
+        const h = await start({ protectServer: false });
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const lower = { Authorization: `bearer ${host.token}` };
+        expect((await request(h.cli.app).get(`${BASE}/commands`).set(lower)).status).toBe((await request(h.cli.app).get(`${BASE}/commands`)).status);
+        expect((await request(h.cli.app).get(`${BASE}/tokens`).set(lower)).status).toBe(401);
+    });
+});
