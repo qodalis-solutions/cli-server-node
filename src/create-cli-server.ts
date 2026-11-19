@@ -409,6 +409,10 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const serverOptions = builder.serverOptions;
     const setAuth = (auth: ICliServerAuth | undefined) => {
+        // Fail closed: a guard-only provider serves no sign-in, so the CLI routes would stay open
+        if (auth?.guardOnly && cliRoutes) {
+            throw new Error('guard-only needs cliRoutes: false');
+        }
         serverAuth = auth;
         eventSocketManager.setAuth(auth);
         logSocketManager.setAuth(auth);
@@ -447,6 +451,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         if (!cliRoutes && !hostRoutes) {
             // Installed (events, catalog, auth hooks above) but its CLI routes are not served
             console.warn(`[qcli] CLI routes are turned off; ${plugin.prefix} is not mounted`);
+            if (plugin.dashboardPrefix) {
+                console.warn('[qcli] the CLI routes are turned off (cliRoutes: false); the admin dashboard is not served');
+            }
         } else {
             // A host-route plugin's prefixes are not CLI routes: host tokens reach its routes
             if (!hostRoutes) {

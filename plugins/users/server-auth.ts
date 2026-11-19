@@ -59,6 +59,8 @@ export class UsersServerAuth {
         private readonly authenticator: RequestAuthenticator,
         readonly protectServer: boolean,
         private readonly onAttach: (server: UsersServerAttachment) => void,
+        /** Guard-only mode: accepted only by a server without CLI routes (`cliRoutes: false`). */
+        readonly guardOnly = false,
     ) {}
 
     static toServerContext(ctx: AuthContext): UsersServerAuthContext {

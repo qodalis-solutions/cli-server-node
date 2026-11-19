@@ -117,6 +117,13 @@ interface IPublicApiUsageStore {
 
 A window is a UTC day (`2026-11-19`) or minute (`2026-11-19T23:59`). The guard increments the token's day and minute counters, reads the account's sums and takes the request back when a limit is exceeded, so processes sharing a store never admit more than the limit (under contention an extra request may be refused). Within one process an account's admissions run one at a time, so the limit admits exactly that many requests.
 
+## In production
+
+- **Set the URLs explicitly.** Without `setServerUrl`, the document's `servers` comes from the request's `Host` header (and the docs plugin's `{{baseUrl}}` likewise without `setBaseUrl`); behind a proxy or with clients sending any `Host`, set both.
+- **"Try it" from another origin.** When the portal is served from another origin than the API, its "try it" calls are cross-origin: enable CORS on your API routes for the portal's origin, allow the `Authorization` header, and expose the rate-limit headers (`Access-Control-Expose-Headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After`) so the reader sees them.
+- **Stacked guards** (one on a router, another on a route) count a request once; each later guard only checks its own permission, and a request it refuses (403) is taken back, so it is not counted. A client that disconnects while its admission waits is not counted.
+- A request that fails with 500 because the usage store failed is not left counted: the increments that succeeded are taken back (best effort).
+
 ## Tokens from one service
 
 The users plugin checks token names and the 20-token limit in the process that creates the token. Several services may validate tokens over shared stores (a second service with `createCliServer({ cliRoutes: false })` and the users plugin's `setGuardOnly()`), but create and revoke tokens from one service only.

@@ -23,6 +23,14 @@ export const PORTAL_SITE_NOT_FOUND = '[qcli] portal site not found; the portal i
 const SITE_ROUTES = ['/', '/guides/:slug', '/reference', '/reference/:tag'];
 const BASE_TAG = /<base href="\/"\s*\/?>/;
 
+/** The answer for a path base that would make `portal.json` URLs and `<base href>` point at another host. */
+export const INVALID_PATH_BASE = 'invalid path base';
+
+/** False for a path base (the path an app is mounted under) starting with `//` or `/\\` (another host). */
+export function isSafePathPrefix(prefix: string): boolean {
+    return !prefix.startsWith('//') && !prefix.startsWith('/\\');
+}
+
 const escapeAttribute = (value: string) =>
     value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -187,12 +195,16 @@ export class CliPortalBuilder {
         };
 
         router.get(SITE_ROUTES, (req, res) => {
+            const prefix = pathPrefix(req);
+            if (!isSafePathPrefix(prefix)) return void res.status(400).json({ error: INVALID_PATH_BASE });
             res.setHeader('Cache-Control', 'no-cache');
-            res.type('html').send(htmlFor(pathPrefix(req)));
+            res.type('html').send(htmlFor(prefix));
         });
         router.get('/portal.json', (req, res) => {
+            const prefix = pathPrefix(req);
+            if (!isSafePathPrefix(prefix)) return void res.status(400).json({ error: INVALID_PATH_BASE });
             res.setHeader('Cache-Control', 'no-cache');
-            res.type('json').send(portalJsonFor(pathPrefix(req)));
+            res.type('json').send(portalJsonFor(prefix));
         });
         router.get('/favicon.svg', (req: Request, res: Response, next: NextFunction) => {
             if (!isFileIn(siteDir, 'favicon.svg')) {

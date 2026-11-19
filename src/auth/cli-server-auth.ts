@@ -52,6 +52,11 @@ export interface CliServerAuthError extends Error {
 export interface ICliServerAuth {
     /** When false the server stays open; sockets only use tickets for optional identity. */
     readonly protectServer: boolean;
+    /**
+     * True for a provider that only validates tokens (the users plugin's guard-only mode):
+     * it serves no sign-in, so it is accepted only by a server without CLI routes.
+     */
+    readonly guardOnly?: boolean;
     /** True for routes the provider authenticates itself (its own API, its login). */
     handlesPath(path: string, method: string): boolean;
     /**

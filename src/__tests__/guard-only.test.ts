@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
 import { Router } from 'express';
 import request from 'supertest';
+import { WebSocket } from 'ws';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
 import {
@@ -17,6 +18,7 @@ import {
     UsersPluginResult,
 } from '../../plugins/users/index';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
+import { CliAdminBuilder } from '../../plugins/admin';
 import { ROOT_PASS, auth } from './users-test-helpers';
 
 const RATES = [{ name: 'rates:read', description: 'Official exchange rates', group: 'Rates' }];
@@ -130,6 +132,22 @@ describe('guard-only users plugin on a server without CLI routes', () => {
         expect(cli.builder.installedPlugins.map((p) => p.id)).toContain('@qodalis/cli-server-plugin-jobs');
     });
 
+    it('the admin dashboard serves nothing without CLI routes', async () => {
+        const cli = createCliServer({ cliRoutes: false });
+        track(cli);
+        const admin = new CliAdminBuilder()
+            .setCredentials('dashadmin', 'dashpass')
+            .setJwtSecret('test-secret')
+            .build({ registry: cli.registry, eventSocketManager: cli.eventSocketManager, builder: cli.builder, broadcastFn: () => {} });
+        admin.logBuffer.restoreConsole();
+        disposables.push(() => admin.dispose());
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        cli.mountPlugin(admin);
+        expect(warn).toHaveBeenCalledWith('[qcli] the CLI routes are turned off (cliRoutes: false); the admin dashboard is not served');
+        expect((await request(cli.app).get('/qcli/admin/')).status).toBe(404);
+        expect((await request(cli.app).get('/api/v1/qcli/status')).status).toBe(404);
+    });
+
     it('the catalog still serves host entries', async () => {
         const p = await startPair();
         expect(p.guard.builder.permissions.find('rates:read')).toBeTruthy();
@@ -144,20 +162,57 @@ describe('guard-only users plugin on a server without CLI routes', () => {
         expect(server.listenerCount('upgrade')).toBe(0);
     });
 
-    it('guard-only with CLI routes on: host tokens are still refused there', async () => {
-        const stores = { userStore: new InMemoryUserStore(), groupStore: new InMemoryGroupStore(), apiTokenStore: new InMemoryApiTokenStore() };
-        const cli = createCliServer({ configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
-        cli.builder.addPermissions(RATES);
-        const users = new CliUsersBuilder().setOptions(stores).setGuardOnly().build();
+    it('guard-only fails closed on a server with CLI routes, whatever the order', () => {
+        const users = () => new CliUsersBuilder().setGuardOnly().build();
+        const a = users();
+        const withRoutes = createCliServer();
+        track(withRoutes, a);
+        expect(() => withRoutes.mountPlugin(a)).toThrow('guard-only needs cliRoutes: false');
+        const b = users();
+        track(withRoutes, b);
+        expect(() => withRoutes.setAuth(b.serverAuth)).toThrow('guard-only needs cliRoutes: false');
+        const c = users();
+        disposables.push(() => c.dispose());
+        expect(() => createCliServer({ auth: c.serverAuth })).toThrow('guard-only needs cliRoutes: false');
+        // a normal users plugin there is unchanged
+        const normal = new CliUsersBuilder().setOptions({ defaultAdminPassword: ROOT_PASS }).build();
+        track(withRoutes, normal);
+        expect(() => withRoutes.mountPlugin(normal)).not.toThrow();
+    });
+
+    it('MCP and the sockets answer 404 without CLI routes', async () => {
+        const cli = createCliServer({ cliRoutes: false, mcp: true, enableShell: true, shell: { allowAnonymous: true } });
+        const users = new CliUsersBuilder().setGuardOnly().build();
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         cli.mountPlugin(users);
         track(cli, users);
-        await stores.groupStore.createGroup({ name: 'customers', permissions: ['rates:read'] });
-        const alice = await stores.userStore.createUser({ name: 'alice', email: 'alice@example.com', groups: ['customers'] });
-        const { token } = await users.apiTokens.create(alice.id, { name: 'site', audience: 'host', permissions: ['rates:read'] });
-        const res = await request(cli.app).get('/api/v1/qcli/commands').set(auth(token));
-        expect(res.status).toBe(403);
-        expect(res.body).toEqual({ error: 'forbidden: host tokens cannot use CLI routes' });
-        expect((await request(cli.app).post('/api/v1/qcli/sessions').send({ username: 'root', password: ROOT_PASS })).status).toBe(404);
+        expect((await request(cli.app).post('/api/qcli/mcp').send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).status).toBe(404);
+        const server = http.createServer(cli.app);
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        cli.eventSocketManager.attach(server);
+        cli.logSocketManager.attach(server);
+        const port = (server.address() as { port: number }).port;
+        try {
+            for (const p of ['/ws/v1/qcli/events', '/ws/v1/qcli/shell', '/ws/qcli/logs']) {
+                const status = await new Promise<number | undefined>((resolve) => {
+                    const ws = new WebSocket(`ws://127.0.0.1:${port}${p}`);
+                    ws.on('unexpected-response', (_req, res) => {
+                        resolve(res.statusCode);
+                        res.resume();
+                        ws.terminate();
+                    });
+                    ws.on('open', () => {
+                        resolve(101);
+                        ws.terminate();
+                    });
+                    ws.on('error', () => resolve(undefined));
+                });
+                expect(status, p).toBe(404);
+            }
+        } finally {
+            server.closeAllConnections?.();
+            await new Promise<void>((r) => server.close(() => r()));
+        }
     });
 
     it('default server unchanged', async () => {

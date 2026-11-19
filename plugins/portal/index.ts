@@ -4,6 +4,8 @@ export {
     DEFAULT_PORTAL_PATH,
     DEFAULT_PORTAL_NAME,
     PORTAL_SITE_NOT_FOUND,
+    isSafePathPrefix,
+    INVALID_PATH_BASE,
 } from './cli-portal-builder';
 export {
     PortalTheme,

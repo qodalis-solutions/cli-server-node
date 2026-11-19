@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
+import { Router } from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
@@ -328,6 +329,90 @@ describe('public-api guard', () => {
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: 'internal server error' });
         expect(res.text).not.toContain('usage db down');
+    });
+
+    it('stacked guards count a request once', async () => {
+        const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 2, requestsPerMinute: null })));
+        const router = Router();
+        router.use(h.api.guard());
+        router.get('/rates', h.api.guard('rates:read'), (_req, res) => res.json({ ok: true }));
+        h.cli.app.use('/v2', router);
+        const { token, userId } = await h.hostToken();
+        const first = await request(h.cli.app).get('/v2/rates').set(auth(token));
+        expect(first.status).toBe(200);
+        expect(first.headers['x-ratelimit-remaining']).toBe('1');
+        expect((await request(h.cli.app).get('/v2/rates').set(auth(token))).status).toBe(200);
+        expect((await request(h.cli.app).get('/v2/rates').set(auth(token))).status).toBe(429);
+        expect(await h.store.accountCount(userId, day(h))).toBe(2);
+        expect((await h.api.usage.account(userId)).today).toBe(2);
+    });
+
+    it('stacked guards: a later guard checks its own permission', async () => {
+        const h = await start();
+        const router = Router();
+        router.use(h.api.guard());
+        router.get('/rates', h.api.guard('rates:read'), (_req, res) => res.json({ ok: true }));
+        h.cli.app.use('/v2', router);
+        const banks = await h.hostToken('alice', ['banks:read']);
+        const res = await request(h.cli.app).get('/v2/rates').set(auth(banks.token));
+        expect(res.status).toBe(403);
+        expect(res.body).toEqual({ error: 'forbidden: missing permission rates:read' });
+        expect(res.headers['x-ratelimit-limit']).toBeUndefined();
+        // refused by a guard's permission: not counted
+        expect(await h.store.accountCount(banks.userId, day(h))).toBe(0);
+        expect(await h.store.accountCount(banks.userId, minute(h))).toBe(0);
+    });
+
+    it('a client that goes away while waiting is not counted', async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((r) => (release = r));
+        let entered!: () => void;
+        const waiting = new Promise<void>((r) => (entered = r));
+        const h = await start((b) =>
+            b.setQuota(async () => {
+                entered();
+                await gate;
+                return { requestsPerDay: 5, requestsPerMinute: null };
+            }),
+        );
+        const { token, userId } = await h.hostToken();
+        const server = http.createServer(h.cli.app);
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        try {
+            const port = (server.address() as { port: number }).port;
+            const req = http.get({ host: '127.0.0.1', port, path: '/v1/rates', headers: auth(token) });
+            req.on('error', () => undefined);
+            await waiting;
+            req.destroy();
+            await new Promise((r) => setTimeout(r, 50));
+            release();
+            await new Promise((r) => setTimeout(r, 50));
+            expect(await h.store.accountCount(userId, day(h))).toBe(0);
+        } finally {
+            server.closeAllConnections?.();
+            await new Promise<void>((r) => server.close(() => r()));
+        }
+    });
+
+    it.each(['minute increment', 'account count'])('a store failing on the %s: 500 and the increments are taken back', async (failing) => {
+        const h = await start();
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const increment = h.store.increment.bind(h.store);
+        if (failing === 'minute increment') {
+            vi.spyOn(h.store, 'increment').mockImplementation(async (tokenId, userId, window) => {
+                if (window.length > 10) throw new Error('store down');
+                return increment(tokenId, userId, window);
+            });
+        } else {
+            vi.spyOn(h.store, 'accountCount').mockRejectedValue(new Error('store down'));
+        }
+        const { token, userId } = await h.hostToken();
+        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        expect(res.status).toBe(500);
+        expect(res.body).toEqual({ error: 'internal server error' });
+        vi.restoreAllMocks();
+        expect(await h.store.accountCount(userId, day(h))).toBe(0);
+        expect(await h.store.accountCount(userId, minute(h))).toBe(0);
     });
 
     it('resolver gets the caller', async () => {
