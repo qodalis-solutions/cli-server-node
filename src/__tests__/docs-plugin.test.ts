@@ -90,6 +90,7 @@ describe('docs plugin', () => {
         const res = await request(cli.app).get(`/qcli/docs/pages/${slug}`);
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'page not found' });
+        expect(res.headers['cache-control']).toBe('no-cache');
     });
 
     it('code pages', async () => {

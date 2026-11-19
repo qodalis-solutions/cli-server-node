@@ -158,7 +158,7 @@ export class CliDocsBuilder {
         router.get('/pages', (req, res) => {
             const pathBase = pathBaseOf(req);
             if (pathBase === undefined) {
-                res.status(400).json({ error: INVALID_PATH_BASE });
+                res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
                 return;
             }
             const variables = variablesFor(req, pathBase);
@@ -167,17 +167,17 @@ export class CliDocsBuilder {
         });
         // a slug path with more segments is an unknown page too
         router.get('/pages/:slug/*', (_req, res) => {
-            res.status(404).json({ error: PAGE_NOT_FOUND });
+            res.setHeader('Cache-Control', 'no-cache').status(404).json({ error: PAGE_NOT_FOUND });
         });
         router.get('/pages/:slug', (req, res) => {
             const page = bySlug.get(req.params.slug);
             if (!page) {
-                res.status(404).json({ error: PAGE_NOT_FOUND });
+                res.setHeader('Cache-Control', 'no-cache').status(404).json({ error: PAGE_NOT_FOUND });
                 return;
             }
             const pathBase = pathBaseOf(req);
             if (pathBase === undefined) {
-                res.status(400).json({ error: INVALID_PATH_BASE });
+                res.setHeader('Cache-Control', 'no-cache').status(400).json({ error: INVALID_PATH_BASE });
                 return;
             }
             const variables = variablesFor(req, pathBase);

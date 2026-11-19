@@ -49,6 +49,13 @@ export interface UsersServerAttachment {
     cliRoutes?: boolean;
 }
 
+/**
+ * Request slot (shared by key, no import needed) where a guard that already counted the
+ * request (the public-api plugin) leaves a function taking that count back. Any later guard
+ * that refuses the request runs it before answering, so a refused request is not counted.
+ */
+export const ON_REFUSED: unique symbol = Symbol.for('qcli.onRefused') as never;
+
 /** Guard-only mode on a server with CLI routes (or on none): fails closed. */
 export const GUARD_ONLY_NEEDS_NO_CLI_ROUTES = 'guard-only needs cliRoutes: false';
 
@@ -285,23 +292,37 @@ export class UsersServerAuth {
 
     private guard(permissions: string[], hostTokenOnly: boolean): RequestHandler {
         return (req: Request, res: Response, next: NextFunction) => {
+            // A refused request carries no caller (an earlier guard may have set one) and is not
+            // counted (an earlier public-api guard may have counted it: its take-back runs first)
+            const refuse = (status: number, error: string) => {
+                const slot = req as Request & { [ON_REFUSED]?: () => Promise<void> };
+                const takeBack = slot[ON_REFUSED];
+                delete slot[ON_REFUSED];
+                delete req.qcliCaller;
+                delete req.qcliAuth;
+                const answer = () => {
+                    if (!res.headersSent) res.status(status).json({ error });
+                };
+                if (takeBack) takeBack().catch(() => undefined).finally(answer);
+                else answer();
+            };
             if (!this.serverReady) {
                 if (!this.notReadyLogged) {
                     this.notReadyLogged = true;
                     console.error(`[users] ${GUARD_ONLY_NEEDS_NO_CLI_ROUTES}: mount the plugin on createCliServer({ cliRoutes: false })`);
                 }
-                res.status(500).json({ error: 'internal server error' });
+                refuse(500, 'internal server error');
                 return;
             }
             this.authenticateFull(req).then(
                 (ctx) => {
                     if (hostTokenOnly && !isHostToken(ctx)) {
-                        res.status(403).json({ error: HOST_TOKEN_REQUIRED });
+                        refuse(403, HOST_TOKEN_REQUIRED);
                         return;
                     }
                     const missing = permissions.filter((p) => !hasPermission(ctx.permissions, p));
                     if (missing.length > 0) {
-                        res.status(403).json({ error: `forbidden: missing permission ${missing.join(', ')}` });
+                        refuse(403, `forbidden: missing permission ${missing.join(', ')}`);
                         return;
                     }
                     req.qcliAuth = ctx;
@@ -312,11 +333,11 @@ export class UsersServerAuth {
                     if (typeof err?.status !== 'number') {
                         // not an auth error (e.g. a store or adapter failure): log it, never expose its message
                         console.error('[users] authentication failed unexpectedly:', err);
-                        res.status(500).json({ error: 'internal server error' });
+                        refuse(500, 'internal server error');
                         return;
                     }
                     const fallback = err.status === 401 ? unauthorized().message : forbidden().message;
-                    res.status(err.status).json({ error: err.message || fallback });
+                    refuse(err.status, err.message || fallback);
                 },
             );
         };

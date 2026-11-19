@@ -441,6 +441,59 @@ describe('public-api guard', () => {
         expect(seen.slice(1).map((s) => s.caller)).toEqual([undefined, undefined, undefined]);
     });
 
+    it('a users guard refusing after the public-api guard takes the count back', async () => {
+        const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 5, requestsPerMinute: null })));
+        const seen: unknown[] = [];
+        h.cli.app.get(
+            '/v1/mixed',
+            (req, res, next) => {
+                res.on('finish', () => seen.push(req.qcliCaller));
+                next();
+            },
+            h.api.guard('rates:read'),
+            h.users.requirePermission('banks:read'),
+            (_req, res) => res.json({ ok: true }),
+        );
+        const ratesOnly = await h.hostToken('alice', ['rates:read']);
+        const res = await request(h.server).get('/v1/mixed').set(auth(ratesOnly.token));
+        expect(res.status).toBe(403);
+        expect(res.body).toEqual({ error: 'forbidden: missing permission banks:read' });
+        expect(res.headers['x-ratelimit-limit']).toBeUndefined();
+        expect(seen).toEqual([undefined]);
+        expect(await h.store.accountCount(ratesOnly.userId, day(h))).toBe(0);
+        expect(await h.store.accountCount(ratesOnly.userId, minute(h))).toBe(0);
+        // admitted by both: counted once, with headers and a caller
+        const both = await h.hostToken('alice', ['rates:read', 'banks:read']);
+        const ok = await request(h.server).get('/v1/mixed').set(auth(both.token));
+        expect(ok.status).toBe(200);
+        expect(ok.headers['x-ratelimit-remaining']).toBe('4');
+        expect(seen[1]).toBeTruthy();
+        expect(await h.store.accountCount(both.userId, day(h))).toBe(1);
+    });
+
+    it('a public-api guard after a users guard: a refusal leaves no caller and nothing counted', async () => {
+        const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 1, requestsPerMinute: null })));
+        const seen: Array<{ status: number; caller: unknown }> = [];
+        h.cli.app.get(
+            '/v1/mixed',
+            (req, res, next) => {
+                res.on('finish', () => seen.push({ status: res.statusCode, caller: req.qcliCaller }));
+                next();
+            },
+            h.users.requirePermission('rates:read'),
+            h.api.guard('rates:read'),
+            (_req, res) => res.json({ ok: true }),
+        );
+        const { token, userId } = await h.hostToken();
+        await request(h.server).get('/v1/mixed').set(auth(token)); // 200
+        await request(h.server).get('/v1/mixed').set(auth(token)); // 429: the users guard had set a caller
+        const banks = await h.hostToken('alice', ['banks:read']);
+        await request(h.server).get('/v1/mixed').set(auth(banks.token)); // 403 from the users guard
+        expect(seen.map((s) => s.status)).toEqual([200, 429, 403]);
+        expect(seen.map((s) => !!s.caller)).toEqual([true, false, false]);
+        expect(await h.store.accountCount(userId, day(h))).toBe(1);
+    });
+
     it('resolver gets the caller', async () => {
         const seen: QcliCaller[] = [];
         const h = await start((b) =>
