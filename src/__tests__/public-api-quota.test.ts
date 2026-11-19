@@ -414,6 +414,33 @@ describe('public-api guard', () => {
         expect(await h.store.accountCount(userId, minute(h))).toBe(0);
     });
 
+    it('a refused request has no caller (429, no API access, store failure)', async () => {
+        let limit = 1;
+        const h = await start((b) => b.setQuota(() => ({ requestsPerDay: limit, requestsPerMinute: null })));
+        const seen: Array<{ status: number; caller: unknown }> = [];
+        h.cli.app.get(
+            '/v1/captured',
+            (req, res, next) => {
+                res.on('finish', () => seen.push({ status: res.statusCode, caller: req.qcliCaller }));
+                next();
+            },
+            h.api.guard('rates:read'),
+            (_req, res) => res.json({ ok: true }),
+        );
+        const { token } = await h.hostToken();
+        await request(h.server).get('/v1/captured').set(auth(token)); // 200
+        await request(h.server).get('/v1/captured').set(auth(token)); // 429
+        limit = 0;
+        await request(h.server).get('/v1/captured').set(auth(token)); // 403 no API access
+        limit = 5;
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.spyOn(h.store, 'increment').mockRejectedValueOnce(new Error('down'));
+        await request(h.server).get('/v1/captured').set(auth(token)); // 500
+        expect(seen.map((s) => s.status)).toEqual([200, 429, 403, 500]);
+        expect(seen[0].caller).toBeTruthy();
+        expect(seen.slice(1).map((s) => s.caller)).toEqual([undefined, undefined, undefined]);
+    });
+
     it('resolver gets the caller', async () => {
         const seen: QcliCaller[] = [];
         const h = await start((b) =>

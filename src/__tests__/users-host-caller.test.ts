@@ -141,6 +141,23 @@ describe('requireHostToken', () => {
         expect(unknown.body).toEqual({ error: 'invalid or expired token' });
     });
 
+    it('a refused request has no caller; an admitted one has it', async () => {
+        const h = await start();
+        const seen: Array<unknown> = [];
+        const capture = (req: { qcliCaller?: unknown }, res: { on(e: string, f: () => void): void }, next: () => void) => {
+            res.on('finish', () => seen.push(req.qcliCaller));
+            next();
+        };
+        h.cli.app.get('/host/captured', capture, h.plugin.requireHostToken('rates:read'), (_req, res) => res.json({ ok: true }));
+        const refused = [await session(h), await cliToken(h), (await hostToken(h, ['banks:read'])).token, 'qcli_pat_unknown'];
+        for (const bearer of refused) {
+            expect((await request(h.cli.app).get('/host/captured').set(auth(bearer))).status).not.toBe(200);
+        }
+        expect(seen).toEqual([undefined, undefined, undefined, undefined]);
+        expect((await request(h.cli.app).get('/host/captured').set(auth((await hostToken(h)).token))).status).toBe(200);
+        expect(seen[4]).toMatchObject({ userName: 'alice', audience: 'host' });
+    });
+
     it('requirePermission unchanged for cli tokens and sessions', async () => {
         const h = await start();
         for (const bearer of [await session(h), await cliToken(h)]) {
