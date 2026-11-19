@@ -206,7 +206,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 
-`configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider` (all chainable).
+`configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider`, `addPermissions` (all chainable; see [Permission catalog and host tokens](#permission-catalog-and-host-tokens)). `builder.permissions` is the server's permission catalog.
 
 `createCliServer` returns:
 
@@ -217,7 +217,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `eventSocketManager` | `attach(server)` for the WebSockets, `broadcastMessage`, `broadcastDisconnect` |
 | `eventBus` | The server's event bus: `publish(type, data, audience)`, `subscribe(pattern, handler)` (see [Server events](#server-events)) |
 | `logSocketManager` | Server log stream socket |
-| `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth) |
+| `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused |
 | `setAuth(auth)` | Installs or removes the server auth provider |
 | `mcp` | `{ enabled, path, addProvider(provider) }` |
 
@@ -244,7 +244,7 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | WS | `/ws/v1/qcli/logs` | Server log stream |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell (when `enableShell` is on) |
 
-Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plugins add their own routes: users (`/api/v1/qcli/sessions`, `/users`, `/groups`, `/tokens`, ...), audit (`/api/v1/qcli/audit`), jobs and admin; see their READMEs.
+Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plugins add their own routes: users (`/api/v1/qcli/sessions`, `/users`, `/groups`, `/tokens`, `/permissions`, ...), audit (`/api/v1/qcli/audit`), jobs and admin; see their READMEs.
 
 ## Plugins
 
@@ -521,6 +521,26 @@ class MyCommand extends CliCommandProcessor {
     }
 }
 ```
+
+## Permission catalog and host tokens
+
+The server keeps a catalog of the permissions it knows: `{ name, description, group, surface }`, `surface` being `cli` (the CLI's routes) or `host` (your application's routes). Core registers the 11 permissions its route policy checks (`commands:execute`, `shell:execute`, `files:read`, `files:write`, `data:query`, `jobs:read`, `jobs:manage`, `logs:read`, `admin:access`, `audit:read`, `audit:clear`), the users plugin its 12 when mounted, and you add the permissions your own routes check:
+
+```typescript
+const cli = createCliServer({
+    configure: (builder) =>
+        builder.addPermissions([
+            { name: 'rates:read', description: 'Official exchange rates', group: 'Rates' },
+            { name: 'banks:read', description: 'Banks and their buy and sell rates', group: 'Rates' },
+        ]), // surface 'host' by default; a plugin passes 'cli' as the second argument
+});
+```
+
+- Names are concrete `resource:action` permissions (lower case, one `:`, no `*`), descriptions one line of 1-200 characters, groups 1-64 characters. An invalid entry throws `invalid permission entry: <name>`; a name already registered (case-insensitive, including one the users plugin owns) throws `permission already registered: <name>` and fails startup. Register at startup only.
+- `builder.permissions.all()` lists every `cli` entry in registration order (core, then plugins), then every `host` entry. The users plugin serves it at `GET /api/v1/qcli/permissions`: the entries the caller holds, or all of them with `?all=true` and `users:read`. The dashboard and the web CLI's `token` command build their permission pickers from it.
+- The catalog is for choosing, not for validation: CLI tokens, groups and commands keep accepting any permission string.
+
+**Host tokens.** API tokens have an `audience`: `cli` (the default, as before) or `host`. Only your code creates `host` tokens, through `usersPlugin.apiTokens.create(userId, { name, audience: 'host', permissions: ['rates:read'] })`, with `host` catalog entries the user holds. A host token is refused with `403 { "error": "forbidden: host tokens cannot use CLI routes" }` on every CLI route (core's, the MCP endpoint, and every plugin mounted with `mountPlugin`), whether or not the server is protected, and on the sockets: the events and logs sockets answer 403 at the upgrade, the shell closes with 4403 and the same text. It is accepted only by `usersPlugin.requireAuth()` and `usersPlugin.requirePermission(...)` on your routes, under `/api` too. A host route under `/api` without a guard is reached without an identity and with `req.qcliHostToken === true`, so guard the routes that serve host tokens. Details, the manager's rules and error texts: [users plugin README](plugins/users/README.md#host-tokens-usersplugin-apitokens).
 
 ## MCP endpoint
 
