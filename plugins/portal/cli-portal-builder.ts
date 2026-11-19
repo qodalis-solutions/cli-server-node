@@ -23,6 +23,9 @@ export const PORTAL_SITE_NOT_FOUND = '[qcli] portal site not found; the portal i
 const SITE_ROUTES = ['/', '/guides/:slug', '/reference', '/reference/:tag'];
 const BASE_TAG = /<base href="\/"\s*\/?>/;
 
+const escapeAttribute = (value: string) =>
+    value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export interface PortalPluginResult {
     /** The mount (default `/qcli/portal`; `/` serves the portal at the root). */
     prefix: string;
@@ -131,7 +134,24 @@ export class CliPortalBuilder {
                 throw new Error(`unknown portal section: ${String((section as { kind: unknown }).kind)}`);
             }
         }
-        const portalJson = JSON.stringify(document);
+        // `portal.json` per path prefix (the app mounted under a parent path); usually only ''
+        const portalJson = new Map<string, string>();
+        const portalJsonFor = (prefix: string) => {
+            let json = portalJson.get(prefix);
+            if (json === undefined) {
+                json = JSON.stringify({
+                    ...document,
+                    docs: document.docs && { ...document.docs, pages: prefix + document.docs.pages },
+                    api: document.api && {
+                        ...document.api,
+                        openapi: prefix + document.api.openapi,
+                        swagger: prefix + document.api.swagger,
+                    },
+                });
+                if (portalJson.size < 16) portalJson.set(prefix, json);
+            }
+            return json;
+        };
 
         // Only the portal's own paths, GET and HEAD; anything else falls through (the host's routes, a 404)
         const router = Router({ caseSensitive: true });
@@ -148,7 +168,17 @@ export class CliPortalBuilder {
             return result;
         }
 
-        const html = readFileSync(join(siteDir, 'index.html'), 'utf8').replace(BASE_TAG, `<base href="${mount === '/' ? '/' : `${mount}/`}" />`);
+        // The site's single `<base href="/" />` points at the mount (and the app's path prefix)
+        const [htmlBefore, htmlAfter] = (() => {
+            const source = readFileSync(join(siteDir, 'index.html'), 'utf8');
+            const match = BASE_TAG.exec(source);
+            return match ? [source.slice(0, match.index), source.slice(match.index + match[0].length)] : [source, undefined];
+        })();
+        const mountHref = mount === '/' ? '/' : `${mount}/`;
+        const htmlFor = (prefix: string) =>
+            htmlAfter === undefined ? htmlBefore : `${htmlBefore}<base href="${escapeAttribute(prefix + mountHref)}" />${htmlAfter}`;
+        // The path the app itself is mounted under (`req.baseUrl` holds it before the portal's mount)
+        const pathPrefix = (req: Request) => (mount === '/' ? req.baseUrl : req.baseUrl.slice(0, req.baseUrl.length - mount.length));
         const assetsDir = resolve(siteDir, 'assets');
         const isFileIn = (dir: string, name: string) => {
             if (!name || name.startsWith('.') || name.includes('/') || name.includes('\\')) return false;
@@ -156,13 +186,13 @@ export class CliPortalBuilder {
             return existsSync(file) && statSync(file).isFile();
         };
 
-        router.get(SITE_ROUTES, (_req, res) => {
+        router.get(SITE_ROUTES, (req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
-            res.type('html').send(html);
+            res.type('html').send(htmlFor(pathPrefix(req)));
         });
-        router.get('/portal.json', (_req, res) => {
+        router.get('/portal.json', (req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
-            res.type('json').send(portalJson);
+            res.type('json').send(portalJsonFor(pathPrefix(req)));
         });
         router.get('/favicon.svg', (req: Request, res: Response, next: NextFunction) => {
             if (!isFileIn(siteDir, 'favicon.svg')) {

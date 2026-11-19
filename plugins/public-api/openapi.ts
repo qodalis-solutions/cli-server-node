@@ -55,7 +55,8 @@ export function publicDocument(source: OpenApiDocument, serverUrl: string): Open
     if (!('qcliToken' in schemes)) {
         schemes.qcliToken = { ...QCLI_TOKEN_SCHEME };
     }
-    if (!('security' in doc)) {
+    // a top-level security requirement counts as set only when it is non-empty
+    if (!Array.isArray(doc.security) || doc.security.length === 0) {
         doc.security = [{ qcliToken: [] }];
     }
     if (!Array.isArray(doc.servers) || doc.servers.length === 0) {

@@ -126,6 +126,24 @@ describe('docs plugin', () => {
         expect(docs.pages.map((p) => p.slug)).toEqual(['guide']);
     });
 
+    it('CRLF front matter, body as written', () => {
+        const page = parsePage('crlf', '---\r\ntitle: "Windows"\r\norder: 4\r\n---\r\n# Heading\r\nbody\r\n');
+        expect(page).toEqual({ slug: 'crlf', title: 'Windows', group: 'Guides', order: 4, markdown: '# Heading\r\nbody\r\n' });
+        expect(parsePage('h', '# Title\r\nbody').title).toBe('Title');
+    });
+
+    it('a slug path with more segments: 404 page not found', async () => {
+        const { cli } = start();
+        const res = await request(cli.app).get('/qcli/docs/pages/index/extra');
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: 'page not found' });
+    });
+
+    it('pages sort by the title as written, before variables are replaced', () => {
+        const docs = new CliDocsBuilder().setName('Alpha').addPage('named', '# {{name}}').addPage('beta', '# Beta').build();
+        expect(docs.pages.map((p) => p.slug)).toEqual(['beta', 'named']);
+    });
+
     it('front matter unclosed is body', () => {
         const page = parsePage('open', '---\ntitle: x\nbody');
         expect(page.title).toBe('open');

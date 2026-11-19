@@ -104,6 +104,13 @@ describe('public OpenAPI document', () => {
         expect(doc.components.securitySchemes).toEqual({ other: { type: 'http', scheme: 'basic' }, qcliToken: QCLI_TOKEN });
     });
 
+    it('an empty security or servers list counts as unset', async () => {
+        const h = await start((b) => b.setOpenApi({ ...fixture(), security: [], servers: [] }));
+        const doc = (await request(h.cli.app).get('/qcli/api/openapi.json').set('Host', 'api.local')).body;
+        expect(doc.security).toEqual([{ qcliToken: [] }]);
+        expect(doc.servers).toEqual([{ url: 'http://api.local' }]);
+    });
+
     it('serverUrl option', async () => {
         const h = await start((b) => b.setOpenApi(fixture()).setServerUrl('https://api.ratebell.app'));
         const doc = (await request(h.cli.app).get('/qcli/api/openapi.json')).body;

@@ -6,6 +6,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import express from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
@@ -178,6 +179,24 @@ describe('portal plugin', () => {
         expect((await request(h.cli.app).get('/qcli/api/openapi.json')).status).toBe(200);
         expect((await request(h.cli.app).get('/api/qcli/versions')).status).toBe(200);
         expect((await request(h.cli.app).get('/nothing-here')).status).toBe(404);
+    });
+
+    it.each([
+        ['/qcli/portal', '/proxy/qcli/portal/'],
+        ['/', '/proxy/'],
+    ])('under a path prefix (mount %s): portal.json URLs and <base href> include it', async (mount, href) => {
+        const h = await start();
+        h.cli.mountPlugin(portal().setPath(mount).addSection(h.docs).addSection(h.api).build());
+        const outer = express();
+        outer.use('/proxy', h.cli.app);
+        const at = mount === '/' ? '/proxy' : `/proxy${mount}`;
+        const json = (await request(outer).get(`${at}/portal.json`)).body;
+        expect(json.docs).toEqual({ title: 'Guides', pages: '/proxy/qcli/docs/pages' });
+        expect(json.api).toEqual({ title: 'API reference', openapi: '/proxy/qcli/api/openapi.json', swagger: '/proxy/qcli/api/swagger' });
+        const page = await request(outer).get(`${at}/guides/auth`);
+        expect(page.text).toContain(`<base href="${href}" />`);
+        // without a prefix nothing changes
+        expect((await request(h.cli.app).get(mount === '/' ? '/portal.json' : `${mount}/portal.json`)).body.docs.pages).toBe('/qcli/docs/pages');
     });
 
     it('no site serves nothing', async () => {

@@ -144,6 +144,22 @@ describe('guard-only users plugin on a server without CLI routes', () => {
         expect(server.listenerCount('upgrade')).toBe(0);
     });
 
+    it('guard-only with CLI routes on: host tokens are still refused there', async () => {
+        const stores = { userStore: new InMemoryUserStore(), groupStore: new InMemoryGroupStore(), apiTokenStore: new InMemoryApiTokenStore() };
+        const cli = createCliServer({ configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
+        cli.builder.addPermissions(RATES);
+        const users = new CliUsersBuilder().setOptions(stores).setGuardOnly().build();
+        cli.mountPlugin(users);
+        track(cli, users);
+        await stores.groupStore.createGroup({ name: 'customers', permissions: ['rates:read'] });
+        const alice = await stores.userStore.createUser({ name: 'alice', email: 'alice@example.com', groups: ['customers'] });
+        const { token } = await users.apiTokens.create(alice.id, { name: 'site', audience: 'host', permissions: ['rates:read'] });
+        const res = await request(cli.app).get('/api/v1/qcli/commands').set(auth(token));
+        expect(res.status).toBe(403);
+        expect(res.body).toEqual({ error: 'forbidden: host tokens cannot use CLI routes' });
+        expect((await request(cli.app).post('/api/v1/qcli/sessions').send({ username: 'root', password: ROOT_PASS })).status).toBe(404);
+    });
+
     it('default server unchanged', async () => {
         const cli = createCliServer({ configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
         track(cli);
