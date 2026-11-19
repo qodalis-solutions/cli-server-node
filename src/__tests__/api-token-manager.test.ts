@@ -311,6 +311,24 @@ describe('ApiTokenManager: list and revoke', () => {
         expect(byHost).toMatchObject({ username: 'bob', actor: 'ratebell' });
     });
 
+    it('revoking a token that already expired returns true and is audited', async () => {
+        const h = await start();
+        const id = await h.addUser('alice', ['*']);
+        const t = await h.plugin.apiTokens.create(id, { name: 'short', expiresInDays: 1 });
+        const later = Date.now() + 2 * DAY;
+        const now = vi.spyOn(Date, 'now').mockReturnValue(later);
+        try {
+            expect((await request(h.cli.app).get(`${BASE}/permissions`).set(auth(t.token))).status).toBe(401);
+            expect(await h.plugin.apiTokens.revoke(id, t.apiToken.id)).toBe(true);
+        } finally {
+            now.mockRestore();
+        }
+        expect(await h.plugin.apiTokenStore.getToken(t.apiToken.id)).toBeUndefined();
+        const audit = (await h.plugin.auditStore.getEntries()).find((e) => e.event === 'token_revoked');
+        expect(audit).toMatchObject({ username: 'alice', userId: id, actor: 'alice', details: `short (${t.apiToken.id})` });
+        expect(h.publish).toHaveBeenCalledWith('token:revoked', expect.objectContaining({ tokenId: t.apiToken.id }), expect.anything());
+    });
+
     it('a revoked token stops authenticating', async () => {
         const h = await start();
         const id = await h.addUser('alice', ['*']);

@@ -139,8 +139,18 @@ export function createServerAuthGate(
             return;
         }
         if (!auth.protectServer) {
-            // Unprotected: CLI routes stay open, but a host token is refused there all the same
-            if (req.method.toUpperCase() === 'OPTIONS' || !isCliRoute(normalizePath(req.path), options)) {
+            // Unprotected: CLI routes stay open, but a host token is refused there all the same.
+            // The routes a protected server leaves public are not checked here either, and the
+            // provider's own routes refuse host tokens themselves (sign-in and link stay public).
+            const m = req.method.toUpperCase();
+            const p = normalizePath(req.path);
+            if (
+                m === 'OPTIONS' ||
+                !isCliRoute(p, options) ||
+                ((m === 'GET' || m === 'HEAD') && PUBLIC_GET.has(p)) ||
+                options.publicRoutes.has(`${m} ${p}`) ||
+                auth.handlesPath(p, m)
+            ) {
                 next();
                 return;
             }

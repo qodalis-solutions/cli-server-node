@@ -433,3 +433,40 @@ describe('the Bearer scheme is matched like the authenticator does (case-sensiti
         expect((await request(h.cli.app).get(`${BASE}/tokens`).set(lower)).status).toBe(401);
     });
 });
+
+describe('public CLI routes are not checked for host tokens on an unprotected server', () => {
+    it('versions, capabilities, sign-in and link answer exactly as without the bearer; the other CLI routes refuse', async () => {
+        const h = await start({ protectServer: false });
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const withHost = (t: request.Test) => t.set(auth(host.token));
+        const same = async (name: string, make: () => request.Test, compareBody = true) => {
+            const plain = await make();
+            const bearer = await withHost(make());
+            expect(bearer.status, name).toBe(plain.status);
+            expect(bearer.status, name).not.toBe(403);
+            if (compareBody) expect(bearer.body, name).toEqual(plain.body);
+            else expect(Object.keys(bearer.body).sort(), name).toEqual(Object.keys(plain.body).sort());
+        };
+        await same('GET /api/qcli/versions', () => request(h.cli.app).get('/api/qcli/versions'));
+        await same('GET /api/v1/qcli/version', () => request(h.cli.app).get(`${BASE}/version`));
+        await same('GET /api/v1/qcli/capabilities', () => request(h.cli.app).get(`${BASE}/capabilities`));
+        await same('POST /sessions (wrong password)', () => request(h.cli.app).post(`${BASE}/sessions`).send({ username: 'root', password: 'nope' }));
+        await same('POST /sessions', () => request(h.cli.app).post(`${BASE}/sessions`).send({ username: 'root', password: ROOT_PASS }), false);
+        await same('POST /link', () => request(h.cli.app).post(`${BASE}/link`).send({ client: 'tests' }), false);
+        await same('GET /link/:id', () => request(h.cli.app).get(`${BASE}/link/unknown-link-id`));
+
+        for (const path of [`${BASE}/commands`, `${BASE}/tokens`, `${BASE}/sessions/current`]) {
+            const res = await withHost(request(h.cli.app).get(path));
+            expect(res.status, path).toBe(403);
+            expect(res.body, path).toEqual({ error: HOST_TEXT });
+        }
+    });
+
+    it('the protected server treats the same public routes the same way', async () => {
+        const h = await start();
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        expect((await request(h.cli.app).get('/api/qcli/versions').set(auth(host.token))).status).toBe(200);
+        expect((await request(h.cli.app).post(`${BASE}/sessions`).set(auth(host.token)).send({ username: 'root', password: ROOT_PASS })).status).toBe(201);
+        expect((await request(h.cli.app).post(`${BASE}/link`).set(auth(host.token)).send({ client: 'tests' })).status).toBe(201);
+    });
+});
