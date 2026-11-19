@@ -81,6 +81,7 @@ export {
     CliServerRuntimeOptions,
     ICliServerAuth,
     CliServerPermissions,
+    HOST_TOKENS_CANNOT_USE_CLI_ROUTES,
     isOriginAllowed,
     isSameOrigin,
     requestOrigin,

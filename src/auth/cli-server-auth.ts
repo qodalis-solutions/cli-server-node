@@ -31,6 +31,9 @@ export interface CliServerRuntimeOptions {
     jobsEnabled: boolean;
 }
 
+/** The 403 text a host-audience API token gets on the CLI's own routes and sockets. */
+export const HOST_TOKENS_CANNOT_USE_CLI_ROUTES = 'forbidden: host tokens cannot use CLI routes';
+
 /** Error thrown by {@link ICliServerAuth.authenticateRequest}; rendered as `{ error }`. */
 export interface CliServerAuthError extends Error {
     status?: number;
@@ -89,6 +92,12 @@ export interface ICliServerAuth {
      * re-authenticates from the request (e.g. a host auth adapter reading cookies).
      */
     revalidate?(ctx: CliServerAuthContext, request?: IncomingMessage): Promise<CliServerAuthContext | undefined>;
+    /**
+     * True when `token` (a bearer presented on a socket upgrade) is a stored, unexpired
+     * host-audience API token. Reads the token store only: never calls a host auth
+     * adapter or records the token's use. Lets sockets answer a host token with a 403.
+     */
+    isHostTokenBearer?(token: string): Promise<boolean>;
     /** Records activity on the session behind `ctx` (slides the idle expiry). */
     touch?(ctx: CliServerAuthContext): Promise<void>;
     /** Writes an audit entry (never include secrets, command text or stdin). */

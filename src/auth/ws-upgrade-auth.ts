@@ -1,27 +1,32 @@
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { CliServerAuthContext, CliServerAuthError, ICliServerAuth, isOriginAllowed, isSameOrigin } from './cli-server-auth';
+import {
+    CliServerAuthContext,
+    CliServerAuthError,
+    HOST_TOKENS_CANNOT_USE_CLI_ROUTES,
+    ICliServerAuth,
+    isOriginAllowed,
+    isSameOrigin,
+} from './cli-server-auth';
 
 /** Prefix of the users plugin's API tokens, the only bearers {@link hostTokenRefusal} looks at. */
 const API_TOKEN_PREFIX = 'qcli_pat_';
 
 /**
  * Sockets authenticate with tickets, never with a bearer. When an upgrade carries an
- * API token (`Authorization: Bearer qcli_pat_…`) that the auth provider refuses as a
- * host token, returns the provider's text (`forbidden: host tokens cannot use CLI
- * routes`) so the socket can be refused with a 403 instead of a 401. Grants nothing:
- * any other outcome returns undefined.
+ * API token (`Authorization: Bearer qcli_pat_…`) that the auth provider identifies
+ * as a host token ({@link ICliServerAuth.isHostTokenBearer}: a token-store lookup
+ * only, no host adapter, no `lastUsedAt` write), returns
+ * `forbidden: host tokens cannot use CLI routes` so the socket is refused with a 403
+ * instead of a 401. Grants nothing: any other outcome returns undefined.
  */
 export async function hostTokenRefusal(auth: ICliServerAuth, request: IncomingMessage): Promise<string | undefined> {
     const header = request.headers.authorization;
-    if (typeof header !== 'string' || !header.startsWith(`Bearer ${API_TOKEN_PREFIX}`)) return undefined;
+    if (!auth.isHostTokenBearer || typeof header !== 'string' || !header.startsWith(`Bearer ${API_TOKEN_PREFIX}`)) return undefined;
     try {
-        // The provider's contract is an Express request; the upgrade request carries the same headers
-        await auth.authenticateRequest(request as unknown as Parameters<ICliServerAuth['authenticateRequest']>[0]);
+        return (await auth.isHostTokenBearer(header.slice('Bearer '.length).trim())) ? HOST_TOKENS_CANNOT_USE_CLI_ROUTES : undefined;
+    } catch {
         return undefined;
-    } catch (err) {
-        const e = err as CliServerAuthError | undefined;
-        return e?.hostToken === true && e.message ? e.message : undefined;
     }
 }
 

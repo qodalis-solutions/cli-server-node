@@ -5,6 +5,7 @@
  * manager's user-id check and the shell's 4403 close texts.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { Router } from 'express';
 import http from 'http';
 import { AddressInfo } from 'net';
 import request from 'supertest';
@@ -42,8 +43,13 @@ afterEach(async () => {
     }
 });
 
-async function start(options: UsersModuleOptions = {}, userPermissions = ['*']): Promise<Harness> {
-    const cli = createCliServer({ enableShell: true, shell: { sessionCheckIntervalMs: 60_000 }, configure: (b) => b.addProcessor(new CliEchoCommandProcessor()) });
+async function start(options: UsersModuleOptions = {}, userPermissions = ['*'], server: { mcp?: boolean } = {}): Promise<Harness> {
+    const cli = createCliServer({
+        enableShell: true,
+        mcp: server.mcp,
+        shell: { sessionCheckIntervalMs: 60_000 },
+        configure: (b) => b.addProcessor(new CliEchoCommandProcessor()),
+    });
     cli.builder.addPermissions([
         { name: 'rates:read', description: 'Official exchange rates', group: 'Rates' },
         { name: 'banks:read', description: 'Banks and their buy and sell rates', group: 'Rates' },
@@ -67,11 +73,11 @@ async function start(options: UsersModuleOptions = {}, userPermissions = ['*']):
     const groupName = 'customers';
     await plugin.groupStore.createGroup({ name: groupName, permissions: userPermissions });
     const user = await plugin.userStore.createUser({ name: 'alice', email: 'alice@example.com', groups: [groupName] });
-    const server = http.createServer(cli.app);
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-    cli.eventSocketManager.attach(server);
-    cli.logSocketManager.attach(server);
-    const h = { cli, plugin, admin, server, port: (server.address() as AddressInfo).port, userId: user.id, groupName };
+    const httpServer = http.createServer(cli.app);
+    await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r));
+    cli.eventSocketManager.attach(httpServer);
+    cli.logSocketManager.attach(httpServer);
+    const h = { cli, plugin, admin, server: httpServer, port: (httpServer.address() as AddressInfo).port, userId: user.id, groupName };
     harnesses.push(h);
     return h;
 }
@@ -230,5 +236,112 @@ describe('shell close reasons', () => {
         expect(closeReason('é'.repeat(62))).toBe('forbidden');
         expect(closeReason(undefined)).toBe('forbidden');
         expect(closeReason('')).toBe('forbidden');
+    });
+});
+
+describe('socket probe of a qcli_pat_ bearer', () => {
+    it('reads the token store only: lastUsedAt is not written', async () => {
+        const h = await start();
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const cli = await h.plugin.apiTokens.create(h.userId, { name: 'cli' });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', { Authorization: `Bearer ${host.token}` })).toEqual({ code: 4403, reason: HOST_TEXT });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/events', { Authorization: `Bearer ${host.token}` })).toEqual({ status: 403 });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', { Authorization: `Bearer ${cli.token}` })).toEqual({ code: 4401, reason: 'login required' });
+        expect((await h.plugin.apiTokenStore.getToken(host.apiToken.id))!.lastUsedAt).toBeUndefined();
+        expect((await h.plugin.apiTokenStore.getToken(cli.apiToken.id))!.lastUsedAt).toBeUndefined();
+    });
+
+    it('never calls the external auth adapter', async () => {
+        const adapter = vi.fn(() => null);
+        const h = await start({ authAdapter: adapter });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', { Authorization: 'Bearer qcli_pat_anything' })).toEqual({ code: 4401, reason: 'login required' });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/events', { Authorization: 'Bearer qcli_pat_anything' })).toEqual({ status: 401 });
+        expect(adapter).not.toHaveBeenCalled();
+    });
+
+    it('with API tokens next to the adapter: host tokens are told apart from the store, the adapter is not called', async () => {
+        const adapter = vi.fn(() => null);
+        const h = await start({ authAdapter: adapter, apiTokensWithExternalAuth: true });
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', { Authorization: `Bearer ${host.token}` })).toEqual({ code: 4403, reason: HOST_TEXT });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', { Authorization: 'Bearer qcli_pat_unknown' })).toEqual({ code: 4401, reason: 'login required' });
+        expect(adapter).not.toHaveBeenCalled();
+        expect((await h.plugin.apiTokenStore.getToken(host.apiToken.id))!.lastUsedAt).toBeUndefined();
+    });
+});
+
+describe('host tokens on an unguarded host route under /api', () => {
+    const openRoute = (h: Harness) =>
+        h.cli.app.get('/api/open', (req, res) => {
+            res.json({ serverAuth: req.qcliServerAuth ?? null, qcliAuth: req.qcliAuth ?? null, hostToken: req.qcliHostToken ?? null });
+        });
+
+    it('reaches the route unauthenticated, marked as a host token', async () => {
+        const h = await start();
+        openRoute(h);
+        const { token } = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const res = await request(h.cli.app).get('/api/open').set(auth(token));
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ serverAuth: null, qcliAuth: null, hostToken: true });
+
+        // the same for a host token whose user must change their password
+        await h.plugin.userStore.updateUser(h.userId, { mustChangePassword: true });
+        const pending = await request(h.cli.app).get('/api/open').set(auth(token));
+        expect(pending.status).toBe(200);
+        expect(pending.body).toEqual({ serverAuth: null, qcliAuth: null, hostToken: true });
+    });
+
+    it('cli tokens and sessions are authenticated by the gate and not marked', async () => {
+        const h = await start();
+        openRoute(h);
+        const cli = await h.plugin.apiTokens.create(h.userId, { name: 'cli' });
+        const res = await request(h.cli.app).get('/api/open').set(auth(cli.token));
+        expect(res.status).toBe(200);
+        expect(res.body.hostToken).toBeNull();
+        expect(res.body.serverAuth).toMatchObject({ userName: 'alice', tokenId: cli.apiToken.id });
+        expect((await request(h.cli.app).get('/api/open')).status).toBe(401);
+    });
+});
+
+describe('path variants with a host token', () => {
+    it('every spelling of a CLI route is refused with the host-token text', async () => {
+        const h = await start({}, ['*'], { mcp: true });
+        const { token } = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        for (const path of ['/API/V1/QCLI/commands', '//api/v1/qcli/commands', '/api/v1/qcli/commands/', '/api/v1/qcli//commands']) {
+            const res = await request(h.cli.app).get(path).set(auth(token));
+            expect(res.status, path).toBe(403);
+            expect(res.body, path).toEqual({ error: HOST_TEXT });
+        }
+        for (const path of ['/api/qcli/mcp/', '/API/QCLI/MCP']) {
+            const res = await request(h.cli.app)
+                .post(path)
+                .set(auth(token))
+                .set('Content-Type', 'application/json')
+                .set('Accept', 'application/json, text/event-stream')
+                .send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+            expect(res.status, path).toBe(403);
+            expect(res.body, path).toEqual({ error: HOST_TEXT });
+        }
+    });
+
+    it('a plugin mounted at a non-default /api prefix is a CLI route; a sibling host route is not', async () => {
+        const h = await start();
+        const router = Router();
+        router.get('/items', (_req, res) => res.json({ items: [] }));
+        h.cli.mountPlugin({ prefix: '/api/custom', router });
+        h.cli.app.get('/api/customers', h.plugin.requireAuth(), (req, res) => res.json({ user: req.qcliAuth?.user.name }));
+        const { token } = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+
+        for (const path of ['/api/custom/items', '/API/Custom/items/', '/api/custom']) {
+            const res = await request(h.cli.app).get(path).set(auth(token));
+            expect(res.status, path).toBe(403);
+            expect(res.body, path).toEqual({ error: HOST_TEXT });
+        }
+        const sibling = await request(h.cli.app).get('/api/customers').set(auth(token));
+        expect(sibling.status).toBe(200);
+        expect(sibling.body).toEqual({ user: 'alice' });
+        // a session still reaches the plugin
+        const root = await login(h.cli.app, 'root', ROOT_PASS);
+        expect((await request(h.cli.app).get('/api/custom/items').set(auth(root.token))).status).toBe(200);
     });
 });

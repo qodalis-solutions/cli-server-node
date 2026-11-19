@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthService, AuthContext, hostTokenRefused, UsersSessionEvent, isHostToken } from './services/auth-service';
+import { AuthService, AuthContext, hostTokenRefused, UsersSessionEvent, isApiToken, isHostToken, tokenAudience } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
@@ -103,6 +103,20 @@ export class UsersServerAuth {
         // Tickets come from `POST /sessions/ws-ticket`, which refuses host tokens; never open a socket for one
         if (ctx && isHostToken(ctx)) throw hostTokenRefused();
         return ctx ? UsersServerAuth.toServerContext(ctx) : undefined;
+    }
+
+    /**
+     * True when `token` is a stored, unexpired `host` API token. Only reads the token
+     * store: no auth adapter call, no `lastUsedAt` write, no user lookup. Always false
+     * when an auth adapter signs users in without API tokens (`apiTokensWithExternalAuth`
+     * off), since the plugin's tokens are not accepted there at all.
+     */
+    async isHostTokenBearer(token: string): Promise<boolean> {
+        if (typeof token !== 'string' || !isApiToken(token)) return false;
+        if (this.authenticator.hasAdapter && !this.authService.apiTokensWithExternalAuth) return false;
+        const stored = await this.authService.apiTokenStore.getTokenByHash(hashToken(token));
+        if (!stored || tokenAudience(stored) !== 'host') return false;
+        return stored.expiresAt === null || stored.expiresAt === undefined || Date.now() < stored.expiresAt;
     }
 
     hasPermission(ctx: { permissions: string[] }, permission: string): boolean {
