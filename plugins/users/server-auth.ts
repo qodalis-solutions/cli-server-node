@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthService, AuthContext, UsersSessionEvent } from './services/auth-service';
+import { AuthService, AuthContext, HOST_TOKENS_CANNOT_USE_CLI_ROUTES, UsersSessionEvent, isHostToken } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
@@ -71,15 +71,27 @@ export class UsersServerAuth {
         return OWN_ROUTES.test(path.toLowerCase());
     }
 
-    /** Authenticates a request for a protected server route (403 while a password change is required). */
+    /**
+     * Authenticates a request for a protected server route: 403 for a `host` token
+     * (CLI routes never accept one), then 403 while a password change is required.
+     */
     async authenticateRequest(req: Request): Promise<UsersServerAuthContext> {
-        const ctx = await this.authenticateFull(req);
-        return UsersServerAuth.toServerContext(ctx);
+        const ctx = await this.authenticator.authenticate(req);
+        if (isHostToken(ctx)) {
+            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+        }
+        return UsersServerAuth.toServerContext(this.requireNoPasswordChange(ctx));
     }
 
-    /** Like {@link authenticateRequest} but returns the full context (live user). */
+    /**
+     * Authenticates a request for a host route (the guards): the full context (live
+     * user), `host` tokens included; 403 while a password change is required.
+     */
     async authenticateFull(req: Request): Promise<AuthContext> {
-        const ctx = await this.authenticator.authenticate(req);
+        return this.requireNoPasswordChange(await this.authenticator.authenticate(req));
+    }
+
+    private requireNoPasswordChange(ctx: AuthContext): AuthContext {
         if (ctx.user.mustChangePassword) {
             throw forbidden(PASSWORD_CHANGE_REQUIRED);
         }
@@ -88,7 +100,8 @@ export class UsersServerAuth {
 
     async consumeTicket(ticket: string): Promise<UsersServerAuthContext | undefined> {
         const ctx = await this.authService.consumeTicket(ticket);
-        return ctx ? UsersServerAuth.toServerContext(ctx) : undefined;
+        // Tickets come from `POST /sessions/ws-ticket`, which refuses host tokens; never open a socket for one
+        return ctx && !isHostToken(ctx) ? UsersServerAuth.toServerContext(ctx) : undefined;
     }
 
     hasPermission(ctx: { permissions: string[] }, permission: string): boolean {
@@ -114,7 +127,7 @@ export class UsersServerAuth {
     async revalidate(ctx: UsersServerAuthContext, request?: IncomingMessage): Promise<UsersServerAuthContext | undefined> {
         if (ctx.tokenId) {
             const fresh = await this.authService.revalidate(ctx.userId, undefined, ctx.tokenId);
-            return fresh ? UsersServerAuth.toServerContext(fresh) : undefined;
+            return fresh && !isHostToken(fresh) ? UsersServerAuth.toServerContext(fresh) : undefined;
         }
         if (!ctx.sessionId && this.authenticator.hasAdapter) {
             const source = ctx[EXTERNAL_REQUEST] ?? request;
@@ -184,6 +197,9 @@ export class UsersServerAuth {
 
     async authenticateToken(token: string): Promise<{ userName: string; permissions: string[]; mustChangePassword: boolean; loginTime: number }> {
         const ctx = await this.authService.authenticateToken(token);
+        if (isHostToken(ctx)) {
+            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+        }
         return {
             userName: ctx.user.name,
             permissions: ctx.permissions,

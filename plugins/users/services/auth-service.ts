@@ -47,6 +47,7 @@ export const HOST_TOKENS_NEED_PERMISSIONS = 'host tokens need permissions';
 /** Followed by the entry. */
 export const NOT_A_HOST_PERMISSION = 'not a host permission: ';
 export const EXPIRY_CONFLICT = 'expiresInDays and neverExpires cannot both be set';
+export const HOST_TOKENS_CANNOT_USE_CLI_ROUTES = 'forbidden: host tokens cannot use CLI routes';
 
 /** Prefix of API tokens (`qcli_pat_` + 32 random bytes, base64url without padding). */
 export const API_TOKEN_PREFIX = 'qcli_pat_';
@@ -1040,6 +1041,14 @@ export class AuthService {
         this.sweepTickets();
         this.emitSessionEvent({ type: 'access-changed' });
     }
+}
+
+/**
+ * True when the request was authenticated by a `host` token: refused on every CLI
+ * route, accepted only by the host's guards (`requireAuth` / `requirePermission`).
+ */
+export function isHostToken(ctx: Pick<AuthContext, 'apiToken'> | undefined): boolean {
+    return !!ctx?.apiToken && tokenAudience(ctx.apiToken) === 'host';
 }
 
 /** The token's audience; anything but `host` (absent in older stores) reads as `cli`. */
