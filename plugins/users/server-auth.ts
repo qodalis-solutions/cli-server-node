@@ -115,8 +115,7 @@ export class UsersServerAuth {
         if (typeof token !== 'string' || !isApiToken(token)) return false;
         if (this.authenticator.hasAdapter && !this.authService.apiTokensWithExternalAuth) return false;
         const stored = await this.authService.apiTokenStore.getTokenByHash(hashToken(token));
-        if (!stored || tokenAudience(stored) !== 'host') return false;
-        return stored.expiresAt === null || stored.expiresAt === undefined || Date.now() < stored.expiresAt;
+        return !!stored && tokenAudience(stored) === 'host' && !AuthService.isTokenExpired(stored);
     }
 
     hasPermission(ctx: { permissions: string[] }, permission: string): boolean {

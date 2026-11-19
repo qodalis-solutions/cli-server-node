@@ -8,6 +8,9 @@ import {
     isOriginAllowed,
     isSameOrigin,
 } from './cli-server-auth';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('WsUpgradeAuth');
 
 /** Prefix of the users plugin's API tokens, the only bearers {@link hostTokenRefusal} looks at. */
 const API_TOKEN_PREFIX = 'qcli_pat_';
@@ -20,12 +23,13 @@ const API_TOKEN_PREFIX = 'qcli_pat_';
  * `forbidden: host tokens cannot use CLI routes` so the socket is refused with a 403
  * instead of a 401. Grants nothing: any other outcome returns undefined.
  */
-export async function hostTokenRefusal(auth: ICliServerAuth, request: IncomingMessage): Promise<string | undefined> {
+export async function hostTokenRefusal(auth: ICliServerAuth, request: Pick<IncomingMessage, 'headers'>): Promise<string | undefined> {
     const header = request.headers.authorization;
     if (!auth.isHostTokenBearer || typeof header !== 'string' || !header.startsWith(`Bearer ${API_TOKEN_PREFIX}`)) return undefined;
     try {
         return (await auth.isHostTokenBearer(header.slice('Bearer '.length).trim())) ? HOST_TOKENS_CANNOT_USE_CLI_ROUTES : undefined;
-    } catch {
+    } catch (err) {
+        logger.warn('host token check failed: %s', (err as Error)?.message ?? err);
         return undefined;
     }
 }
@@ -76,12 +80,16 @@ export async function authorizeWsUpgrade(
           })
         : undefined;
 
+    // Sockets take tickets only; a host token presented as a bearer is refused (403), on an
+    // unprotected server too
+    if (hostToken || (await hostTokenRefusal(auth, request))) {
+        return { ok: false, status: 403 };
+    }
     if (!auth.protectServer) {
         return { ok: true, ctx };
     }
     if (!ctx) {
-        // Sockets take tickets only; a host token presented as a bearer is told so (403)
-        return { ok: false, status: hostToken || (await hostTokenRefusal(auth, request)) ? 403 : 401 };
+        return { ok: false, status: 401 };
     }
     if (options.permission && !auth.hasPermission(ctx, options.permission)) {
         return { ok: false, status: 403 };

@@ -185,10 +185,10 @@ describe('host tokens', () => {
         expect((await request(h.cli.app).get(`${BASE}/commands`).set('X-User', 'alice')).status).toBe(200);
     });
 
-    it('when the server is not protected, a host token on a CLI route grants nothing more than no token', async () => {
+    it('when the server is not protected, a host token is still refused on the CLI routes', async () => {
         const h = await start({ protectServer: false });
         const { token } = await h.plugin.apiTokens.create(h.userId, { name: 'api', audience: 'host', permissions: ['rates:read'] });
-        expect((await request(h.cli.app).get(`${BASE}/commands`).set(auth(token))).status).toBe(200);
+        expect((await request(h.cli.app).get(`${BASE}/commands`).set(auth(token))).body).toEqual({ error: HOST_TEXT });
         // the users plugin's own routes still authenticate, and refuse it
         expect((await request(h.cli.app).get(`${BASE}/tokens`).set(auth(token))).body).toEqual({ error: HOST_TEXT });
     });

@@ -4,6 +4,7 @@ import { ICliCommandProcessor, commandMatches } from '../abstractions';
 import { ICliCommandRegistry } from '../services/cli-command-registry';
 import { CliServerAuthContext, CliServerPermissions as P, ICliServerAuth } from './cli-server-auth';
 import { createLogger } from '../utils/logger';
+import { hostTokenRefusal } from './ws-upgrade-auth';
 
 const logger = createLogger('ServerAuth');
 
@@ -123,7 +124,8 @@ export function requiredServerPermissions(method: string, path: string, body: an
 /**
  * Express middleware protecting every `/api/...` route of the CLI server when
  * an auth provider with `protectServer` is installed. Without a provider it is
- * a no-op, so servers without the users plugin behave as before.
+ * a no-op, so servers without the users plugin behave as before. With a provider
+ * that does not protect the server, it only refuses host tokens on the CLI's routes.
  */
 export function createServerAuthGate(
     getAuth: () => ICliServerAuth | undefined,
@@ -131,8 +133,26 @@ export function createServerAuthGate(
 ): RequestHandler {
     return (req: Request, res: Response, next: NextFunction) => {
         const auth = getAuth();
-        if (!auth || !auth.protectServer) {
+        if (!auth) {
             next();
+            return;
+        }
+        if (!auth.protectServer) {
+            // Unprotected: CLI routes stay open, but a host token is refused there all the same
+            if (req.method.toUpperCase() === 'OPTIONS' || !isCliRoute(normalizePath(req.path), options)) {
+                next();
+                return;
+            }
+            hostTokenRefusal(auth, req).then(
+                (refusal) => {
+                    if (refusal) {
+                        res.status(403).json({ error: refusal });
+                        return;
+                    }
+                    next();
+                },
+                () => next(),
+            );
             return;
         }
         const method = req.method.toUpperCase();

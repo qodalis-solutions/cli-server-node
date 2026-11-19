@@ -114,4 +114,28 @@ describe('GET /permissions', () => {
         expect(cli.builder.permissions.all()).toHaveLength(24);
         expect(plugin.authService.permissionCatalog()).toBe(cli.builder.permissions);
     });
+
+    it('a host registering a name the users plugin owns fails at mount', async () => {
+        const cli = createCliServer({ configure: (b) => b.addPermissions([{ name: 'users:read', description: 'x', group: 'g' }]) });
+        const plugin = new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).build();
+        plugins.push(plugin);
+        expect(() => cli.mountPlugin(plugin)).toThrow('permission already registered: users:read');
+
+        // a collision on a later entry throws too, and adds nothing (all or nothing)
+        const cli2 = createCliServer({ configure: (b) => b.addPermissions([{ name: 'tokens:revoke', description: 'x', group: 'g' }]) });
+        const plugin2 = new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).build();
+        plugins.push(plugin2);
+        expect(() => cli2.mountPlugin(plugin2)).toThrow('permission already registered: tokens:revoke');
+        expect(cli2.builder.permissions.find('users:read')).toBeUndefined();
+    });
+
+    it('attaching the same plugin to one catalog again neither throws nor duplicates', async () => {
+        const { cli, plugin } = await startServer();
+        expect(() => cli.setAuth(plugin.serverAuth)).not.toThrow();
+        cli.setAuth(undefined);
+        expect(() => cli.setAuth(plugin.serverAuth)).not.toThrow();
+        expect(() => plugin.serverAuth.attachToServer({ broadcast: () => undefined, permissions: cli.builder.permissions })).not.toThrow();
+        expect(cli.builder.permissions.all()).toHaveLength(24);
+        expect(cli.builder.permissions.find('users:read')?.surface).toBe('cli');
+    });
 });
