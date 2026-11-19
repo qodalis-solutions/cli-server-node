@@ -14,6 +14,7 @@ import { InMemoryApiTokenStore } from '../stores/in-memory-api-token-store';
 import {
     ApiToken,
     ApiTokenAudience,
+    ApiTokenCreateOptions,
     ApiTokenView,
     AuditEntry,
     LoginResult,
@@ -42,6 +43,10 @@ export const WS_TICKET_TTL_SECONDS = 30;
 export const LOCKED_MESSAGE = 'account locked, try again later';
 export const HOST_TOKENS_CREATED_BY_HOST = 'host tokens can only be created by the host application';
 export const INVALID_AUDIENCE = 'audience must be cli or host';
+export const HOST_TOKENS_NEED_PERMISSIONS = 'host tokens need permissions';
+/** Followed by the entry. */
+export const NOT_A_HOST_PERMISSION = 'not a host permission: ';
+export const EXPIRY_CONFLICT = 'expiresInDays and neverExpires cannot both be set';
 
 /** Prefix of API tokens (`qcli_pat_` + 32 random bytes, base64url without padding). */
 export const API_TOKEN_PREFIX = 'qcli_pat_';
@@ -666,10 +671,10 @@ export class AuthService {
 
     /**
      * Creates an API token for the caller (a session, or a user signed in by the
-     * auth adapter with `apiTokensWithExternalAuth`; 501 otherwise). Validates the name
-     * (400, duplicate 409), the expiry (1-365 days, default 90; `null` only with
-     * `allowNonExpiringTokens`), the 20-token limit (400) and the scope (each entry
-     * valid, 400, and covered by the caller's permissions, 403).
+     * auth adapter with `apiTokensWithExternalAuth`; 501 otherwise) through
+     * {@link createApiTokenFor}, with the `cli` audience (body `audience` absent or
+     * `cli`; `host` and anything else → 400) and the caller's permissions as the
+     * grantable ones. `expiresInDays: null` asks for a token that never expires.
      */
     async createApiToken(ctx: AuthContext, body: Record<string, unknown>): Promise<{ token: string; apiToken: ApiToken }> {
         if (ctx.apiToken) {
@@ -682,21 +687,50 @@ export class AuthService {
         if ('audience' in body && body.audience !== 'cli') {
             throw badRequest(body.audience === 'host' ? HOST_TOKENS_CREATED_BY_HOST : INVALID_AUDIENCE);
         }
-        const name = body.name;
+        const options: ApiTokenCreateOptions = {
+            name: body.name as string,
+            ...(body.expiresInDays === null ? { neverExpires: true } : body.expiresInDays !== undefined ? { expiresInDays: body.expiresInDays as number } : {}),
+            permissions: body.permissions as string[] | null | undefined,
+            audience: 'cli',
+        };
+        return this.createApiTokenFor(ctx.user, ctx.permissions, options, { name: ctx.user.name, id: ctx.user.id });
+    }
+
+    /**
+     * Creates a token for `owner` (the shared path of `POST /tokens` and
+     * `usersPlugin.apiTokens.create`; the caller checked who may create it). In order:
+     * the name (400), the expiry (1-365 days, default 90; `neverExpires` only with
+     * `allowNonExpiringTokens`, never with `expiresInDays`; 400), the permissions'
+     * syntax (400), for `host` tokens that permissions are given and each is a
+     * `host`-surface catalog entry (400, stored with the catalog's spelling), that
+     * `grantable` covers each entry (403), then duplicate names (409) and the
+     * 20-token limit (400), both audiences counted together.
+     */
+    async createApiTokenFor(
+        owner: User,
+        grantable: string[],
+        options: ApiTokenCreateOptions,
+        actor: { name: string; id?: string },
+    ): Promise<{ token: string; apiToken: ApiToken }> {
+        const audience: ApiTokenAudience = options.audience ?? 'cli';
+        const name = options.name;
         if (typeof name !== 'string' || !API_TOKEN_NAME_RE.test(name)) {
             throw badRequest('name must be 1-64 characters of [A-Za-z0-9._ -]');
         }
 
         let expiresAt: number | null;
         const now = Date.now();
-        const days = body.expiresInDays;
-        if (days === undefined) {
-            expiresAt = now + DEFAULT_API_TOKEN_EXPIRY_DAYS * DAY_MS;
-        } else if (days === null) {
+        const days: unknown = options.expiresInDays;
+        if (options.neverExpires === true) {
+            if (days !== undefined && days !== null) {
+                throw badRequest(EXPIRY_CONFLICT);
+            }
             if (!this.allowNonExpiringTokens) {
                 throw badRequest('non-expiring tokens are not allowed');
             }
             expiresAt = null;
+        } else if (days === undefined || days === null) {
+            expiresAt = now + DEFAULT_API_TOKEN_EXPIRY_DAYS * DAY_MS;
         } else if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > MAX_API_TOKEN_EXPIRY_DAYS) {
             throw badRequest(`expiresInDays must be an integer between 1 and ${MAX_API_TOKEN_EXPIRY_DAYS}`);
         } else {
@@ -704,20 +738,35 @@ export class AuthService {
         }
 
         let permissions: string[] | undefined;
-        if (body.permissions !== undefined && body.permissions !== null) {
-            const value = body.permissions;
+        if (options.permissions !== undefined && options.permissions !== null) {
+            const value: unknown = options.permissions;
             if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || v.length === 0)) {
                 throw badRequest('permissions must be an array of strings');
             }
             permissions = mergePermissions(validatePermissions(value as string[]));
-            for (const p of permissions) {
-                if (!hasPermission(ctx.permissions, p)) {
-                    throw forbidden(`forbidden: cannot grant ${p}`);
-                }
+        }
+        if (audience === 'host') {
+            if (!permissions || permissions.length === 0) {
+                throw badRequest(HOST_TOKENS_NEED_PERMISSIONS);
+            }
+            // Only the host's own catalog entries, exactly (wildcards never match one)
+            permissions = mergePermissions(
+                permissions.map((p) => {
+                    const entry = this.catalog.find(p);
+                    if (!entry || entry.surface !== 'host') {
+                        throw badRequest(`${NOT_A_HOST_PERMISSION}${p}`);
+                    }
+                    return entry.name;
+                }),
+            );
+        }
+        for (const p of permissions ?? []) {
+            if (!hasPermission(grantable, p)) {
+                throw forbidden(`forbidden: cannot grant ${p}`);
             }
         }
 
-        const existing = await this.apiTokenStore.getTokens(ctx.user.id);
+        const existing = await this.apiTokenStore.getTokens(owner.id);
         if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
             throw conflict(`token '${name}' already exists`);
         }
@@ -728,24 +777,24 @@ export class AuthService {
         const token = API_TOKEN_PREFIX + randomBytes(32).toString('base64url');
         const apiToken = await this.apiTokenStore.createToken({
             id: randomUUID(),
-            userId: ctx.user.id,
+            userId: owner.id,
             name,
             tokenHash: hashToken(token),
             createdAt: now,
             expiresAt,
-            audience: 'cli',
+            audience,
             ...(permissions ? { permissions } : {}),
         });
         await this.audit({
             event: 'token_created',
-            username: ctx.user.name,
-            userId: ctx.user.id,
-            actor: ctx.user.name,
-            actorId: ctx.user.id,
+            username: owner.name,
+            userId: owner.id,
+            actor: actor.name,
+            actorId: actor.id,
             details: `${apiToken.name} (${apiToken.id})`,
             metadata: { tokenId: apiToken.id, tokenName: apiToken.name },
         });
-        await this.publishTokenEvent('token:created', apiToken, ctx.user.name);
+        await this.publishTokenEvent('token:created', apiToken, actor.name);
         return { token, apiToken };
     }
 
@@ -758,18 +807,23 @@ export class AuthService {
         if (!token || (token.userId !== ctx.user.id && !canRevokeAny)) {
             throw notFound('token not found');
         }
-        await this.apiTokenStore.deleteToken(token.id);
         const ownerName = token.userId === ctx.user.id ? ctx.user.name : (await this.userStore.getUser(token.userId))?.name ?? token.userId;
+        await this.revokeApiTokenCore(token, ownerName, { name: ctx.user.name, id: ctx.user.id });
+    }
+
+    /** Deletes a token, audits `token_revoked`, publishes `token:revoked` and closes its sockets. */
+    async revokeApiTokenCore(token: ApiToken, ownerName: string, actor: { name: string; id?: string }): Promise<void> {
+        await this.apiTokenStore.deleteToken(token.id);
         await this.audit({
             event: 'token_revoked',
             username: ownerName,
             userId: token.userId,
-            actor: ctx.user.name,
-            actorId: ctx.user.id,
+            actor: actor.name,
+            actorId: actor.id,
             details: `${token.name} (${token.id})`,
             metadata: { tokenId: token.id, tokenName: token.name },
         });
-        await this.publishTokenEvent('token:revoked', token, ctx.user.name);
+        await this.publishTokenEvent('token:revoked', token, actor.name);
         // Sockets opened with this token re-check their identity and close.
         this.emitSessionEvent({ type: 'access-changed', userId: token.userId });
     }

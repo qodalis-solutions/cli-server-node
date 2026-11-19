@@ -26,6 +26,8 @@ export type {
     ApiToken,
     ApiTokenAudience,
     ApiTokenView,
+    ApiTokenCreateOptions,
+    CreatedApiToken,
     CreateApiTokenResult,
     CliPermission,
     UsersPermissionCatalog,
@@ -51,7 +53,11 @@ export {
     MAX_API_TOKENS_PER_USER,
     HOST_TOKENS_CREATED_BY_HOST,
     INVALID_AUDIENCE,
+    HOST_TOKENS_NEED_PERMISSIONS,
+    NOT_A_HOST_PERMISSION,
+    EXPIRY_CONFLICT,
 } from './services/auth-service';
+export { ApiTokenManager } from './services/api-token-manager';
 export type { AuthContext, AuthServiceOptions, UsersSessionEvent } from './services/auth-service';
 export { DirectoryService } from './services/directory-service';
 export { hashPassword, verifyPasswordHash, PBKDF2_ITERATIONS } from './services/password-hasher';

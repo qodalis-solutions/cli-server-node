@@ -16,6 +16,7 @@ import { InMemoryGroupStore } from './stores/in-memory-group-store';
 import { InMemoryApiTokenStore } from './stores/in-memory-api-token-store';
 import { AuthService } from './services/auth-service';
 import { DirectoryService } from './services/directory-service';
+import { ApiTokenManager } from './services/api-token-manager';
 import { createAuthMiddleware, getAuth, requirePermission, RequestAuthenticator } from './middleware/auth-middleware';
 import { createReadOnlyStoresGuard } from './middleware/read-only-stores';
 import { UsersServerAuth } from './server-auth';
@@ -56,6 +57,11 @@ export interface UsersPluginResult {
     /** Packages listed among the server's installed plugins with this one (the audit plugin). */
     installedPlugins: CliInstalledPlugin[];
     apiTokenStore: ICliApiTokenStore;
+    /**
+     * API tokens the host creates, lists and revokes for its users (same rules as the
+     * HTTP routes), including `host` tokens that only the host's guards accept.
+     */
+    apiTokens: ApiTokenManager;
     /**
      * Auth provider for the CLI server and the admin dashboard. Installed by
      * `mountPlugin(usersPlugin)` or `createCliServer({ auth: usersPlugin.serverAuth })`.
@@ -321,6 +327,7 @@ export class CliUsersBuilder {
             groupsReadOnly,
         });
         const directory = new DirectoryService(userStore, groupStore, authService);
+        const apiTokens = new ApiTokenManager(authService, userStore, { externalAuth, apiTokensWithExternalAuth });
         if (eventBus) {
             auditPlugin.setEventBus?.(eventBus);
         }
@@ -429,6 +436,7 @@ export class CliUsersBuilder {
             auditStore,
             auditPlugin,
             apiTokenStore,
+            apiTokens,
             serverAuth,
             protectServer,
             requireAuth: () => serverAuth.requireAuth(),

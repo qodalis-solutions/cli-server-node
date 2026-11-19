@@ -156,11 +156,30 @@ export interface ApiTokenView {
     permissions?: string[];
 }
 
+/** What `usersPlugin.apiTokens.create` takes. */
+export interface ApiTokenCreateOptions {
+    /** 1-64 characters of `[A-Za-z0-9._ -]`, unique per user (case-insensitive). */
+    name: string;
+    /** 1-365 days; absent = 90. */
+    expiresInDays?: number;
+    /** A token that never expires (needs `allowNonExpiringTokens`; not with `expiresInDays`). Default false. */
+    neverExpires?: boolean;
+    /** The token's scope; absent or null = everything the user holds (`cli` only: `host` tokens need permissions). */
+    permissions?: string[] | null;
+    /** Default `cli`. */
+    audience?: ApiTokenAudience;
+    /** The name audited as the actor (default the token owner's name). */
+    actor?: string;
+}
+
 /** Result of `POST /tokens`: the token (shown once) and its view. */
 export interface CreateApiTokenResult {
     token: string;
     apiToken: ApiTokenView;
 }
+
+/** What `usersPlugin.apiTokens.create` returns: the same as the `POST /tokens` response. */
+export type CreatedApiToken = CreateApiTokenResult;
 
 /**
  * A permission catalog entry (`GET /permissions`), the same shape as core's
