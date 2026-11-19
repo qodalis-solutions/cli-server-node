@@ -236,7 +236,14 @@ export class CliPublicApiBuilder {
             }
         };
 
-        const internalError = (res: Response, what: string, err: unknown) => {
+        // A refused request carries no caller: only an admitted one reaches code with `req.qcliCaller`
+        const forgetCaller = (req: Request) => {
+            const r = req as Request & { qcliCaller?: unknown; qcliAuth?: unknown };
+            delete r.qcliCaller;
+            delete r.qcliAuth;
+        };
+        const internalError = (req: Request, res: Response, what: string, err: unknown) => {
+            forgetCaller(req);
             // never expose the error's text
             console.error(`[public-api] ${what}:`, err);
             if (!res.headersSent) res.status(500).json({ error: 'internal server error' });
@@ -245,6 +252,7 @@ export class CliPublicApiBuilder {
         const admit: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
             const caller = (req as Request & { qcliCaller?: QcliCaller }).qcliCaller;
             if (!caller || caller.audience !== 'host' || !caller.tokenId) {
+                forgetCaller(req);
                 res.status(403).json({ error: HOST_TOKEN_REQUIRED });
                 return;
             }
@@ -264,10 +272,11 @@ export class CliPublicApiBuilder {
                     perDay = normalizeLimit(quota?.requestsPerDay);
                     perMinute = normalizeLimit(quota?.requestsPerMinute);
                 } catch (err) {
-                    internalError(res, 'quota resolver failed', err);
+                    internalError(req, res, 'quota resolver failed', err);
                     return;
                 }
                 if (perDay === 0 || perMinute === 0) {
+                    forgetCaller(req);
                     res.status(403).json({ error: NO_API_ACCESS });
                     return;
                 }
@@ -312,7 +321,7 @@ export class CliPublicApiBuilder {
                         }
                     });
                 } catch (err) {
-                    internalError(res, 'usage store failed', err);
+                    internalError(req, res, 'usage store failed', err);
                     return;
                 }
                 if (outcome.cancelled) {
@@ -329,16 +338,18 @@ export class CliPublicApiBuilder {
                 }
                 if (outcome.refused === 'day') {
                     res.setHeader('Retry-After', String(secondsToNextDay(at)));
+                    forgetCaller(req);
                     res.status(429).json({ error: `quota exceeded: ${perDay} requests per day` });
                     return;
                 }
                 if (outcome.refused === 'minute') {
                     res.setHeader('Retry-After', String(secondsToNextMinute(at)));
+                    forgetCaller(req);
                     res.status(429).json({ error: `too many requests: ${perMinute} per minute` });
                     return;
                 }
                 next();
-            })().catch((err) => internalError(res, 'guard failed', err));
+            })().catch((err) => internalError(req, res, 'guard failed', err));
         };
 
         const guard = (permission?: string): RequestHandler[] => {
@@ -363,6 +374,7 @@ export class CliPublicApiBuilder {
                     .catch((err) => console.error('[public-api] usage store failed:', err))
                     .finally(() => {
                         for (const header of RATE_LIMIT_HEADERS) res.removeHeader(header);
+                        forgetCaller(req);
                         res.status(403).json({ error: `forbidden: missing permission ${permission}` });
                     });
             };

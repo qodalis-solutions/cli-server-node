@@ -285,38 +285,35 @@ describe('portal plugin', () => {
         expect(built.installedPlugin.id).toBe('@qodalis/cli-server-plugin-portal');
     });
 
-    it.each(['before', 'after'])(
-        'public prefixes never open a host route under them (host routes registered %s mounting)',
-        async (when) => {
-            const h = await start();
-            const reached: string[] = [];
-            const hostRoutes = () => {
-                for (const p of ['/api/developers/reference/x/y', '/api/developers/assets/secret/file', '/api/developers/guides/a/b', '/api/developers/assets/secret']) {
-                    h.cli.app.get(p, (_req, res) => {
-                        reached.push(p);
-                        res.json({ secret: true });
-                    });
-                }
-            };
-            if (when === 'before') hostRoutes();
-            h.cli.mountPlugin(portal().setPath('/api/developers').build());
-            if (when === 'after') hostRoutes();
+    it.each(['before', 'after'])('public prefixes never open a host route under them (host routes registered %s mounting)', async (when) => {
+        const h = await start();
+        const reached: string[] = [];
+        const hostRoutes = () => {
             for (const p of ['/api/developers/reference/x/y', '/api/developers/assets/secret/file', '/api/developers/guides/a/b', '/api/developers/assets/secret']) {
-                const res = await request(h.cli.app).get(p);
-                expect(res.status, p).toBe(404);
-                expect(res.body, p).toEqual({ error: 'not found' });
+                h.cli.app.get(p, (_req, res) => {
+                    reached.push(p);
+                    res.json({ secret: true });
+                });
             }
-            expect(reached).toEqual([]);
-            // with a token the gate lets the request on, and still only the portal answers under its prefixes
-            expect((await request(h.cli.app).get('/api/v1/qcli/commands')).status).toBe(401);
-        },
-    );
+        };
+        if (when === 'before') hostRoutes();
+        h.cli.mountPlugin(portal().setPath('/api/developers').build());
+        if (when === 'after') hostRoutes();
+        for (const p of ['/api/developers/reference/x/y', '/api/developers/assets/secret/file', '/api/developers/guides/a/b', '/api/developers/assets/secret']) {
+            const res = await request(h.cli.app).get(p);
+            expect(res.status, p).toBe(404);
+            expect(res.body, p).toEqual({ error: 'not found' });
+        }
+        expect(reached).toEqual([]);
+        // the CLI's own routes still need a token
+        expect((await request(h.cli.app).get('/api/v1/qcli/commands')).status).toBe(401);
+    });
 
     it.each(['/api', '/api/v1', '/api/v1/qcli/docs', '/ws', '/API'])('a portal mount holding or inside CLI routes is refused: %s', (mount) => {
         expect(() => new CliPortalBuilder().setSiteDir(SITE).setPath(mount).build()).toThrow(`invalid portal path: ${mount}`);
     });
 
-        it('resolves the site: explicit alone, else the npm package, the sibling repo (checkouts only), the bundled copy', () => {
+    it('resolves the site: explicit alone, else the npm package, the sibling repo (checkouts only), the bundled copy', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-portal-resolve-'));
         const repo = path.join(root, 'cli-server-node');
         const pkg = path.join(repo, 'plugins', 'portal');
