@@ -12,6 +12,13 @@ declare global {
         interface Request {
             /** Set by the server auth gate when the users plugin protects the server. */
             qcliServerAuth?: CliServerAuthContext;
+            /**
+             * Set by the server auth gate when a host-audience API token reached a path the
+             * CLI does not serve (the host's own route): the gate let it through without
+             * authenticating it (`qcliServerAuth` stays unset), for the host's guard to
+             * decide. A route without a guard sees the marker and no identity.
+             */
+            qcliHostToken?: boolean;
         }
     }
 }
@@ -163,6 +170,7 @@ export function createServerAuthGate(
             (err: { status?: number; message?: string; hostToken?: boolean }) => {
                 if (err?.hostToken === true && !isCliRoute(path, options)) {
                     // A host token on the host's own route: its guard authenticates and decides
+                    req.qcliHostToken = true;
                     next();
                     return;
                 }
