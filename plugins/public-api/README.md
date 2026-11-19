@@ -54,6 +54,28 @@ Otherwise the request is counted and the handler runs, with `req.qcliCaller` (`{
 
 Every answer that passed check 3 (429s and the handler's own answers included) carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds until the window resets, at least 1). They describe the daily limit when it is set, otherwise the per-minute one, and are left out when both are unlimited.
 
+## OpenAPI document and Swagger UI
+
+Hand over the document of your public routes (an object, or a path to a JSON file read once by `build()`):
+
+```typescript
+const publicApi = new CliPublicApiBuilder()
+    .setUsers(users)
+    .setOpenApi('./openapi/public.json') // or an object
+    .setServerUrl('https://api.example.com') // optional
+    .build();
+```
+
+| Route | Answer |
+|---|---|
+| `GET /qcli/api/openapi.json` | The document, `Cache-Control: no-cache`, `Access-Control-Allow-Origin: *`; no sign-in, credentials ignored |
+| `GET /qcli/api/swagger` | Swagger UI 5 for that document only (`persistAuthorization: false`, "try it out" on), titled with `info.title` |
+| `GET /qcli/api/swagger/assets/<file>` | Swagger UI's own files (`swagger-ui-dist`) |
+
+What the document lacks is added, and the host's own values always win: the bearer scheme `components.securitySchemes.qcliToken` (`{ type: 'http', scheme: 'bearer', bearerFormat: 'qcli_pat' }`), a top-level `security: [{ qcliToken: [] }]`, and `servers: [{ url }]` with `setServerUrl` or the request's `scheme://host`. Express has no route metadata, so state each operation's permission in your document as `x-required-permission: "rates:read"` (the portal shows it); your `x-codeSamples` are passed through. Without `setOpenApi` an empty document (`info.title` `API`) is served. On a protected server these routes stay public, under `/api` too.
+
+The portal plugin shows the document as an API reference with code samples (`new CliPortalBuilder().addSection(publicApi)`).
+
 ## Usage
 
 With the plugin built, `GET /api/v1/qcli/tokens` and `users.apiTokens.list(userId)` add `usage` to every token view (`{ today, last30Days, days: [{ date, requests }] }`, 30 UTC days, oldest first). For your own account pages:
@@ -73,9 +95,11 @@ An unknown user rejects with a `PublicApiError` (`status` 404, `user not found`)
 | `setQuota(resolver)` | unlimited | `(caller) => PublicApiQuota \| Promise<PublicApiQuota>`; `null` limits are unlimited |
 | `setUsageStore(store)` | `InMemoryPublicApiUsageStore` | Where the counters are kept |
 | `setUsageRetentionDays(days)` | 31 | Days the day counters are kept (minute counters: 2 minutes); pruned at most once an hour |
-| `setBasePath(path)` | `/qcli/api` | Where the OpenAPI document and Swagger UI are served |
+| `setOpenApi(source)` | empty document | The public document: an object, or a path to a JSON file (`public-api: cannot read OpenAPI document <path>` when unreadable) |
+| `setServerUrl(url)` | the request's `scheme://host` | The document's `servers` URL when it has none |
+| `setBasePath(path)` | `/qcli/api` | Where the OpenAPI document and Swagger UI are served (`/segment[/segment]`; otherwise `invalid public-api base path: <path>`) |
 | `setTitle(title)` | `API reference` | The portal's label for the API section |
-| `build()` | | `{ prefix, router, cliRoutes: false, guard(permission?), usage, store, portalSection, installedPlugin }` |
+| `build()` | | `{ prefix, router, cliRoutes: false, publicRoutes, guard(permission?), usage, store, portalSection, installedPlugin }` |
 
 ## Storage
 

@@ -29,7 +29,8 @@
         "directory": "plugins/public-api"
     },
     "dependencies": {
-        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions"
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions",
+        "swagger-ui-dist": "^5.17.0"
     },
     "peerDependencies": {
         "express": "^4.18.0"
