@@ -24,7 +24,10 @@
         "@qodalis/cli-server-plugin-data-explorer-mssql": "file:../plugins/data-explorer-mssql",
         "@qodalis/cli-server-plugin-data-explorer-redis": "file:../plugins/data-explorer-redis",
         "@qodalis/cli-server-plugin-data-explorer-elasticsearch": "file:../plugins/data-explorer-elasticsearch",
-        "@qodalis/cli-server-plugin-aws": "file:../plugins/aws"
+        "@qodalis/cli-server-plugin-aws": "file:../plugins/aws",
+        "@qodalis/cli-server-plugin-public-api": "file:../plugins/public-api",
+        "@qodalis/cli-server-plugin-docs": "file:../plugins/docs",
+        "@qodalis/cli-server-plugin-portal": "file:../plugins/portal"
     },
     "devDependencies": {
         "tsx": "^4.19.0"

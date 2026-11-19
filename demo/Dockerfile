@@ -15,6 +15,9 @@ COPY plugins/jobs/package.json plugins/jobs/
 COPY plugins/audit/package.json plugins/audit/
 COPY plugins/users/package.json plugins/users/
 COPY plugins/admin/package.json plugins/admin/
+COPY plugins/public-api/package.json plugins/public-api/
+COPY plugins/docs/package.json plugins/docs/
+COPY plugins/portal/package.json plugins/portal/
 COPY plugins/data-explorer/package.json plugins/data-explorer/
 COPY plugins/data-explorer-sql/package.json plugins/data-explorer-sql/
 COPY plugins/data-explorer-mongo/package.json plugins/data-explorer-mongo/
@@ -47,6 +50,9 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../data-explorer-mssql && npx tsc \
     && cd ../data-explorer-redis && npx tsc \
     && cd ../data-explorer-elasticsearch && npx tsc \
+    && cd ../public-api && npx tsc \
+    && cd ../docs && npx tsc \
+    && cd ../portal && node scripts/copy-portal.js && npx tsc \
     && cd ../aws && npm install && npx tsc \
     && cd ../admin && npm install && node scripts/copy-dashboard.js && npx tsc
 
@@ -56,6 +62,7 @@ RUN npm run build
 WORKDIR /app/demo
 COPY demo/package.json demo/tsconfig.json ./
 COPY demo/src/ src/
+COPY demo/docs/ docs/
 RUN npm install
 RUN npx tsc
 
@@ -74,6 +81,7 @@ COPY --from=build /app/packages/abstractions/package.json packages/abstractions/
 COPY --from=build /app/plugins/ plugins/
 COPY --from=build /app/demo/dist/ demo/dist/
 COPY --from=build /app/demo/package.json demo/
+COPY --from=build /app/demo/docs/ demo/docs/
 COPY --from=build /app/demo/node_modules/ demo/node_modules/
 
 ENV PORT=8047

@@ -33,7 +33,9 @@
         "directory": "plugins/portal"
     },
     "dependencies": {
-        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions",
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions"
+    },
+    "optionalDependencies": {
         "@qodalis/cli-server-portal": "^1.0.0-beta.26"
     },
     "peerDependencies": {
