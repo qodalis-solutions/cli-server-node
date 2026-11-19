@@ -18,5 +18,6 @@ export {
     requiredServerPermissions,
     processorPermissions,
     normalizePath,
+    isCliRoute,
 } from './cli-server-auth-gate';
-export { authorizeWsUpgrade, rejectUpgrade, WsUpgradeAuthOptions, WsUpgradeAuthResult } from './ws-upgrade-auth';
+export { authorizeWsUpgrade, rejectUpgrade, hostTokenRefusal, WsUpgradeAuthOptions, WsUpgradeAuthResult } from './ws-upgrade-auth';

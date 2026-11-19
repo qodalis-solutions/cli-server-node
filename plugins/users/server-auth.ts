@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthService, AuthContext, HOST_TOKENS_CANNOT_USE_CLI_ROUTES, UsersSessionEvent, isHostToken } from './services/auth-service';
+import { AuthService, AuthContext, hostTokenRefused, UsersSessionEvent, isHostToken } from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
@@ -78,7 +78,7 @@ export class UsersServerAuth {
     async authenticateRequest(req: Request): Promise<UsersServerAuthContext> {
         const ctx = await this.authenticator.authenticate(req);
         if (isHostToken(ctx)) {
-            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+            throw hostTokenRefused();
         }
         return UsersServerAuth.toServerContext(this.requireNoPasswordChange(ctx));
     }
@@ -101,7 +101,8 @@ export class UsersServerAuth {
     async consumeTicket(ticket: string): Promise<UsersServerAuthContext | undefined> {
         const ctx = await this.authService.consumeTicket(ticket);
         // Tickets come from `POST /sessions/ws-ticket`, which refuses host tokens; never open a socket for one
-        return ctx && !isHostToken(ctx) ? UsersServerAuth.toServerContext(ctx) : undefined;
+        if (ctx && isHostToken(ctx)) throw hostTokenRefused();
+        return ctx ? UsersServerAuth.toServerContext(ctx) : undefined;
     }
 
     hasPermission(ctx: { permissions: string[] }, permission: string): boolean {
@@ -198,7 +199,7 @@ export class UsersServerAuth {
     async authenticateToken(token: string): Promise<{ userName: string; permissions: string[]; mustChangePassword: boolean; loginTime: number }> {
         const ctx = await this.authService.authenticateToken(token);
         if (isHostToken(ctx)) {
-            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+            throw hostTokenRefused();
         }
         return {
             userName: ctx.user.name,

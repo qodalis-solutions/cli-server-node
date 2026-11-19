@@ -1,6 +1,29 @@
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { CliServerAuthContext, ICliServerAuth, isOriginAllowed, isSameOrigin } from './cli-server-auth';
+import { CliServerAuthContext, CliServerAuthError, ICliServerAuth, isOriginAllowed, isSameOrigin } from './cli-server-auth';
+
+/** Prefix of the users plugin's API tokens, the only bearers {@link hostTokenRefusal} looks at. */
+const API_TOKEN_PREFIX = 'qcli_pat_';
+
+/**
+ * Sockets authenticate with tickets, never with a bearer. When an upgrade carries an
+ * API token (`Authorization: Bearer qcli_pat_…`) that the auth provider refuses as a
+ * host token, returns the provider's text (`forbidden: host tokens cannot use CLI
+ * routes`) so the socket can be refused with a 403 instead of a 401. Grants nothing:
+ * any other outcome returns undefined.
+ */
+export async function hostTokenRefusal(auth: ICliServerAuth, request: IncomingMessage): Promise<string | undefined> {
+    const header = request.headers.authorization;
+    if (typeof header !== 'string' || !header.startsWith(`Bearer ${API_TOKEN_PREFIX}`)) return undefined;
+    try {
+        // The provider's contract is an Express request; the upgrade request carries the same headers
+        await auth.authenticateRequest(request as unknown as Parameters<ICliServerAuth['authenticateRequest']>[0]);
+        return undefined;
+    } catch (err) {
+        const e = err as CliServerAuthError | undefined;
+        return e?.hostToken === true && e.message ? e.message : undefined;
+    }
+}
 
 export interface WsUpgradeAuthOptions {
     auth?: ICliServerAuth;
@@ -40,13 +63,20 @@ export async function authorizeWsUpgrade(
         return { ok: true };
     }
     const ticket = url.searchParams.get('ticket');
-    const ctx = ticket ? await auth.consumeTicket(ticket).catch(() => undefined) : undefined;
+    let hostToken = false;
+    const ctx = ticket
+        ? await auth.consumeTicket(ticket).catch((err: CliServerAuthError) => {
+              hostToken = err?.hostToken === true;
+              return undefined;
+          })
+        : undefined;
 
     if (!auth.protectServer) {
         return { ok: true, ctx };
     }
     if (!ctx) {
-        return { ok: false, status: 401 };
+        // Sockets take tickets only; a host token presented as a bearer is told so (403)
+        return { ok: false, status: hostToken || (await hostTokenRefusal(auth, request)) ? 403 : 401 };
     }
     if (options.permission && !auth.hasPermission(ctx, options.permission)) {
         return { ok: false, status: 403 };

@@ -23,8 +23,14 @@ import {
     tokensEqual,
 } from './cli-shell-options';
 import { newShellId, SHELL_ID_ENV, terminateProcessTree } from './process-tree';
+import { hostTokenRefusal } from '../auth/ws-upgrade-auth';
 
 const logger = createLogger('ShellSession');
+
+/** WebSocket close reasons are limited to 123 UTF-8 bytes: longer (or missing) texts become `forbidden`. */
+export function closeReason(message: unknown): string {
+    return typeof message === 'string' && message && Buffer.byteLength(message, 'utf8') <= 123 ? message : 'forbidden';
+}
 
 /** Longest delay `setTimeout` supports (~24.8 days); longer ones fire immediately. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
@@ -286,11 +292,16 @@ export class CliShellSessionManager {
                 ctx = ticket ? await this._auth!.consumeTicket(ticket) : undefined;
             } catch (err: any) {
                 if (err?.status === 403) {
-                    return { ok: false, code: ShellCloseCodes.Forbidden, reason: 'forbidden' };
+                    // The auth provider's own text (password change required, host token, ...)
+                    return { ok: false, code: ShellCloseCodes.Forbidden, reason: closeReason(err?.message) };
                 }
                 ctx = undefined;
             }
             if (!ctx) {
+                const refusal = await hostTokenRefusal(this._auth!, request);
+                if (refusal) {
+                    return { ok: false, code: ShellCloseCodes.Forbidden, reason: closeReason(refusal) };
+                }
                 return { ok: false, code: ShellCloseCodes.LoginRequired, reason: 'login required' };
             }
             if (!this._auth!.hasPermission(ctx, CliServerPermissions.ShellExecute)) {

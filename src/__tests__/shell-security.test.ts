@@ -336,7 +336,7 @@ describe('C1: enabling and access modes', () => {
             expect(await run(e.port, 'echo unprotected-ok', {}, `&ticket=${await ticket(e.cli.app, r.token)}`)).toContain('unprotected-ok');
         });
 
-        it('a users-layer 403 (password change required) => 4403', async () => {
+        it('a users-layer 403 (password change required) => 4403 with the plugin text', async () => {
             await setup();
             await request(app)
                 .post(`${V1}/users`)
@@ -347,7 +347,7 @@ describe('C1: enabling and access modes', () => {
             const t = await ticket(app, ops.token);
             // Flag set behind the API (an admin reset would also revoke the session)
             await h.users!.userStore.updateUser(ops.userId, { mustChangePassword: true });
-            expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${t}`)).toEqual({ code: 4403, reason: 'forbidden' });
+            expect(await closeOf(h.port, `/ws/v1/qcli/shell?ticket=${t}`)).toEqual({ code: 4403, reason: 'password change required' });
         });
 
         it('needs a ticket (4401) and shell:execute (4403); root (*) gets a shell', async () => {

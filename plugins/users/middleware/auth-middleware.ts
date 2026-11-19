@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AuthAdapter } from '../models';
-import { AuthService, AuthContext, HOST_TOKENS_CANNOT_USE_CLI_ROUTES, isApiToken, isHostToken } from '../services/auth-service';
+import { AuthService, AuthContext, hostTokenRefused, isApiToken, isHostToken } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup, mergePermissions } from '../permissions';
 import { isOriginAllowed, isSameOrigin } from '../security';
@@ -133,7 +133,7 @@ export function createAuthMiddleware(authenticator: RequestAuthenticator): Reque
     return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
         const ctx = await authenticator.authenticate(req);
         if (isHostToken(ctx)) {
-            throw forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES);
+            throw hostTokenRefused();
         }
         if (ctx.user.mustChangePassword && !allowedDuringPasswordChange(req)) {
             throw forbidden(PASSWORD_CHANGE_REQUIRED);

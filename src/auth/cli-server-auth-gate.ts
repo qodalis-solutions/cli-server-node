@@ -44,6 +44,21 @@ export interface ServerAuthGateOptions {
     publicRoutes: Set<string>;
     /** MCP endpoint paths (normalized), requiring `commands:execute`. */
     mcpPaths?: string[];
+    /**
+     * Prefixes (normalized) the CLI and its plugins serve; `mountPlugin` adds each
+     * plugin's prefixes. Host tokens are refused under them; on any other path they
+     * reach the host's own guard. Without it every path counts as a CLI route.
+     */
+    cliRoutePrefixes?: ReadonlySet<string>;
+}
+
+/** True when `path` (normalized) is one of the CLI's own routes (see `cliRoutePrefixes`). */
+export function isCliRoute(path: string, options: Pick<ServerAuthGateOptions, 'cliRoutePrefixes'>): boolean {
+    if (!options.cliRoutePrefixes) return true;
+    for (const prefix of options.cliRoutePrefixes) {
+        if (path === prefix || path.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)) return true;
+    }
+    return false;
 }
 
 /** Collects `requiredPermissions` along the resolved processor chain. */
@@ -145,7 +160,12 @@ export function createServerAuthGate(
                 // Host code (a processor's services) reads the caller with getCliCaller()
                 runAsCliCaller(ctx, next);
             },
-            (err: { status?: number; message?: string }) => {
+            (err: { status?: number; message?: string; hostToken?: boolean }) => {
+                if (err?.hostToken === true && !isCliRoute(path, options)) {
+                    // A host token on the host's own route: its guard authenticates and decides
+                    next();
+                    return;
+                }
                 if (typeof err?.status !== 'number') {
                     // not an auth error (e.g. a store failure): never expose its message
                     logger.error('authentication failed unexpectedly:', err);
