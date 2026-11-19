@@ -58,7 +58,7 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setCleanupInterval(ms)` | 5 min | Background sweep of expired sessions |
 | `setOptions(options)` | — | Same options as a plain object |
 
-The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `apiTokens` (tokens the host creates for its users, see [Host tokens](#host-tokens-usersplugin-apitokens)), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
+The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `apiTokens` (tokens the host creates for its users, see [Host tokens](#host-tokens-userspluginapitokens)), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
 
 ## Events
 
@@ -244,7 +244,7 @@ const { token, apiToken } = await usersPlugin.apiTokens.create(user.id, {
 
 **Where a host token works.** A `host` token is refused with `403 { "error": "forbidden: host tokens cannot use CLI routes" }` on every CLI route, whatever the route requires and also once its live permissions have shrunk to none, whether or not the server is protected (`setProtectServer`):
 
-- every route of this plugin (`/users`, `/sessions`, `/groups`, `/audit`, `/tokens`, `/link`, `/permissions`) and of the admin dashboard;
+- every authenticated route of this plugin (`/users`, `/sessions`, `/groups`, `/audit`, `/tokens`, `/permissions`, the link approval routes) and of the admin dashboard. Public routes are not checked: sign-in (`POST /sessions`), `POST /link` and `GET /link/:linkId` answer a request with a host token as they answer one without it, as do version discovery and capabilities;
 - the core routes (`/api/qcli/...`, `/api/v1/qcli/...`, the MCP endpoint) and every route of a plugin mounted with `cli.mountPlugin(plugin)` (its `prefix` and `dashboardPrefix`). A router you mount yourself with `app.use(...)` is a host route;
 - the sockets: a host token cannot get a ticket (`POST /sessions/ws-ticket` refuses it). Presented as `Authorization: Bearer` on the upgrade, the events and logs sockets answer an HTTP 403 at the upgrade, and the shell opens and closes with 4403 and the same text.
 
