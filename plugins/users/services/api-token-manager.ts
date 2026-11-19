@@ -60,13 +60,16 @@ export class ApiTokenManager {
         return { token, apiToken: this.authService.toApiTokenView(apiToken, user.name) };
     }
 
-    /** The user's tokens, oldest first, both audiences; empty for an unknown user. */
+    /**
+     * The user's tokens, oldest first, both audiences; empty for an unknown user. Views
+     * carry `usage` when a usage provider is registered (`setTokenUsageProvider`).
+     */
     async list(userId: string): Promise<ApiTokenView[]> {
         requireUserId(userId);
         const user = await this.findUser(userId);
         if (!user) return [];
         const tokens = await this.authService.listApiTokens(user.id);
-        return tokens.map((t) => this.authService.toApiTokenView(t, user.name));
+        return this.authService.withTokenUsage(tokens.map((t) => this.authService.toApiTokenView(t, user.name)));
     }
 
     /**

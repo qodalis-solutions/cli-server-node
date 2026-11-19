@@ -1,10 +1,19 @@
 import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthService, AuthContext, hostTokenRefused, UsersSessionEvent, isApiToken, isHostToken, tokenAudience } from './services/auth-service';
+import {
+    AuthService,
+    AuthContext,
+    HOST_TOKEN_REQUIRED,
+    hostTokenRefused,
+    UsersSessionEvent,
+    isApiToken,
+    isHostToken,
+    tokenAudience,
+} from './services/auth-service';
 import { RequestAuthenticator, PASSWORD_CHANGE_REQUIRED } from './middleware/auth-middleware';
 import { forbidden, unauthorized } from './errors';
 import { hasPermission } from './permissions';
-import { SessionMetadata, UsersPermissionCatalog } from './models';
+import { QcliCaller, SessionMetadata, UsersPermissionCatalog } from './models';
 import { hashToken } from './security';
 
 /**
@@ -229,29 +238,43 @@ export class UsersServerAuth {
     // ------------------------------------------------------ host app guards
 
     /**
-     * Express middleware for host-app routes: requires a users session (sets `req.qcliAuth`).
-     * Auth errors keep their status (401/403); unexpected errors are logged and answered
-     * with 500 `{ error: 'internal server error' }`.
+     * Express middleware for host-app routes: requires a users session or API token (sets
+     * `req.qcliAuth` and `req.qcliCaller`). Auth errors keep their status (401/403);
+     * unexpected errors are logged and answered with 500 `{ error: 'internal server error' }`.
      */
     requireAuth(): RequestHandler {
-        return this.guard([]);
+        return this.guard([], false);
     }
 
     /** Express middleware for host-app routes: requires all the given permissions (403 otherwise; errors as {@link requireAuth}). */
     requirePermission(...permissions: string[]): RequestHandler {
-        return this.guard(permissions);
+        return this.guard(permissions, false);
     }
 
-    private guard(permissions: string[]): RequestHandler {
+    /**
+     * Express middleware for host-app routes that only `host` tokens may call: a session,
+     * an adapter sign-in or a `cli` token gets 403 `forbidden: a host token is required`
+     * (checked before the permissions); then as {@link requirePermission}.
+     */
+    requireHostToken(...permissions: string[]): RequestHandler {
+        return this.guard(permissions, true);
+    }
+
+    private guard(permissions: string[], hostTokenOnly: boolean): RequestHandler {
         return (req: Request, res: Response, next: NextFunction) => {
             this.authenticateFull(req).then(
                 (ctx) => {
+                    if (hostTokenOnly && !isHostToken(ctx)) {
+                        res.status(403).json({ error: HOST_TOKEN_REQUIRED });
+                        return;
+                    }
                     const missing = permissions.filter((p) => !hasPermission(ctx.permissions, p));
                     if (missing.length > 0) {
                         res.status(403).json({ error: `forbidden: missing permission ${missing.join(', ')}` });
                         return;
                     }
                     req.qcliAuth = ctx;
+                    req.qcliCaller = toQcliCaller(ctx);
                     next();
                 },
                 (err: { status?: number; message?: string }) => {
@@ -267,4 +290,15 @@ export class UsersServerAuth {
             );
         };
     }
+}
+
+/** The caller of a guarded host route, from an authenticated context. */
+export function toQcliCaller(ctx: AuthContext): QcliCaller {
+    return {
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        tokenId: ctx.apiToken?.id ?? null,
+        audience: ctx.apiToken ? tokenAudience(ctx.apiToken) : null,
+        permissions: [...ctx.permissions],
+    };
 }

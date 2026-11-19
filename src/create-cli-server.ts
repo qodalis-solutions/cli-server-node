@@ -67,6 +67,12 @@ export interface MountablePlugin {
     installedPlugins?: CliInstalledPlugin[];
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
     setEventBus?(eventBus: ICliEventBus): void;
+    /**
+     * False for a plugin that serves host routes (public-api, docs, portal): its prefixes
+     * are not CLI routes, so host tokens are not refused there, and it is mounted on a
+     * server without CLI routes too. Default true.
+     */
+    cliRoutes?: boolean;
 }
 
 /** MCP extension point of a server instance. */
@@ -135,6 +141,15 @@ export interface CliServerOptions {
      * marked `page.truncated`, in `/execute`, `/execute/stream` and MCP command results.
      */
     maxTableRows?: number;
+    /**
+     * Serve the CLI's routes and sockets (default true). False, for a service that only
+     * hosts its own routes (e.g. a public API guarded by the users plugin in guard-only
+     * mode): none of the CLI's HTTP routes (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`,
+     * a custom `basePath`, MCP) or sockets (`/ws/*`) are served, and `mountPlugin` mounts
+     * only plugins with `cliRoutes: false`, logging the others. The builder, the permission
+     * catalog, the event bus and installed plugins stay.
+     */
+    cliRoutes?: boolean;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -185,6 +200,7 @@ export interface CliServerResult {
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
     const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false, shell, trustProxy = false } = options;
+    const cliRoutes = options.cliRoutes ?? true;
     if (shell && !enableShell) {
         logger.warn('shell options are set but enableShell is false: the shell stays disabled');
     }
@@ -211,7 +227,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         );
     }
 
-    const mcpOptions = resolveMcpOptions(options.mcp);
+    // Without CLI routes there is no MCP endpoint either
+    const mcpOptions = cliRoutes ? resolveMcpOptions(options.mcp) : undefined;
     const mcpPath = `${normalizePath(basePath)}/mcp`;
     if (mcpOptions?.token && options.auth?.protectServer) {
         logger.warn('mcp.token is ignored: the auth provider protects the MCP endpoint');
@@ -272,10 +289,15 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
 
-    const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy });
+    const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy, cliRoutes });
     const eventBus = new CliEventBus();
     eventBus.subscribe('*', (event) => eventSocketManager.deliverEvent(event));
-    const logSocketManager = new CliLogSocketManager({ allowedOrigins, trustProxy, sessionCheckIntervalMs: shell?.sessionCheckIntervalMs });
+    const logSocketManager = new CliLogSocketManager({
+        allowedOrigins,
+        trustProxy,
+        sessionCheckIntervalMs: shell?.sessionCheckIntervalMs,
+        cliRoutes,
+    });
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };
@@ -313,71 +335,74 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         );
     }
 
-    // Version discovery endpoint
-    app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
+    // The CLI's own routes (none on a server without CLI routes)
+    if (cliRoutes) {
+        // Version discovery endpoint
+        app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
 
-    // API v1 routes
-    app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
+        // API v1 routes
+        app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
 
-    // Custom basePath fallback (when user overrides the default)
-    if (basePath !== '/api/v1/qcli') {
-        app.use(basePath, createCliController(registry, executor, { shellCapabilities, eventBus }));
-    }
+        // Custom basePath fallback (when user overrides the default)
+        if (basePath !== '/api/v1/qcli') {
+            app.use(basePath, createCliController(registry, executor, { shellCapabilities, eventBus }));
+        }
 
-    // Filesystem API — provider-based
-    let fsProvider = builder.fileStorageProvider;
-    if (!fsProvider && builder.fileSystemOptions) {
-        // Backward compatibility: create OsFileStorageProvider from old-style options
-        fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
-    }
-    if (fsProvider) {
-        // The API and the MCP tools share it, so both publish fs:changed
-        fsProvider = withFileStorageEvents(fsProvider, eventBus);
-        app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
-        mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
-        mcpFeatures.add('filesystem');
-    }
+        // Filesystem API — provider-based
+        let fsProvider = builder.fileStorageProvider;
+        if (!fsProvider && builder.fileSystemOptions) {
+            // Backward compatibility: create OsFileStorageProvider from old-style options
+            fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
+        }
+        if (fsProvider) {
+            // The API and the MCP tools share it, so both publish fs:changed
+            fsProvider = withFileStorageEvents(fsProvider, eventBus);
+            app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
+            mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
+            mcpFeatures.add('filesystem');
+        }
 
-    // Data Explorer API
-    const deBuilder = builder.dataExplorerBuilder;
-    if (deBuilder && deBuilder.registry.size > 0) {
-        // The sign-in provider can be set later (setAuth, mountPlugin): read it per request
-        const deExecutor = new DataExplorerExecutor(deBuilder.registry, {
-            audit: () => {
+        // Data Explorer API
+        const deBuilder = builder.dataExplorerBuilder;
+        if (deBuilder && deBuilder.registry.size > 0) {
+            // The sign-in provider can be set later (setAuth, mountPlugin): read it per request
+            const deExecutor = new DataExplorerExecutor(deBuilder.registry, {
+                audit: () => {
+                    const auth = serverAuth;
+                    return auth?.audit
+                        ? (entry) =>
+                              auth.audit!({
+                                  event: entry.event,
+                                  userId: entry.userId,
+                                  userName: entry.userName,
+                                  details: String(entry.metadata.source ?? ''),
+                                  metadata: entry.metadata,
+                              })
+                        : undefined;
+                },
+            });
+            const dataCaller = (ctx: CliServerAuthContext | undefined, remoteAddress?: string): DataExplorerCaller => {
                 const auth = serverAuth;
-                return auth?.audit
-                    ? (entry) =>
-                          auth.audit!({
-                              event: entry.event,
-                              userId: entry.userId,
-                              userName: entry.userName,
-                              details: String(entry.metadata.source ?? ''),
-                              metadata: entry.metadata,
-                          })
-                    : undefined;
-            },
-        });
-        const dataCaller = (ctx: CliServerAuthContext | undefined, remoteAddress?: string): DataExplorerCaller => {
-            const auth = serverAuth;
-            return {
-                userId: ctx?.userId,
-                userName: ctx?.userName,
-                remoteAddress,
-                hasPermission: auth?.protectServer && ctx ? (p: string) => auth.hasPermission(ctx, p) : undefined,
+                return {
+                    userId: ctx?.userId,
+                    userName: ctx?.userName,
+                    remoteAddress,
+                    hasPermission: auth?.protectServer && ctx ? (p: string) => auth.hasPermission(ctx, p) : undefined,
+                };
             };
-        };
-        app.use(
-            '/api/qcli/data-explorer',
-            createDataExplorerController(deBuilder.registry, deExecutor, {
-                caller: (req) => dataCaller(req.qcliServerAuth, clientAddress(req, trustProxy)),
-            }),
-        );
-        mcpFeatureProviders.push(
-            new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor, (context) =>
-                dataCaller(context.auth, clientAddress(context.request, trustProxy)),
-            ),
-        );
-        mcpFeatures.add('data-explorer');
+            app.use(
+                '/api/qcli/data-explorer',
+                createDataExplorerController(deBuilder.registry, deExecutor, {
+                    caller: (req) => dataCaller(req.qcliServerAuth, clientAddress(req, trustProxy)),
+                }),
+            );
+            mcpFeatureProviders.push(
+                new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor, (context) =>
+                    dataCaller(context.auth, clientAddress(context.request, trustProxy)),
+                ),
+            );
+            mcpFeatures.add('data-explorer');
+        }
     }
 
     logger.info('CLI server created with %d processors', registry.processors.length);
@@ -418,11 +443,20 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             builder.addInstalledPlugin(bundled);
         }
         plugin.setEventBus?.(eventBus);
-        cliRoutePrefixes.add(normalizePath(plugin.prefix));
-        if (plugin.dashboardPrefix) cliRoutePrefixes.add(normalizePath(plugin.dashboardPrefix));
-        app.use(plugin.prefix, plugin.router);
-        if (plugin.dashboardPrefix && plugin.dashboardRouter) {
-            app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+        const hostRoutes = plugin.cliRoutes === false;
+        if (!cliRoutes && !hostRoutes) {
+            // Installed (events, catalog, auth hooks above) but its CLI routes are not served
+            console.warn(`[qcli] CLI routes are turned off; ${plugin.prefix} is not mounted`);
+        } else {
+            // A host-route plugin's prefixes are not CLI routes: host tokens reach its routes
+            if (!hostRoutes) {
+                cliRoutePrefixes.add(normalizePath(plugin.prefix));
+                if (plugin.dashboardPrefix) cliRoutePrefixes.add(normalizePath(plugin.dashboardPrefix));
+            }
+            app.use(plugin.prefix, plugin.router);
+            if (plugin.dashboardPrefix && plugin.dashboardRouter) {
+                app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+            }
         }
         if (isJobScheduler(plugin.scheduler)) {
             serverOptions.jobsEnabled = true;

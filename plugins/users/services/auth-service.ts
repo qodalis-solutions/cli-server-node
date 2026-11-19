@@ -23,6 +23,7 @@ import {
     SessionPayload,
     SessionView,
     User,
+    TokenUsageProvider,
     UsersBroadcastFn,
     UsersPermissionCatalog,
 } from '../models';
@@ -48,6 +49,8 @@ export const HOST_TOKENS_NEED_PERMISSIONS = 'host tokens need permissions';
 export const NOT_A_HOST_PERMISSION = 'not a host permission: ';
 export const EXPIRY_CONFLICT = 'expiresInDays and neverExpires cannot both be set';
 export const HOST_TOKENS_CANNOT_USE_CLI_ROUTES = 'forbidden: host tokens cannot use CLI routes';
+/** `requireHostToken` (and the public-api guard) refusing a session, an adapter sign-in or a `cli` token. */
+export const HOST_TOKEN_REQUIRED = 'forbidden: a host token is required';
 
 /** Prefix of API tokens (`qcli_pat_` + 32 random bytes, base64url without padding). */
 export const API_TOKEN_PREFIX = 'qcli_pat_';
@@ -164,6 +167,7 @@ export class AuthService {
     private readonly groupStore?: ICliGroupStore;
     private broadcast?: UsersBroadcastFn;
     private eventBus?: ICliEventBus;
+    private tokenUsageProvider?: TokenUsageProvider;
     private readonly lockouts = new Map<string, LockoutState>();
     private readonly tickets = new Map<string, TicketEntry>();
     private readonly sessionListeners = new Set<(event: UsersSessionEvent) => void>();
@@ -663,6 +667,33 @@ export class AuthService {
         };
         if (token.permissions) view.permissions = [...token.permissions];
         return view;
+    }
+
+    /** Registers (or, with null, removes) the provider of `usage` on token views. */
+    setTokenUsageProvider(provider: TokenUsageProvider | null): void {
+        this.tokenUsageProvider = provider ?? undefined;
+    }
+
+    /**
+     * Adds `usage` (last) to the views, with one provider call for every id; the views
+     * unchanged without a provider. A provider failure is logged and the views are
+     * returned without `usage`.
+     */
+    async withTokenUsage(views: ApiTokenView[]): Promise<ApiTokenView[]> {
+        const provider = this.tokenUsageProvider;
+        if (!provider || views.length === 0) return views;
+        let usage: Record<string, ApiTokenView['usage']>;
+        try {
+            usage = (await provider(views.map((v) => v.id))) ?? {};
+        } catch (err) {
+            console.error('[users] token usage provider failed:', err);
+            return views;
+        }
+        for (const view of views) {
+            const u = Object.prototype.hasOwnProperty.call(usage, view.id) ? usage[view.id] : undefined;
+            if (u) view.usage = u;
+        }
+        return views;
     }
 
     /** Tokens of `userId`, or every token when omitted, oldest first. */

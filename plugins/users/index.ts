@@ -1,5 +1,5 @@
 export { CliUsersBuilder, generatePassword } from './cli-users-builder';
-export { UsersServerAuth, EXTERNAL_REQUEST } from './server-auth';
+export { UsersServerAuth, EXTERNAL_REQUEST, toQcliCaller } from './server-auth';
 export type { UsersServerAuthContext, UsersServerAttachment } from './server-auth';
 export { RequestAuthenticator } from './middleware/auth-middleware';
 export { hashToken, isOriginAllowed, isSameOrigin, requestOrigin } from './security';
@@ -26,6 +26,10 @@ export type {
     ApiToken,
     ApiTokenAudience,
     ApiTokenView,
+    ApiTokenUsage,
+    ApiTokenUsageDay,
+    TokenUsageProvider,
+    QcliCaller,
     ApiTokenCreateOptions,
     CreatedApiToken,
     CreateApiTokenResult,
@@ -57,6 +61,7 @@ export {
     NOT_A_HOST_PERMISSION,
     EXPIRY_CONFLICT,
     HOST_TOKENS_CANNOT_USE_CLI_ROUTES,
+    HOST_TOKEN_REQUIRED,
     isHostToken,
     hostTokenRefused,
 } from './services/auth-service';
