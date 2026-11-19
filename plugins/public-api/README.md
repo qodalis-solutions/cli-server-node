@@ -40,7 +40,7 @@ Your users get `host` tokens from your own pages through `users.apiTokens.create
 
 | # | Condition | Answer |
 |---|---|---|
-| 1 | authentication fails | as the users plugin's guards: 401 `unauthorized`, 401 `invalid or expired token`, 403 `account disabled`, 403 `password change required` |
+| 1 | authentication fails | as the users plugin's guards: 401 `unauthorized` (no credentials), 401 `invalid or expired token` (unknown, expired or revoked token, or a disabled user's token or session), 401 `session expired`, 401 `account disabled` (a disabled user signed in by an auth adapter), 403 `password change required` |
 | 2 | not a `host` token (a session, an auth-adapter sign-in, a `cli` token) | 403 `forbidden: a host token is required` |
 | 3 | the permission is given and not held | 403 `forbidden: missing permission <permission>` |
 | 4 | the quota resolver throws or rejects | 500 `internal server error` (the error is logged, its text never sent) |
@@ -72,7 +72,7 @@ const publicApi = new CliPublicApiBuilder()
 | `GET /qcli/api/swagger` | Swagger UI 5 for that document only (`persistAuthorization: false`, "try it out" on), titled with `info.title` |
 | `GET /qcli/api/swagger/assets/<file>` | Swagger UI's own files (`swagger-ui-dist`) |
 
-What the document lacks is added, and the host's own values always win: the bearer scheme `components.securitySchemes.qcliToken` (`{ type: 'http', scheme: 'bearer', bearerFormat: 'qcli_pat' }`), a top-level `security: [{ qcliToken: [] }]`, and `servers: [{ url }]` with `setServerUrl` or the request's `scheme://host`. Express has no route metadata, so state each operation's permission in your document as `x-required-permission: "rates:read"` (the portal shows it); your `x-codeSamples` are passed through. Without `setOpenApi` an empty document (`info.title` `API`) is served. On a protected server these routes stay public, under `/api` too.
+What the document lacks is added, and the host's own values always win: the bearer scheme `components.securitySchemes.qcliToken` (`{ type: 'http', scheme: 'bearer', bearerFormat: 'qcli_pat' }`), a top-level `security: [{ qcliToken: [] }]`, and `servers: [{ url }]` with `setServerUrl`, else the request's `scheme://host` plus the path the app is mounted under (a parent app's `app.use('/prefix', cli.app)`; a path base starting with `//` or `/\` answers 400 `{ "error": "invalid path base" }`). Express has no route metadata, so state each operation's permission in your document as `x-required-permission: "rates:read"` (the portal shows it); your `x-codeSamples` are passed through. Without `setOpenApi` an empty document (`info.title` `API`) is served. On a protected server these routes stay public, under `/api` too.
 
 The portal plugin shows the document as an API reference with code samples (`new CliPortalBuilder().addSection(publicApi)`).
 
@@ -96,7 +96,7 @@ An unknown user rejects with a `PublicApiError` (`status` 404, `user not found`)
 | `setUsageStore(store)` | `InMemoryPublicApiUsageStore` | Where the counters are kept |
 | `setUsageRetentionDays(days)` | 31 | Days the day counters are kept (minute counters: 2 minutes); pruned at most once an hour |
 | `setOpenApi(source)` | empty document | The public document: an object, or a path to a JSON file (`public-api: cannot read OpenAPI document <path>` when unreadable) |
-| `setServerUrl(url)` | the request's `scheme://host` | The document's `servers` URL when it has none |
+| `setServerUrl(url)` | the request's `scheme://host` plus the parent mount's prefix | The document's `servers` URL when it has none |
 | `setBasePath(path)` | `/qcli/api` | Where the OpenAPI document and Swagger UI are served (`/segment[/segment]`; otherwise `invalid public-api base path: <path>`) |
 | `setTitle(title)` | `API reference` | The portal's label for the API section |
 | `build()` | | `{ prefix, router, cliRoutes: false, publicRoutes, guard(permission?), usage, store, portalSection, installedPlugin }` |
