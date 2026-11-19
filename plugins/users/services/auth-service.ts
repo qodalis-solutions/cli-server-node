@@ -606,7 +606,8 @@ export class AuthService {
         return scope.filter((p) => hasPermission(userPermissions, p));
     }
 
-    private static isTokenExpired(token: ApiToken, now = Date.now()): boolean {
+    /** True once the token's `expiresAt` passed (null: never expires). */
+    static isTokenExpired(token: ApiToken, now = Date.now()): boolean {
         return token.expiresAt !== null && token.expiresAt !== undefined && now >= token.expiresAt;
     }
 

@@ -357,6 +357,8 @@ export class CliUsersBuilder {
         };
 
         const protectServer = options.protectServer ?? true;
+        // Server catalogs this plugin already added its entries to (attach runs again on setAuth)
+        const filledCatalogs = new WeakSet<object>();
         const serverAuth = new UsersServerAuth(authService, authenticator, protectServer, (server) => {
             if (!allowedOrigins && server.allowedOrigins) {
                 allowedOrigins = server.allowedOrigins;
@@ -375,10 +377,13 @@ export class CliUsersBuilder {
             if (server.serverOptions) {
                 server.serverOptions.externalAuthentication = externalAuth;
             }
-            // The server's catalog (core's entries, the host's): add this plugin's and serve it
+            // The server's catalog (core's entries, the host's): add this plugin's once per
+            // catalog and serve it. A name already registered (e.g. the host's `users:read`)
+            // throws `permission already registered: <name>` and fails startup.
             if (server.permissions) {
-                if (!server.permissions.find(USERS_PERMISSION_ENTRIES[0].name)) {
+                if (!filledCatalogs.has(server.permissions)) {
                     server.permissions.add(USERS_PERMISSION_ENTRIES, 'cli');
+                    filledCatalogs.add(server.permissions);
                 }
                 authService.setPermissionCatalog(server.permissions);
             }

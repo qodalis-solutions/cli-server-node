@@ -345,3 +345,67 @@ describe('path variants with a host token', () => {
         expect((await request(h.cli.app).get('/api/custom/items').set(auth(root.token))).status).toBe(200);
     });
 });
+
+describe('host tokens on an unprotected server', () => {
+    const MCP_BODY = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const probes = (app: Harness['cli']['app']): [string, () => request.Test][] => [
+        ['GET /commands', () => request(app).get(`${BASE}/commands`)],
+        ['POST /execute', () => request(app).post(`${BASE}/execute`).send({ command: 'echo', value: 'hi', chainCommands: [], args: {} })],
+        ['GET /api/qcli/fs/ls', () => request(app).get('/api/qcli/fs/ls?path=/')],
+        ['GET /api/qcli/data-explorer/sources', () => request(app).get('/api/qcli/data-explorer/sources')],
+        ['GET /jobs', () => request(app).get(`${BASE}/jobs`)],
+        [
+            'POST /api/qcli/mcp',
+            () =>
+                request(app)
+                    .post('/api/qcli/mcp')
+                    .set('Content-Type', 'application/json')
+                    .set('Accept', 'application/json, text/event-stream')
+                    .send(MCP_BODY),
+        ],
+    ];
+
+    it('a host token is refused on the CLI routes and sockets; anonymous and cli-token requests are unchanged', async () => {
+        const h = await start({ protectServer: false }, ['*'], { mcp: true });
+        const host = await h.plugin.apiTokens.create(h.userId, { name: 'host', audience: 'host', permissions: ['rates:read'] });
+        const cli = await h.plugin.apiTokens.create(h.userId, { name: 'cli' });
+        for (const [name, probe] of probes(h.cli.app)) {
+            const refused = await probe().set(auth(host.token));
+            expect(refused.status, name).toBe(403);
+            expect(refused.body, name).toEqual({ error: HOST_TEXT });
+            const anonymous = await probe();
+            expect(anonymous.status, name).not.toBe(403);
+            const withCli = await probe().set(auth(cli.token));
+            expect(withCli.status, name).toBe(anonymous.status);
+        }
+        expect((await request(h.cli.app).get(`${BASE}/commands`)).status).toBe(200);
+
+        const header = { Authorization: `Bearer ${host.token}` };
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/events', header)).toEqual({ status: 403 });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/logs', header)).toEqual({ status: 403 });
+        expect(await socketOutcome(h.port, '/ws/v1/qcli/shell', header)).toEqual({ code: 4403, reason: HOST_TEXT });
+
+        // the host's own route under /api still works with the host token
+        const rates = await request(h.cli.app).get('/api/rates').set(auth(host.token));
+        expect(rates.status).toBe(200);
+        expect(rates.body.user).toBe('alice');
+        expect((await request(h.cli.app).get('/api/rates').set(auth(cli.token))).status).toBe(200);
+    });
+
+    it('the events socket still opens anonymously and with a cli-token bearer', async () => {
+        const h = await start({ protectServer: false });
+        const cli = await h.plugin.apiTokens.create(h.userId, { name: 'cli' });
+        const open = (headers: Record<string, string>) =>
+            new Promise<string>((resolve) => {
+                const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/v1/qcli/events`, { headers });
+                ws.on('open', () => {
+                    ws.close();
+                    resolve('open');
+                });
+                ws.on('unexpected-response', (_req, res) => resolve(`status ${res.statusCode}`));
+                ws.on('error', () => undefined);
+            });
+        expect(await open({})).toBe('open');
+        expect(await open({ Authorization: `Bearer ${cli.token}` })).toBe('open');
+    });
+});
