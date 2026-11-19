@@ -126,6 +126,7 @@ export function requiredServerPermissions(method: string, path: string, body: an
  * an auth provider with `protectServer` is installed. Without a provider it is
  * a no-op, so servers without the users plugin behave as before. With a provider
  * that does not protect the server, it only refuses host tokens on the CLI's routes.
+ * Without `cliRoutePrefixes` every path counts as a CLI route.
  */
 export function createServerAuthGate(
     getAuth: () => ICliServerAuth | undefined,

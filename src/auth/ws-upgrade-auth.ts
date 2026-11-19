@@ -21,7 +21,9 @@ const API_TOKEN_PREFIX = 'qcli_pat_';
  * as a host token ({@link ICliServerAuth.isHostTokenBearer}: a token-store lookup
  * only, no host adapter, no `lastUsedAt` write), returns
  * `forbidden: host tokens cannot use CLI routes` so the socket is refused with a 403
- * instead of a 401. Grants nothing: any other outcome returns undefined.
+ * instead of a 401. Grants nothing: any other outcome returns undefined. The scheme
+ * is matched exactly (`Bearer `, case-sensitive), as the users plugin's authenticator
+ * reads it: a `bearer …` header is no credential there, so it is not a host token here.
  */
 export async function hostTokenRefusal(auth: ICliServerAuth, request: Pick<IncomingMessage, 'headers'>): Promise<string | undefined> {
     const header = request.headers.authorization;
