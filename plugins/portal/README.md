@@ -54,6 +54,8 @@ The portal answers exactly these paths under its mount (GET and HEAD) and nothin
 
 `docs` and `api` are `null` when that plugin's section was not added (with neither, the site shows "Nothing published yet"). No sign-in is needed. On a protected server, mount the portal outside `/api` (the default `/qcli/portal` and `/` are): under `/api` the server's sign-in applies to the guide and reference pages.
 
+When your app is mounted under a path (a parent Express app's `app.use('/prefix', cli.app)`), that prefix is added to the `portal.json` URLs and to `<base href>`. A prefix starting with `//` or `/\` (it would point them at another host) answers 400 `{ "error": "invalid path base" }` on the pages and `portal.json`.
+
 ## The site
 
 The site is found, in order: `setSiteDir(dir)` (then only there), the sibling `cli-server-dashboard/portal/dist` (development), the copy bundled into this package (`site/`, made by `npm run build` / `prepublishOnly`), `../cli-server-dashboard/portal/dist` from the working directory, then the `@qodalis/cli-server-portal` package. Without one, `[qcli] portal site not found; the portal is not served` is logged once and nothing is served, `portal.json` included.

@@ -26,6 +26,22 @@ export const HOST_TOKEN_REQUIRED = 'forbidden: a host token is required';
 export const NO_API_ACCESS = 'forbidden: no API access';
 
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+/** Set on a request once a guard counted it: the token and the windows it was counted in. */
+const COUNTED: unique symbol = Symbol('qcli.publicApi.counted');
+const RATE_LIMIT_HEADERS = ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'];
+
+type CountedRequest = Request & { qcliCaller?: QcliCaller; [COUNTED]?: { tokenId: string; windows: string[] } };
+
+/** The users plugin's matching: `*` as the last segment matches the rest, case-insensitive. */
+function permissionMatches(granted: string, required: string): boolean {
+    const g = granted.trim().toLowerCase().split(':');
+    const r = required.trim().toLowerCase().split(':');
+    for (let i = 0; i < g.length; i++) {
+        if (g[i] === '*' && i === g.length - 1) return true;
+        if (i >= r.length || (g[i] !== '*' && g[i] !== r[i])) return false;
+    }
+    return g.length === r.length;
+}
 const MINUTE_ROWS_KEPT = 2;
 
 /**
@@ -230,6 +246,12 @@ export class CliPublicApiBuilder {
                 return;
             }
             const tokenId = caller.tokenId;
+            const marked = req as CountedRequest;
+            if (marked[COUNTED]) {
+                // a stacked guard: counted once, by the first guard
+                next();
+                return;
+            }
             (async () => {
                 let perDay: number | null;
                 let perMinute: number | null;
@@ -249,26 +271,52 @@ export class CliPublicApiBuilder {
                 const at = now();
                 const day = dayWindow(at);
                 const minute = minuteWindow(at);
-                let outcome: { refused?: 'day' | 'minute'; dayCount: number; minuteCount: number };
+                let outcome: { refused?: 'day' | 'minute'; cancelled?: boolean; dayCount: number; minuteCount: number };
                 try {
                     outcome = await serialized(caller.userId, async () => {
                         // increment, check the account's sums, compensate when over a limit
-                        await store.increment(tokenId, caller.userId, day);
-                        await store.increment(tokenId, caller.userId, minute);
-                        const dayCount = await store.accountCount(caller.userId, day);
-                        const minuteCount = await store.accountCount(caller.userId, minute);
-                        const refused =
-                            perDay !== null && dayCount > perDay ? 'day' : perMinute !== null && minuteCount > perMinute ? 'minute' : undefined;
-                        if (refused) {
-                            await store.decrement(tokenId, day);
-                            await store.decrement(tokenId, minute);
+                        // the client went away while waiting: not counted, nothing answered
+                        if (req.socket?.destroyed || res.destroyed) {
+                            return { cancelled: true, dayCount: 0, minuteCount: 0 };
                         }
-                        return { refused, dayCount, minuteCount } as const;
+                        const counted: string[] = [];
+                        try {
+                            await store.increment(tokenId, caller.userId, day);
+                            counted.push(day);
+                            await store.increment(tokenId, caller.userId, minute);
+                            counted.push(minute);
+                            const dayCount = await store.accountCount(caller.userId, day);
+                            const minuteCount = await store.accountCount(caller.userId, minute);
+                            const refused =
+                                perDay !== null && dayCount > perDay
+                                    ? 'day'
+                                    : perMinute !== null && minuteCount > perMinute
+                                      ? 'minute'
+                                      : undefined;
+                            if (refused) {
+                                await store.decrement(tokenId, day);
+                                counted.shift();
+                                await store.decrement(tokenId, minute);
+                                counted.shift();
+                            }
+                            return { refused, dayCount, minuteCount } as const;
+                        } catch (err) {
+                            // a request answered 500 is not left counted (best effort)
+                            for (const window of counted) {
+                                await store.decrement(tokenId, window).catch(() => undefined);
+                            }
+                            throw err;
+                        }
                     });
                 } catch (err) {
                     internalError(res, 'usage store failed', err);
                     return;
                 }
+                if (outcome.cancelled) {
+                    res.destroy();
+                    return;
+                }
+                if (!outcome.refused) marked[COUNTED] = { tokenId, windows: [day, minute] };
                 pruneNow(at);
                 const headers = rateLimitHeaders({ perDay, perMinute }, outcome.dayCount, outcome.minuteCount, at);
                 if (headers) {
@@ -292,7 +340,30 @@ export class CliPublicApiBuilder {
 
         const guard = (permission?: string): RequestHandler[] => {
             // authentication, then host tokens only, then the permission (the users plugin's texts)
-            return [users.requireHostToken(...(permission ? [permission] : [])), admit];
+            const authenticate = users.requireHostToken(...(permission ? [permission] : []));
+            const check: RequestHandler = (req, res, next) => {
+                const marked = req as CountedRequest;
+                const counted = marked[COUNTED];
+                if (!counted) {
+                    authenticate(req, res, next);
+                    return;
+                }
+                // A later stacked guard checks only its own permission. Express runs the guards one
+                // after the other, so the first one cannot see this permission: a refusal here takes
+                // the request's count back, so a refused request is not counted.
+                if (!permission || marked.qcliCaller?.permissions.some((p) => permissionMatches(p, permission))) {
+                    next();
+                    return;
+                }
+                delete marked[COUNTED];
+                Promise.all(counted.windows.map((w) => store.decrement(counted.tokenId, w)))
+                    .catch((err) => console.error('[public-api] usage store failed:', err))
+                    .finally(() => {
+                        for (const header of RATE_LIMIT_HEADERS) res.removeHeader(header);
+                        res.status(403).json({ error: `forbidden: missing permission ${permission}` });
+                    });
+            };
+            return [check, admit];
         };
 
         // The document and Swagger UI: no sign-in, credentials ignored

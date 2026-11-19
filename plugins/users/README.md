@@ -286,7 +286,7 @@ cli.mountPlugin(users); // logs: [qcli] CLI routes are turned off; /api/v1/qcli 
 cli.app.get('/v1/rates', users.requireHostToken('rates:read'), handler);
 ```
 
-In guard-only mode the plugin serves no routes (sign-in, users, groups, sessions, tokens, permissions, link, audit), seeds nothing (no `root`, no built-in groups), does not protect the server and does not sweep the shared session store. The guards and `apiTokens` stay. With the CLI routes left on, host tokens are still refused there.
+In guard-only mode the plugin serves no routes (sign-in, users, groups, sessions, tokens, permissions, link, audit), seeds nothing (no `root`, no built-in groups), does not protect the server and does not sweep the shared session store. The guards and `apiTokens` stay. It is accepted only by a server without CLI routes: mounting it (or `setAuth`, `createCliServer({ auth })`) on a server with CLI routes throws `guard-only needs cliRoutes: false`, so the CLI routes are never left open without sign-in.
 
 **Create and revoke tokens from one service only.** Token names and the 20-token limit are checked in the process that creates the token; several services may validate tokens over shared stores, but only one should create and revoke them.
 

@@ -203,7 +203,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
 | `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
 | `mcp` | off | `true` or `{ tools, exclude, token, instructions, enabled }` (see [MCP](#mcp-endpoint)) |
-| `cliRoutes` | `true` | `false` serves none of the CLI's routes and sockets (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`, `basePath`, MCP, `/ws/*`): for a service that only hosts its own routes (see the users plugin's [guard-only mode](plugins/users/README.md#guard-only-mode)). `mountPlugin` then mounts only plugins with `cliRoutes: false` and logs `[qcli] CLI routes are turned off; <prefix> is not mounted` for the others; the catalog, events and installed plugins stay |
+| `cliRoutes` | `true` | `false` serves none of the CLI's routes and sockets (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`, `basePath`, MCP, `/ws/*`): for a service that only hosts its own routes (see the users plugin's [guard-only mode](plugins/users/README.md#guard-only-mode)). `mountPlugin` then mounts only plugins with `cliRoutes: false` and logs `[qcli] CLI routes are turned off; <prefix> is not mounted` for the others (the admin dashboard is not served either); a guard-only users plugin is accepted only there (`guard-only needs cliRoutes: false`); the catalog, events and installed plugins stay |
 | `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 

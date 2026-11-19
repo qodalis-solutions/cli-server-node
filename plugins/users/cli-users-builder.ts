@@ -418,7 +418,7 @@ export class CliUsersBuilder {
                 }
                 authService.setPermissionCatalog(server.permissions);
             }
-        });
+        }, guardOnly);
 
         const router = Router();
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);

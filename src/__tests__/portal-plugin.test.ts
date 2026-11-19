@@ -12,7 +12,7 @@ import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
 import { CliDocsBuilder, DocsPluginResult } from '@qodalis/cli-server-plugin-docs';
 import { CliPublicApiBuilder, PublicApiPluginResult } from '@qodalis/cli-server-plugin-public-api';
-import { CliPortalBuilder, resolvePortalSiteDir } from '@qodalis/cli-server-plugin-portal';
+import { CliPortalBuilder, isSafePathPrefix, resolvePortalSiteDir } from '@qodalis/cli-server-plugin-portal';
 import { ROOT_PASS } from './users-test-helpers';
 
 const SITE = path.join(__dirname, 'fixtures', 'portal-site');
@@ -197,6 +197,24 @@ describe('portal plugin', () => {
         expect(page.text).toContain(`<base href="${href}" />`);
         // without a prefix nothing changes
         expect((await request(h.cli.app).get(mount === '/' ? '/portal.json' : `${mount}/portal.json`)).body.docs.pages).toBe('/qcli/docs/pages');
+    });
+
+    it('a path base starting with // or /\\ answers 400 invalid path base', async () => {
+        for (const ok of ['', '/proxy', '/a/b']) expect(isSafePathPrefix(ok), ok).toBe(true);
+        for (const bad of ['//evil.example.com', '/\\evil.example.com']) expect(isSafePathPrefix(bad), bad).toBe(false);
+        const h = await start();
+        h.cli.mountPlugin(portal().setPath('/').build());
+        // what a parent app mounted at a protocol-relative path hands the portal
+        const outer = express();
+        outer.use((req, res, next) => {
+            Object.defineProperty(req, 'baseUrl', { get: () => '//evil.example.com', set: () => undefined, configurable: true });
+            h.cli.app(req, res, next);
+        });
+        for (const p of ['/portal.json', '/', '/guides/x']) {
+            const res = await request(outer).get(p);
+            expect(res.status, p).toBe(400);
+            expect(res.body).toEqual({ error: 'invalid path base' });
+        }
     });
 
     it('no site serves nothing', async () => {
