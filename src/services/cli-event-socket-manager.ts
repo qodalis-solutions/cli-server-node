@@ -39,6 +39,8 @@ export interface CliEventSocketManagerOptions {
     trustProxy?: boolean | number;
     /** When set, every upgrade with an `Origin` header must come from one of these. */
     allowedOrigins?: string[];
+    /** False on a server without CLI routes (`createCliServer({ cliRoutes: false })`): `attach()` does nothing. Default true. */
+    cliRoutes?: boolean;
 }
 
 /** Events delivered only to sockets authenticated as the event's user. */
@@ -89,6 +91,7 @@ export class CliEventSocketManager {
     private _auth?: ICliServerAuth;
     private _allowedOrigins?: string[];
     private readonly _trustProxy: boolean | number;
+    private readonly _cliRoutes: boolean;
     private readonly _sessionBound: SessionBoundSockets;
 
     constructor(options: CliEventSocketManagerOptions = {}) {
@@ -102,6 +105,7 @@ export class CliEventSocketManager {
             trustProxy: options.trustProxy,
         });
         this._allowedOrigins = options.allowedOrigins;
+        this._cliRoutes = options.cliRoutes ?? true;
         this._trustProxy = options.trustProxy ?? false;
     }
 
@@ -149,6 +153,8 @@ export class CliEventSocketManager {
      * event and shell paths.
      */
     attach(server: Server): void {
+        // No CLI routes on this server: its sockets are not served either
+        if (!this._cliRoutes) return;
         this._wss = new WebSocketServer({ noServer: true });
         this._shellManager.logStartupState();
 

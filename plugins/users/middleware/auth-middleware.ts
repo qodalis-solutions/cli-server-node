@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
-import { AuthAdapter } from '../models';
+import { AuthAdapter, QcliCaller } from '../models';
 import { AuthService, AuthContext, hostTokenRefused, isApiToken, isHostToken } from '../services/auth-service';
 import { asyncHandler, forbidden, unauthorized } from '../errors';
 import { ADMIN_GROUP, hasPermission, inGroup, mergePermissions } from '../permissions';
@@ -10,6 +10,8 @@ declare global {
         interface Request {
             /** Set by the users plugin auth middleware. */
             qcliAuth?: AuthContext;
+            /** The caller of a guarded host route (`requireAuth`, `requirePermission`, `requireHostToken`). */
+            qcliCaller?: QcliCaller;
         }
     }
 }

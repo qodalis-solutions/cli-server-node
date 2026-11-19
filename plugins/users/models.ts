@@ -154,6 +154,46 @@ export interface ApiTokenView {
     lastUsedAt: number | null;
     audience: ApiTokenAudience;
     permissions?: string[];
+    /**
+     * Requests made with the token, from the usage provider (the public-api plugin);
+     * present only when one is registered (`usersPlugin.setTokenUsageProvider`).
+     */
+    usage?: ApiTokenUsage;
+}
+
+/** One UTC day of a token's usage. */
+export interface ApiTokenUsageDay {
+    /** `yyyy-MM-dd` (UTC). */
+    date: string;
+    requests: number;
+}
+
+/** A token's requests: today (UTC) and the last 30 days. */
+export interface ApiTokenUsage {
+    /** Equals the last entry of `days`. */
+    today: number;
+    /** The sum of `days`. */
+    last30Days: number;
+    /** Exactly 30 entries, oldest first, the last one today (UTC); days without requests included. */
+    days: ApiTokenUsageDay[];
+}
+
+/** Returns the usage of each token id it knows (`setTokenUsageProvider`). */
+export type TokenUsageProvider = (tokenIds: string[]) => Promise<Record<string, ApiTokenUsage>>;
+
+/**
+ * The caller of a guarded host route (`req.qcliCaller`, set by `requireAuth`,
+ * `requirePermission` and `requireHostToken`).
+ */
+export interface QcliCaller {
+    userId: string;
+    userName: string;
+    /** The API token's id; null for a session or an auth-adapter sign-in. */
+    tokenId: string | null;
+    /** The token's audience (anything not exactly `cli` reads as `host`); null without a token. */
+    audience: ApiTokenAudience | null;
+    /** The live effective permissions, narrowed to the token's scope. */
+    permissions: string[];
 }
 
 /** What `usersPlugin.apiTokens.create` takes. */
@@ -337,4 +377,12 @@ export interface UsersModuleOptions {
      * calling the store, and the built-in groups are not seeded. Default false.
      */
     readOnlyGroups?: boolean;
+    /**
+     * Guard-only mode, for a second service that only validates tokens over stores it
+     * shares with the service that manages them: no routes (sign-in, users, groups,
+     * sessions, tokens, permissions, link, audit), no seeding, no server protection. The
+     * guards (`requireAuth`, `requirePermission`, `requireHostToken`) and `apiTokens`
+     * stay. Default false.
+     */
+    guardOnly?: boolean;
 }

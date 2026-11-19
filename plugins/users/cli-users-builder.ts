@@ -1,7 +1,7 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
 import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
-import { AuthAdapter, UsersBroadcastFn, UsersModuleOptions } from './models';
+import { AuthAdapter, TokenUsageProvider, User, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
     ICliUserStore,
     ICliSessionStore,
@@ -73,6 +73,21 @@ export interface UsersPluginResult {
     requireAuth: () => RequestHandler;
     /** Express middleware for host routes: requires all the given permissions. */
     requirePermission: (...permissions: string[]) => RequestHandler;
+    /**
+     * Express middleware for host routes only `host` tokens may call (403 `forbidden: a host
+     * token is required` for a session, an adapter sign-in or a `cli` token), then requires
+     * all the given permissions. Sets `req.qcliCaller` like the other guards.
+     */
+    requireHostToken: (...permissions: string[]) => RequestHandler;
+    /**
+     * Registers (or, with null, removes) the provider of `usage` on token views (`GET /tokens`,
+     * `apiTokens.list`); the public-api plugin registers one.
+     */
+    setTokenUsageProvider: (provider: TokenUsageProvider | null) => void;
+    /** The user with this id, read from the user store (by id only). */
+    getUser: (id: string) => Promise<User | undefined>;
+    /** Guard-only mode (`setGuardOnly`): no routes, no seeding, no server protection. */
+    guardOnly: boolean;
     /** Stops the background session sweep. */
     dispose: () => void;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
@@ -273,6 +288,18 @@ export class CliUsersBuilder {
         return this;
     }
 
+    /**
+     * Guard-only mode, for a second service that validates tokens over stores shared with
+     * the service that manages them: the router serves nothing (no sign-in, users, groups,
+     * sessions, tokens, permissions, link or audit routes), nothing is seeded and the server
+     * is not protected; the guards and `apiTokens` stay. Create and revoke tokens from one
+     * service only: the name and per-user limit checks run in the creating process.
+     */
+    setGuardOnly(on = true): this {
+        this.options.guardOnly = on;
+        return this;
+    }
+
     /** Interval of the background expired-session sweep (default 5 minutes). */
     setCleanupInterval(ms: number): this {
         this.options.cleanupIntervalMs = ms;
@@ -298,6 +325,7 @@ export class CliUsersBuilder {
         const apiTokensWithExternalAuth = externalAuth && (options.apiTokensWithExternalAuth ?? false);
         const usersReadOnly = options.readOnlyUsers ?? false;
         const groupsReadOnly = options.readOnlyGroups ?? false;
+        const guardOnly = options.guardOnly ?? false;
 
         const userStore = options.userStore ?? new InMemoryUserStore();
         const sessionStore = options.sessionStore ?? new InMemorySessionStore();
@@ -332,12 +360,15 @@ export class CliUsersBuilder {
             auditPlugin.setEventBus?.(eventBus);
         }
 
-        const ready = seed(userStore, groupStore, authService, {
-            externalAuth,
-            usersReadOnly,
-            groupsReadOnly,
-            configuredPassword: options.defaultAdminPassword,
-        });
+        // Guard-only: the stores belong to the service that manages users and tokens
+        const ready = guardOnly
+            ? Promise.resolve()
+            : seed(userStore, groupStore, authService, {
+                  externalAuth,
+                  usersReadOnly,
+                  groupsReadOnly,
+                  configuredPassword: options.defaultAdminPassword,
+              });
         ready.catch((err) => console.error('[users] seeding failed:', err));
 
         const waitReady = (_req: Request, _res: Response, next: NextFunction) => {
@@ -356,7 +387,7 @@ export class CliUsersBuilder {
             }
         };
 
-        const protectServer = options.protectServer ?? true;
+        const protectServer = guardOnly ? false : (options.protectServer ?? true);
         // Server catalogs this plugin already added its entries to (attach runs again on setAuth)
         const filledCatalogs = new WeakSet<object>();
         const serverAuth = new UsersServerAuth(authService, authenticator, protectServer, (server) => {
@@ -390,41 +421,47 @@ export class CliUsersBuilder {
         });
 
         const router = Router();
-        // Writes to read-only stores answer 501 before body parsing and authentication.
-        const readOnly = { usersReadOnly, groupsReadOnly, externalAuth };
-        router.use('/users', createReadOnlyStoresGuard('users', readOnly));
-        router.use('/groups', createReadOnlyStoresGuard('groups', readOnly));
-        const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens', '/link', '/permissions'];
-        router.use(scoped, json({ limit: '1mb' }), waitReady);
-        router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
-        router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
-        router.use('/groups', authMiddleware, createGroupsController(directory));
-        // The audit API is protected by the users sign-in and permissions (and by the
-        // server's route policy on a protected server).
-        const auditGuard: CliAuditGuard = (permission) => [
-            authMiddleware,
-            requirePermission(permission),
-            (req, _res, next) => {
-                const request = req as Request & { qcliServerAuth?: unknown };
-                request.qcliServerAuth ??= UsersServerAuth.toServerContext(getAuth(req));
-                next();
-            },
-        ];
-        auditPlugin.protect(auditGuard);
-        router.use('/audit', auditPlugin.router);
-        router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
-        router.use('/permissions', authMiddleware, createPermissionsController(authService));
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
         const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
-        router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy, limiter: linkLimiter }));
-        router.use(scoped, errorHandler);
+        // Guard-only: the router serves nothing (the managing service serves these routes)
+        if (!guardOnly) {
+            // Writes to read-only stores answer 501 before body parsing and authentication.
+            const readOnly = { usersReadOnly, groupsReadOnly, externalAuth };
+            router.use('/users', createReadOnlyStoresGuard('users', readOnly));
+            router.use('/groups', createReadOnlyStoresGuard('groups', readOnly));
+            const scoped = ['/sessions', '/users', '/groups', '/audit', '/tokens', '/link', '/permissions'];
+            router.use(scoped, json({ limit: '1mb' }), waitReady);
+            router.use('/sessions', createSessionsController(authService, userStore, directory, authMiddleware, { externalAuth, limitAttempt }));
+            router.use('/users', authMiddleware, createUsersController(authService, directory, { externalAuth, limitAttempt }));
+            router.use('/groups', authMiddleware, createGroupsController(directory));
+            // The audit API is protected by the users sign-in and permissions (and by the
+            // server's route policy on a protected server).
+            const auditGuard: CliAuditGuard = (permission) => [
+                authMiddleware,
+                requirePermission(permission),
+                (req, _res, next) => {
+                    const request = req as Request & { qcliServerAuth?: unknown };
+                    request.qcliServerAuth ??= UsersServerAuth.toServerContext(getAuth(req));
+                    next();
+                },
+            ];
+            auditPlugin.protect(auditGuard);
+            router.use('/audit', auditPlugin.router);
+            router.use('/tokens', authMiddleware, createTokensController(authService, userStore));
+            router.use('/permissions', authMiddleware, createPermissionsController(authService));
+            router.use('/link', createLinkController(linkService, authMiddleware, { trustProxy, limiter: linkLimiter }));
+            router.use(scoped, errorHandler);
+        }
 
         const cleanupInterval = setInterval(() => {
             ipLimiter.sweep();
             linkService.sweep();
             linkLimiter.sweep();
             authService.sweepLockouts();
-            authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
+            // Guard-only: the managing service sweeps the shared session store
+            if (!guardOnly) {
+                authService.cleanupExpiredSessions().catch((err) => console.error('[users] session cleanup failed:', err));
+            }
         }, options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS);
         cleanupInterval.unref?.();
 
@@ -446,6 +483,14 @@ export class CliUsersBuilder {
             protectServer,
             requireAuth: () => serverAuth.requireAuth(),
             requirePermission: (...permissions: string[]) => serverAuth.requirePermission(...permissions),
+            requireHostToken: (...permissions: string[]) => serverAuth.requireHostToken(...permissions),
+            setTokenUsageProvider: (provider: TokenUsageProvider | null) => authService.setTokenUsageProvider(provider),
+            getUser: async (id: string) => {
+                if (typeof id !== 'string' || !id) return undefined;
+                const user = await userStore.getUser(id);
+                return user && user.id === id ? user : undefined;
+            },
+            guardOnly,
             dispose: () => clearInterval(cleanupInterval),
             installedPlugin: usersInstalledPlugin,
             installedPlugins: [auditPlugin.installedPlugin],

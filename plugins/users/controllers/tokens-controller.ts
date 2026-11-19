@@ -33,7 +33,8 @@ export function createTokensController(authService: AuthService, userStore: ICli
                 names.set(t.userId, (await userStore.getUser(t.userId))?.name ?? t.userId);
             }
         }
-        res.json(tokens.map((t) => authService.toApiTokenView(t, names.get(t.userId)!)));
+        // `usage` only when a usage provider is registered (the public-api plugin)
+        res.json(await authService.withTokenUsage(tokens.map((t) => authService.toApiTokenView(t, names.get(t.userId)!))));
     }));
 
     router.post('/', asyncHandler(async (req: Request, res: Response) => {

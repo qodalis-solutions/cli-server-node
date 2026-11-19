@@ -71,18 +71,23 @@ export class CliLogSocketManager {
     private _allowedOrigins?: string[];
     private readonly _trustProxy: boolean | number;
     private readonly _sessionBound: SessionBoundSockets;
+    private readonly _cliRoutes: boolean;
 
     /**
      * @param options.sessionCheckIntervalMs Re-check interval of sockets opened through an
      *   external auth adapter (the shell's `sessionCheckIntervalMs`: default 30 s, at most 60 s).
+     * @param options.cliRoutes False on a server without CLI routes: `attach()` does nothing (default true).
      */
-    constructor(options: { allowedOrigins?: string[]; trustProxy?: boolean | number; sessionCheckIntervalMs?: number } = {}) {
+    constructor(
+        options: { allowedOrigins?: string[]; trustProxy?: boolean | number; sessionCheckIntervalMs?: number; cliRoutes?: boolean } = {},
+    ) {
         this._sessionBound = new SessionBoundSockets({
             externalPermission: CliServerPermissions.LogsRead,
             sessionCheckIntervalMs: options.sessionCheckIntervalMs,
         });
         this._allowedOrigins = options.allowedOrigins;
         this._trustProxy = options.trustProxy ?? false;
+        this._cliRoutes = options.cliRoutes ?? true;
     }
 
     /** Installs the auth provider; when it protects the server, upgrades need a ticket and `logs:read`. */
@@ -136,6 +141,8 @@ export class CliLogSocketManager {
      * multiple listeners, and each manager only handles its own paths.
      */
     attach(server: Server): void {
+        // No CLI routes on this server: its sockets are not served either
+        if (!this._cliRoutes) return;
         this._wss = new WebSocketServer({ noServer: true });
 
         server.on('upgrade', (request, socket, head) => {
