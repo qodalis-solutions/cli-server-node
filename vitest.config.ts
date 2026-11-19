@@ -40,6 +40,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/docs/index.ts',
             ),
+            '@qodalis/cli-server-plugin-portal': path.resolve(
+                __dirname,
+                'plugins/portal/index.ts',
+            ),
             '@qodalis/cli-server-plugin-public-api': path.resolve(
                 __dirname,
                 'plugins/public-api/index.ts',
