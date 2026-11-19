@@ -36,6 +36,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/audit/index.ts',
             ),
+            '@qodalis/cli-server-plugin-public-api': path.resolve(
+                __dirname,
+                'plugins/public-api/index.ts',
+            ),
             '@qodalis/cli-server-plugin-users': path.resolve(
                 __dirname,
                 'plugins/users/index.ts',
