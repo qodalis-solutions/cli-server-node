@@ -23,6 +23,7 @@ import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { AwsModule } from '@qodalis/cli-server-plugin-aws';
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
 import { SampleHealthCheckJob } from './sample-health-check-job';
+import { addPublicApi } from './public-api';
 
 // File storage providers — uncomment the one you want to use:
 import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
@@ -322,6 +323,11 @@ const adminPlugin = new CliAdminBuilder()
 mountPlugin(adminPlugin);
 mountPlugin(usersPlugin);
 
+// -----------------------------------------------------------
+// Public API (host tokens, quotas, OpenAPI + Swagger UI), guides and the portal
+// -----------------------------------------------------------
+addPublicApi({ app, builder, mountPlugin }, usersPlugin);
+
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
     console.log(`  Commands:  http://localhost:${port}/api/qcli/commands`);
@@ -331,6 +337,9 @@ const server = app.listen(port, () => {
     console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
     console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
     console.log(`  MCP:       http://localhost:${port}/api/qcli/mcp`);
+    console.log(`  Portal:    http://localhost:${port}/qcli/portal/`);
+    console.log(`  Swagger:   http://localhost:${port}/qcli/api/swagger`);
+    console.log(`  Public:    http://localhost:${port}/v1/demo/time (host token, demo:read)`);
     console.log(`  Events:    ws://localhost:${port}/ws/qcli/events`);
     console.log(`  Logs WS:   ws://localhost:${port}/ws/qcli/logs`);
 

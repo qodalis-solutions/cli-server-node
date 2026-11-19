@@ -203,6 +203,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
 | `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
 | `mcp` | off | `true` or `{ tools, exclude, token, instructions, enabled }` (see [MCP](#mcp-endpoint)) |
+| `cliRoutes` | `true` | `false` serves none of the CLI's routes and sockets (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`, `basePath`, MCP, `/ws/*`): for a service that only hosts its own routes (see the users plugin's [guard-only mode](plugins/users/README.md#guard-only-mode)). `mountPlugin` then mounts only plugins with `cliRoutes: false` and logs `[qcli] CLI routes are turned off; <prefix> is not mounted` for the others; the catalog, events and installed plugins stay |
 | `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 
@@ -217,7 +218,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `eventSocketManager` | `attach(server)` for the WebSockets, `broadcastMessage`, `broadcastDisconnect` |
 | `eventBus` | The server's event bus: `publish(type, data, audience)`, `subscribe(pattern, handler)` (see [Server events](#server-events)) |
 | `logSocketManager` | Server log stream socket |
-| `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused |
+| `mountPlugin(plugin)` | Mounts a plugin's routes (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused, unless the plugin serves host routes (`cliRoutes: false`: public-api, docs, portal) |
 | `setAuth(auth)` | Installs or removes the server auth provider |
 | `mcp` | `{ enabled, path, addProvider(provider) }` |
 
@@ -253,6 +254,9 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens; protects the whole server and adds the audit plugin |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
 | [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
+| [`@qodalis/cli-server-plugin-public-api`](plugins/public-api/README.md) | Your public REST API: a host-token guard with per-account daily and per-minute quotas, usage per token, your OpenAPI document and Swagger UI at `/qcli/api` |
+| [`@qodalis/cli-server-plugin-docs`](plugins/docs/README.md) | Markdown guides from folders or code (front matter, variables), served as JSON at `/qcli/docs` |
+| [`@qodalis/cli-server-plugin-portal`](plugins/portal/README.md) | The documentation portal (guides and API reference with code samples) at `/qcli/portal` |
 | [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management; `maxConcurrentRuns` per job and an overlap policy, never a job started twice |
 | [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |
 | [`-filesystem-json`](plugins/filesystem-json/README.md), [`-filesystem-sqlite`](plugins/filesystem-sqlite/README.md), [`-filesystem-s3`](plugins/filesystem-s3/README.md) | JSON file, SQLite and Amazon S3 storage providers |
@@ -540,7 +544,7 @@ const cli = createCliServer({
 - `builder.permissions.all()` lists every `cli` entry in registration order (core, then plugins), then every `host` entry. The users plugin serves it at `GET /api/v1/qcli/permissions`: the entries the caller holds, or all of them with `?all=true` and `users:read`. The dashboard and the web CLI's `token` command build their permission pickers from it.
 - The catalog is for choosing, not for validation: CLI tokens, groups and commands keep accepting any permission string.
 
-**Host tokens.** API tokens have an `audience`: `cli` (the default, as before) or `host`. Only your code creates `host` tokens, through `usersPlugin.apiTokens.create(userId, { name, audience: 'host', permissions: ['rates:read'] })`, with `host` catalog entries the user holds. A host token is refused with `403 { "error": "forbidden: host tokens cannot use CLI routes" }` on every CLI route (core's, the MCP endpoint, and every plugin mounted with `mountPlugin`; public routes such as version discovery, capabilities, sign-in and the terminal link are not checked), whether or not the server is protected, and on the sockets: the events and logs sockets answer 403 at the upgrade, the shell closes with 4403 and the same text. It is accepted only by `usersPlugin.requireAuth()` and `usersPlugin.requirePermission(...)` on your routes, under `/api` too. A host route under `/api` without a guard is reached without an identity and with `req.qcliHostToken === true`, so guard the routes that serve host tokens. Details, the manager's rules and error texts: [users plugin README](plugins/users/README.md#host-tokens-userspluginapitokens).
+**Host tokens.** API tokens have an `audience`: `cli` (the default, as before) or `host`. Only your code creates `host` tokens, through `usersPlugin.apiTokens.create(userId, { name, audience: 'host', permissions: ['rates:read'] })`, with `host` catalog entries the user holds. A host token is refused with `403 { "error": "forbidden: host tokens cannot use CLI routes" }` on every CLI route (core's, the MCP endpoint, and every plugin mounted with `mountPlugin`; public routes such as version discovery, capabilities, sign-in and the terminal link are not checked), whether or not the server is protected, and on the sockets: the events and logs sockets answer 403 at the upgrade, the shell closes with 4403 and the same text. It is accepted only by `usersPlugin.requireAuth()`, `usersPlugin.requirePermission(...)` and `usersPlugin.requireHostToken(...)` (which refuses everything but host tokens) on your routes, under `/api` too, and by the [public-api plugin](plugins/public-api/README.md)'s guard, which adds per-account quotas and usage. A host route under `/api` without a guard is reached without an identity and with `req.qcliHostToken === true`, so guard the routes that serve host tokens. Details, the manager's rules and error texts: [users plugin README](plugins/users/README.md#host-tokens-userspluginapitokens).
 
 ## MCP endpoint
 

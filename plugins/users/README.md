@@ -56,9 +56,10 @@ Mounting the plugin protects the **whole** CLI server by default (`protectServer
 | `setTrustProxy(bool \| hops)` | `false` | Trusted proxy hops (`true` = 1): client IP = `X-Forwarded-For` entry at index `len - hops` (rightmost with one hop) |
 | `setIpRateLimit(max, windowMs)` | 20 / min | Per-IP limit on login, verify-password and self password change |
 | `setCleanupInterval(ms)` | 5 min | Background sweep of expired sessions |
+| `setGuardOnly(bool = true)` | `false` | Guard-only mode for a second service that only validates tokens (see [Guard-only mode](#guard-only-mode)) |
 | `setOptions(options)` | — | Same options as a plain object |
 
-The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `apiTokens` (tokens the host creates for its users, see [Host tokens](#host-tokens-userspluginapitokens)), `requireAuth()`, `requirePermission(...perms)` and `dispose()`.
+The result exposes `prefix`, `router`, `ready`, `authService`, `directory`, the six stores (including `apiTokenStore`), `auditPlugin` (the audit plugin it records in and serves), `serverAuth` (the server/admin auth provider), `apiTokens` (tokens the host creates for its users, see [Host tokens](#host-tokens-userspluginapitokens)), `requireAuth()`, `requirePermission(...perms)`, `requireHostToken(...perms)`, `setTokenUsageProvider(provider)`, `getUser(id)`, `guardOnly` and `dispose()`.
 
 ## Events
 
@@ -248,9 +249,46 @@ const { token, apiToken } = await usersPlugin.apiTokens.create(user.id, {
 - the core routes (`/api/qcli/...`, `/api/v1/qcli/...`, the MCP endpoint) and every route of a plugin mounted with `cli.mountPlugin(plugin)` (its `prefix` and `dashboardPrefix`). A router you mount yourself with `app.use(...)` is a host route;
 - the sockets: a host token cannot get a ticket (`POST /sessions/ws-ticket` refuses it). Presented as `Authorization: Bearer` on the upgrade, the events and logs sockets answer an HTTP 403 at the upgrade, and the shell opens and closes with 4403 and the same text.
 
-It is accepted only by `usersPlugin.requireAuth()` and `usersPlugin.requirePermission(...)`, which check its permissions against the user's live permissions as for any token (403 `forbidden: missing permission <perm>`). The catalog is checked only when the token is created: a host that later stops registering an entry does not invalidate existing tokens.
+It is accepted only by `usersPlugin.requireAuth()`, `usersPlugin.requirePermission(...)` and `usersPlugin.requireHostToken(...)`, which check its permissions against the user's live permissions as for any token (403 `forbidden: missing permission <perm>`). The catalog is checked only when the token is created: a host that later stops registering an entry does not invalidate existing tokens.
 
 On a protected server, a host token on a host route under `/api` passes the server's auth gate unauthenticated, for the route's guard to decide. A host route **without** a guard sees no identity (`req.qcliServerAuth` unset) and `req.qcliHostToken === true`, so guard every route that serves host tokens. Sessions and `cli` tokens are unaffected.
+
+### The caller on guarded routes (`req.qcliCaller`)
+
+`requireAuth()`, `requirePermission(...)` and `requireHostToken(...)` set `req.qcliCaller` for your handler (next to `req.qcliAuth`, which keeps working):
+
+```typescript
+app.get('/v1/rates', usersPlugin.requireHostToken('rates:read'), (req, res) => {
+    const { userId, userName, tokenId, audience, permissions } = req.qcliCaller!;
+    res.json(rates.for(userId));
+});
+```
+
+`tokenId` and `audience` are `null` for a session or an auth-adapter sign-in; `audience` is `cli` or `host` for a token (anything stored that is not exactly `cli` reads as `host`). `permissions` are the live effective permissions, narrowed to the token's scope.
+
+### Routes only host tokens may call (`requireHostToken`)
+
+`usersPlugin.requireHostToken(...permissions)` authenticates as the other guards (401 `unauthorized`, 401 `invalid or expired token`, 403 `password change required`), then refuses a session, an auth-adapter sign-in or a `cli` token with **403 `forbidden: a host token is required`**, and only then checks the permissions (403 `forbidden: missing permission <perm>`). `requireAuth` and `requirePermission` do not change. For per-account quotas and usage on such routes, use the [public-api plugin](../public-api/README.md)'s guard.
+
+### Token usage on token views
+
+`usersPlugin.setTokenUsageProvider(provider)` registers `(tokenIds: string[]) => Promise<Record<string, ApiTokenUsage>>` (`null` removes it). With a provider, `GET /tokens` (own and `?all=true`) and `apiTokens.list` add `usage` as the last key of every view: `{ today, last30Days, days: [{ date: 'yyyy-MM-dd', requests }] }`, 30 UTC days oldest first. The provider is called once per list with every id; when it fails the error is logged and the views are returned without `usage`. `POST /tokens` and `apiTokens.create` never include it. The public-api plugin registers a provider; without one nothing changes.
+
+### Guard-only mode
+
+A second service (say a public API on its own host) can validate the tokens of the service that manages users, over the same stores:
+
+```typescript
+const cli = createCliServer({ cliRoutes: false }); // none of the CLI's routes or sockets
+cli.builder.addPermissions([{ name: 'rates:read', description: 'Exchange rates', group: 'Rates' }]);
+const users = new CliUsersBuilder().setOptions({ userStore, groupStore, apiTokenStore, sessionStore }).setGuardOnly().build();
+cli.mountPlugin(users); // logs: [qcli] CLI routes are turned off; /api/v1/qcli is not mounted
+cli.app.get('/v1/rates', users.requireHostToken('rates:read'), handler);
+```
+
+In guard-only mode the plugin serves no routes (sign-in, users, groups, sessions, tokens, permissions, link, audit), seeds nothing (no `root`, no built-in groups), does not protect the server and does not sweep the shared session store. The guards and `apiTokens` stay. With the CLI routes left on, host tokens are still refused there.
+
+**Create and revoke tokens from one service only.** Token names and the 20-token limit are checked in the process that creates the token; several services may validate tokens over shared stores, but only one should create and revoke them.
 
 ## Linking a terminal
 
