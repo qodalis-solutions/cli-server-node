@@ -45,7 +45,12 @@ export interface UsersServerAttachment {
     serverOptions?: { externalAuthentication: boolean };
     /** The server's permission catalog (structurally core's `CliPermissionCatalog`). */
     permissions?: UsersPermissionCatalog;
+    /** False when the server serves no CLI routes; a guard-only plugin needs exactly that. */
+    cliRoutes?: boolean;
 }
+
+/** Guard-only mode on a server with CLI routes (or on none): fails closed. */
+export const GUARD_ONLY_NEEDS_NO_CLI_ROUTES = 'guard-only needs cliRoutes: false';
 
 const OWN_ROUTES = /^\/api\/v1\/qcli\/(sessions|users|groups|tokens|link|permissions)(\/.*)?$/;
 
@@ -61,7 +66,17 @@ export class UsersServerAuth {
         private readonly onAttach: (server: UsersServerAttachment) => void,
         /** Guard-only mode: accepted only by a server without CLI routes (`cliRoutes: false`). */
         readonly guardOnly = false,
-    ) {}
+    ) {
+        this.serverReady = !guardOnly;
+    }
+
+    /**
+     * Guard-only: true once a server without CLI routes attached the plugin. Until then the
+     * guards answer 500, so a host that never mounts the plugin (or mounts it on a server
+     * with CLI routes) cannot leave the CLI open while its own routes seem guarded.
+     */
+    private serverReady: boolean;
+    private notReadyLogged = false;
 
     static toServerContext(ctx: AuthContext): UsersServerAuthContext {
         return {
@@ -134,6 +149,12 @@ export class UsersServerAuth {
     }
 
     attachToServer(server: UsersServerAttachment): void {
+        if (this.guardOnly) {
+            if (server.cliRoutes !== false) {
+                throw new Error(GUARD_ONLY_NEEDS_NO_CLI_ROUTES);
+            }
+            this.serverReady = true;
+        }
         this.onAttach(server);
     }
 
@@ -264,6 +285,14 @@ export class UsersServerAuth {
 
     private guard(permissions: string[], hostTokenOnly: boolean): RequestHandler {
         return (req: Request, res: Response, next: NextFunction) => {
+            if (!this.serverReady) {
+                if (!this.notReadyLogged) {
+                    this.notReadyLogged = true;
+                    console.error(`[users] ${GUARD_ONLY_NEEDS_NO_CLI_ROUTES}: mount the plugin on createCliServer({ cliRoutes: false })`);
+                }
+                res.status(500).json({ error: 'internal server error' });
+                return;
+            }
             this.authenticateFull(req).then(
                 (ctx) => {
                     if (hostTokenOnly && !isHostToken(ctx)) {

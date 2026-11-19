@@ -87,6 +87,8 @@ export interface ICliServerAuth {
         eventBus?: ICliEventBus;
         serverOptions?: CliServerRuntimeOptions;
         permissions?: CliPermissionCatalog;
+        /** False when the server serves no CLI routes (`createCliServer({ cliRoutes: false })`). */
+        cliRoutes?: boolean;
     }): void;
     /**
      * Re-validates a socket identity without sliding the session: the session still

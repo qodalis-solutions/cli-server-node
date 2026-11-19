@@ -55,7 +55,10 @@ export interface MountablePlugin {
      * then requires a users session.
      */
     serverAuth?: ICliServerAuth;
-    /** Routes that stay public under server protection, as `"METHOD /path"` (e.g. a plugin's login). */
+    /**
+     * Routes that stay public under server protection, as `"METHOD /path"` (e.g. a plugin's
+     * login); `"GET /prefix/*"` makes every GET and HEAD under the prefix public (never a CLI route).
+     */
     publicRoutes?: string[];
     /** MCP tool providers contributed by the plugin (used when the `mcp` option is on). */
     mcpProviders?: McpToolProvider[];
@@ -263,6 +266,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;
     const publicRoutes = new Set<string>();
+    // `GET /prefix/*` entries: every GET and HEAD under the prefix is public
+    const publicPrefixes = new Set<string>();
     // The CLI's own routes (host tokens are refused there); mountPlugin adds the plugins' prefixes
     const cliRoutePrefixes = new Set<string>([
         '/api/qcli',
@@ -278,6 +283,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             registry,
             cliPrefixes: Array.from(new Set(['/api/v1/qcli', normalizePath(basePath)])),
             publicRoutes,
+            publicPrefixes,
             mcpPaths: mcpOptions ? [mcpPath] : [],
             cliRoutePrefixes,
         }),
@@ -424,6 +430,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             eventBus,
             serverOptions,
             permissions: builder.permissions,
+            cliRoutes,
         });
     };
 
@@ -434,7 +441,13 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const mountPlugin = (plugin: MountablePlugin) => {
         for (const route of plugin.publicRoutes ?? []) {
             const [method, ...rest] = route.trim().split(/\s+/);
-            publicRoutes.add(`${method.toUpperCase()} ${normalizePath(rest.join(' '))}`);
+            const path = rest.join(' ');
+            if (path.endsWith('/*')) {
+                // GET and HEAD under the prefix (only GET entries make a prefix public)
+                if (method.toUpperCase() === 'GET') publicPrefixes.add(normalizePath(path.slice(0, -2) || '/'));
+                continue;
+            }
+            publicRoutes.add(`${method.toUpperCase()} ${normalizePath(path)}`);
         }
         if (plugin.serverAuth && plugin.serverAuth !== serverAuth) {
             setAuth(plugin.serverAuth);

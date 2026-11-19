@@ -14,7 +14,7 @@
         "copy-portal": "node scripts/copy-portal.js",
         "prebuild": "npm run copy-portal",
         "build": "tsc",
-        "prepublishOnly": "npm run copy-portal"
+        "prepublishOnly": "node scripts/copy-portal.js --publish"
     },
     "keywords": [
         "cli",

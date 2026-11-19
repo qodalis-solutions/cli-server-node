@@ -16,7 +16,7 @@ import {
 import { ApiTokenUsage, PublicApiAccountUsage, PublicApiUsageService } from './usage-service';
 import { publicApiInstalledPlugin } from './package-info';
 import { documentTitle, loadOpenApiSource, publicDocument } from './openapi';
-import { SWAGGER_ASSETS, swaggerAssets, swaggerPage, swaggerUiDir } from './swagger';
+import { swaggerAssets, swaggerPage, swaggerUiDir } from './swagger';
 
 export const DEFAULT_PUBLIC_API_BASE_PATH = '/qcli/api';
 export const DEFAULT_PUBLIC_API_TITLE = 'API reference';
@@ -32,17 +32,18 @@ const RATE_LIMIT_HEADERS = ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-Rat
 
 type CountedRequest = Request & { qcliCaller?: QcliCaller; [COUNTED]?: { tokenId: string; windows: string[] } };
 
-/** The users plugin's matching: `*` as the last segment matches the rest, case-insensitive. */
-function permissionMatches(granted: string, required: string): boolean {
-    const g = granted.trim().toLowerCase().split(':');
-    const r = required.trim().toLowerCase().split(':');
-    for (let i = 0; i < g.length; i++) {
-        if (g[i] === '*' && i === g.length - 1) return true;
-        if (i >= r.length || (g[i] !== '*' && g[i] !== r[i])) return false;
-    }
-    return g.length === r.length;
-}
 const MINUTE_ROWS_KEPT = 2;
+export const INVALID_PATH_BASE = 'invalid path base';
+
+/**
+ * The path the app is mounted under (a parent app's `app.use('/prefix', cli.app)`): the
+ * request's `baseUrl` before the plugin's own `prefix`; undefined when it starts with `//`
+ * or `/\` (it would point URLs at another host).
+ */
+export function mountPathBase(req: Request, prefix: string): string | undefined {
+    const base = prefix === '/' ? req.baseUrl : req.baseUrl.slice(0, Math.max(0, req.baseUrl.length - prefix.length));
+    return base.startsWith('//') || base.startsWith('/\\') ? undefined : base;
+}
 
 /**
  * The users-plugin members this plugin reads (`setUsers(usersPlugin)`); structurally
@@ -52,8 +53,10 @@ export interface PublicApiUsers {
     /** Authentication, host tokens only, then the permissions (the users plugin's texts). */
     requireHostToken(...permissions: string[]): RequestHandler;
     setTokenUsageProvider(provider: ((tokenIds: string[]) => Promise<Record<string, ApiTokenUsage>>) | null): void;
-    apiTokens: { list(userId: string): Promise<Array<{ id: string; name: string }>> };
+    apiTokens: { list(userId: string): Promise<Array<{ id: string; name: string; usage?: ApiTokenUsage }>> };
     getUser(id: string): Promise<{ id: string; name: string } | undefined>;
+    /** The users plugin's permission matching (wildcards), for stacked guards. */
+    serverAuth: { hasPermission(ctx: { permissions: string[] }, permission: string): boolean };
     authService?: { getEffectivePermissions(user: { id: string; name: string }): Promise<string[]> };
 }
 
@@ -351,7 +354,7 @@ export class CliPublicApiBuilder {
                 // A later stacked guard checks only its own permission. Express runs the guards one
                 // after the other, so the first one cannot see this permission: a refusal here takes
                 // the request's count back, so a refused request is not counted.
-                if (!permission || marked.qcliCaller?.permissions.some((p) => permissionMatches(p, permission))) {
+                if (!permission || users.serverAuth.hasPermission({ permissions: marked.qcliCaller?.permissions ?? [] }, permission)) {
                     next();
                     return;
                 }
@@ -369,23 +372,37 @@ export class CliPublicApiBuilder {
         // The document and Swagger UI: no sign-in, credentials ignored
         const router = Router();
         router.get('/openapi.json', (req, res) => {
-            const url = serverUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}`;
+            const pathBase = mountPathBase(req, basePath);
+            if (pathBase === undefined) {
+                res.status(400).json({ error: INVALID_PATH_BASE });
+                return;
+            }
+            const url = serverUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}${pathBase}`;
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.json(publicDocument(document(), url));
         });
-        router.get('/swagger', (_req, res) => {
+        router.get('/swagger', (req, res) => {
+            const pathBase = mountPathBase(req, basePath);
+            if (pathBase === undefined) {
+                res.status(400).json({ error: INVALID_PATH_BASE });
+                return;
+            }
             res.setHeader('Cache-Control', 'no-cache');
-            res.type('html').send(swaggerPage(basePath, documentTitle(document())));
+            res.type('html').send(swaggerPage(pathBase + basePath, documentTitle(document())));
         });
         router.get('/swagger/assets/:file', swaggerAssets(swaggerUiDir()));
-        const publicPaths = ['/openapi.json', '/swagger', '/swagger/', ...SWAGGER_ASSETS.map((f) => `/swagger/assets/${f}`)];
+        // public on a protected server, under /api too (the gate never opens a CLI route this way)
+        const publicRoutes = [
+            ...['/openapi.json', '/swagger'].flatMap((p) => [`GET ${basePath}${p}`, `HEAD ${basePath}${p}`]),
+            `GET ${basePath}/swagger/*`,
+        ];
 
         return {
             prefix: basePath,
             router,
             cliRoutes: false,
-            publicRoutes: publicPaths.flatMap((p) => [`GET ${basePath}${p}`, `HEAD ${basePath}${p}`]),
+            publicRoutes,
             guard,
             usage: { account: (userId: string) => usage.account(userId) },
             store,

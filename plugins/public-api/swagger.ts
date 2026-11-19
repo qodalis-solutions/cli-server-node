@@ -10,9 +10,9 @@ const escapeHtml = (text: string) =>
 /** A JSON value safe inside an inline `<script>`. */
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c');
 
-/** Swagger UI 5 for `<basePath>/openapi.json` only. */
+/** Swagger UI 5 for `<basePath>/openapi.json` only (`basePath` includes the app's path base). */
 export function swaggerPage(basePath: string, title: string): string {
-    const assets = `${basePath}/swagger/assets`;
+    const assets = escapeHtml(`${basePath}/swagger/assets`);
     return `<!doctype html>
 <html lang="en">
 <head>

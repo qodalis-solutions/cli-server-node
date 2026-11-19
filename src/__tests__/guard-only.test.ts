@@ -19,6 +19,7 @@ import {
 } from '../../plugins/users/index';
 import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '../../plugins/admin';
+import { CliPublicApiBuilder } from '@qodalis/cli-server-plugin-public-api';
 import { ROOT_PASS, auth } from './users-test-helpers';
 
 const RATES = [{ name: 'rates:read', description: 'Official exchange rates', group: 'Rates' }];
@@ -178,6 +179,57 @@ describe('guard-only users plugin on a server without CLI routes', () => {
         const normal = new CliUsersBuilder().setOptions({ defaultAdminPassword: ROOT_PASS }).build();
         track(withRoutes, normal);
         expect(() => withRoutes.mountPlugin(normal)).not.toThrow();
+    });
+
+    it('a guard-only plugin never mounted: its guards answer 500, the CLI is not left open behind them', async () => {
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const users = new CliUsersBuilder().setGuardOnly().build();
+        disposables.push(() => users.dispose());
+        const cli = createCliServer();
+        track(cli);
+        cli.app.get('/host/rates', users.requireHostToken('rates:read'), (_req, res) => res.json({ ok: true }));
+        cli.app.get('/host/me', users.requireAuth(), (_req, res) => res.json({ ok: true }));
+        const api = new CliPublicApiBuilder().setUsers(users).build();
+        cli.app.get('/v1/rates', api.guard('rates:read'), (_req, res) => res.json({ ok: true }));
+        for (const p of ['/host/rates', '/host/me', '/v1/rates']) {
+            const res = await request(cli.app).get(p).set(auth('qcli_pat_anything'));
+            expect(res.status, p).toBe(500);
+            expect(res.body).toEqual({ error: 'internal server error' });
+        }
+        expect(errors).toHaveBeenCalledTimes(1);
+        expect(String(errors.mock.calls[0][0])).toContain('guard-only needs cliRoutes: false');
+    });
+
+    it('a guard-only plugin mounted on a server with CLI routes: startup error, guards stay closed', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const users = new CliUsersBuilder().setGuardOnly().build();
+        const cli = createCliServer();
+        track(cli, users);
+        expect(() => cli.mountPlugin(users)).toThrow('guard-only needs cliRoutes: false');
+        // even when the provider is attached directly, bypassing the server's check
+        expect(() => users.serverAuth.attachToServer({ broadcast: () => undefined })).toThrow('guard-only needs cliRoutes: false');
+        cli.app.get('/host/me', users.requireAuth(), (_req, res) => res.json({ ok: true }));
+        expect((await request(cli.app).get('/host/me')).status).toBe(500);
+    });
+
+    it.each(['plugin first', 'server first'])('a guard-only plugin mounted on a server without CLI routes works (%s)', async (order) => {
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        let users: UsersPluginResult;
+        let cli: CliServerResult;
+        if (order === 'plugin first') {
+            users = new CliUsersBuilder().setGuardOnly().build();
+            cli = createCliServer({ cliRoutes: false });
+        } else {
+            cli = createCliServer({ cliRoutes: false });
+            users = new CliUsersBuilder().setGuardOnly().build();
+        }
+        track(cli, users);
+        // guards registered before mounting answer once the plugin is mounted
+        cli.app.get('/host/me', users.requireAuth(), (_req, res) => res.json({ ok: true }));
+        cli.mountPlugin(users);
+        const res = await request(cli.app).get('/host/me');
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({ error: 'unauthorized' });
     });
 
     it('MCP and the sockets answer 404 without CLI routes', async () => {

@@ -25,6 +25,7 @@ const RATES = [
 
 interface Harness {
     cli: CliServerResult;
+    server: http.Server;
     users: UsersPluginResult;
     api: PublicApiPluginResult;
     store: InMemoryPublicApiUsageStore;
@@ -33,11 +34,11 @@ interface Harness {
     hostToken(userName?: string, permissions?: string[]): Promise<{ token: string; id: string; userId: string }>;
 }
 
-const disposables: Array<() => void> = [];
+const disposables: Array<() => void | Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
     vi.restoreAllMocks();
-    while (disposables.length) disposables.pop()!();
+    while (disposables.length) await disposables.pop()!();
 });
 
 async function start(configure: (b: CliPublicApiBuilder) => void = () => undefined): Promise<Harness> {
@@ -65,16 +66,23 @@ async function start(configure: (b: CliPublicApiBuilder) => void = () => undefin
     cli.app.get('/v1/missing', api.guard('rates:read'), (_req, res) => {
         res.status(404).json({ error: 'no such rate' });
     });
-    disposables.push(() => {
+    // One listening server per test (supertest otherwise opens and closes one per request),
+    // closed and awaited after the test
+    const server = http.createServer(cli.app);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    disposables.push(async () => {
         users.dispose();
         cli.eventSocketManager.dispose();
         cli.logSocketManager.dispose();
+        server.closeAllConnections?.();
+        await new Promise<void>((r) => server.close(() => r()));
     });
 
     const userIds = new Map<string, string>();
     let n = 0;
     return {
         cli,
+        server,
         users,
         api,
         store,
@@ -103,7 +111,7 @@ describe('public-api guard', () => {
     it('unlimited, no headers', async () => {
         const h = await start();
         const { token, id, userId } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ tokenId: id });
         expect(res.headers['x-ratelimit-limit']).toBeUndefined();
@@ -157,14 +165,14 @@ describe('public-api guard', () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 3, requestsPerMinute: null })));
         const { token } = await h.hostToken();
         for (const remaining of ['2', '1', '0']) {
-            const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+            const res = await request(h.server).get('/v1/rates').set(auth(token));
             expect(res.status).toBe(200);
             expect(res.headers['x-ratelimit-limit']).toBe('3');
             expect(res.headers['x-ratelimit-remaining']).toBe(remaining);
             expect(res.headers['x-ratelimit-reset']).toBe('30');
             expect(res.headers['retry-after']).toBeUndefined();
         }
-        const refused = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const refused = await request(h.server).get('/v1/rates').set(auth(token));
         expect(refused.status).toBe(429);
         expect(refused.body).toEqual({ error: 'quota exceeded: 3 requests per day' });
         expect(refused.headers['retry-after']).toBe('30');
@@ -177,13 +185,13 @@ describe('public-api guard', () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: null, requestsPerMinute: 2 })));
         const { token } = await h.hostToken();
         for (const remaining of ['1', '0']) {
-            const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+            const res = await request(h.server).get('/v1/rates').set(auth(token));
             expect(res.status).toBe(200);
             expect(res.headers['x-ratelimit-limit']).toBe('2');
             expect(res.headers['x-ratelimit-remaining']).toBe(remaining);
             expect(res.headers['x-ratelimit-reset']).toBe('30');
         }
-        const refused = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const refused = await request(h.server).get('/v1/rates').set(auth(token));
         expect(refused.status).toBe(429);
         expect(refused.body).toEqual({ error: 'too many requests: 2 per minute' });
         expect(refused.headers['retry-after']).toBe('30');
@@ -194,11 +202,11 @@ describe('public-api guard', () => {
     it('both limits, headers describe the day', async () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 100, requestsPerMinute: 2 })));
         const { token } = await h.hostToken();
-        const first = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const first = await request(h.server).get('/v1/rates').set(auth(token));
         expect(first.headers['x-ratelimit-limit']).toBe('100');
         expect(first.headers['x-ratelimit-remaining']).toBe('99');
-        await request(h.cli.app).get('/v1/rates').set(auth(token));
-        const refused = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        await request(h.server).get('/v1/rates').set(auth(token));
+        const refused = await request(h.server).get('/v1/rates').set(auth(token));
         expect(refused.status).toBe(429);
         expect(refused.body).toEqual({ error: 'too many requests: 2 per minute' });
         expect(refused.headers['x-ratelimit-limit']).toBe('100');
@@ -209,7 +217,7 @@ describe('public-api guard', () => {
     it.each([0, -5])('zero limit returns 403 (%d)', async (limit) => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: limit, requestsPerMinute: null })));
         const { token, userId } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(403);
         expect(res.body).toEqual({ error: 'forbidden: no API access' });
         expect(res.headers['x-ratelimit-limit']).toBeUndefined();
@@ -220,25 +228,25 @@ describe('public-api guard', () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 3, requestsPerMinute: null })));
         const a = await h.hostToken();
         const b = await h.hostToken();
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(200);
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(200);
-        const third = await request(h.cli.app).get('/v1/rates').set(auth(b.token));
+        expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(200);
+        const third = await request(h.server).get('/v1/rates').set(auth(b.token));
         expect(third.status).toBe(200);
         expect(third.headers['x-ratelimit-remaining']).toBe('0');
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(429);
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(b.token))).status).toBe(429);
+        expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(429);
+        expect((await request(h.server).get('/v1/rates').set(auth(b.token))).status).toBe(429);
         const other = await h.hostToken('bob');
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(other.token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(other.token))).status).toBe(200);
     });
 
     it('quota: revoked tokens still count', async () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 2, requestsPerMinute: null })));
         const a = await h.hostToken();
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(200);
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(200);
         expect(await h.users.apiTokens.revoke(a.userId, a.id)).toBe(true);
         const b = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(b.token));
+        const res = await request(h.server).get('/v1/rates').set(auth(b.token));
         expect(res.status).toBe(429);
         expect(res.body).toEqual({ error: 'quota exceeded: 2 requests per day' });
     });
@@ -246,16 +254,16 @@ describe('public-api guard', () => {
     it('quota: the day rolls over at UTC midnight', async () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 1, requestsPerMinute: null })));
         const { token } = await h.hostToken();
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(token))).status).toBe(200);
-        const refused = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        expect((await request(h.server).get('/v1/rates').set(auth(token))).status).toBe(200);
+        const refused = await request(h.server).get('/v1/rates').set(auth(token));
         expect(refused.status).toBe(429);
         expect(refused.headers['retry-after']).toBe('30');
         h.advance(31); // 00:00:01Z: a new day
-        const next = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const next = await request(h.server).get('/v1/rates').set(auth(token));
         expect(next.status).toBe(200);
         expect(next.headers['x-ratelimit-reset']).toBe('86399');
         h.advance(30); // 00:00:31Z
-        const later = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const later = await request(h.server).get('/v1/rates').set(auth(token));
         expect(later.status).toBe(429);
         expect(later.headers['x-ratelimit-reset']).toBe('86369');
         expect(later.headers['retry-after']).toBe('86369');
@@ -264,18 +272,14 @@ describe('public-api guard', () => {
     it('quota: parallel requests admit exactly the limit', async () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 10, requestsPerMinute: null })));
         const { token, userId } = await h.hostToken();
-        const server = http.createServer(h.cli.app);
-        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-        try {
+        const server = h.server;
+        {
             const results = await Promise.all(
                 Array.from({ length: 50 }, () => request(server).get('/v1/rates').set(auth(token)).then((r) => r.status)),
             );
             expect(results.filter((s) => s === 200)).toHaveLength(10);
             expect(results.filter((s) => s === 429)).toHaveLength(40);
             expect(await h.store.accountCount(userId, day(h))).toBe(10);
-        } finally {
-            server.closeAllConnections?.();
-            await new Promise<void>((r) => server.close(() => r()));
         }
     });
 
@@ -289,7 +293,7 @@ describe('public-api guard', () => {
         );
         const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const { token, userId } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: 'internal server error' });
         expect(res.text).not.toContain('db down');
@@ -297,7 +301,7 @@ describe('public-api guard', () => {
         expect(errors).toHaveBeenCalled();
         expect(await h.store.accountCount(userId, day(h))).toBe(0);
         broken = false;
-        const next = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const next = await request(h.server).get('/v1/rates').set(auth(token));
         expect(next.status).toBe(200);
         expect(next.headers['x-ratelimit-remaining']).toBe('2');
     });
@@ -306,7 +310,7 @@ describe('public-api guard', () => {
         const h = await start((b) => b.setQuota(async () => Promise.reject(new Error('db down'))));
         vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const { token } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: 'internal server error' });
     });
@@ -314,7 +318,7 @@ describe('public-api guard', () => {
     it('a resolver returning null is unlimited (still counted)', async () => {
         const h = await start((b) => b.setQuota(() => null as unknown as PublicApiQuota));
         const { token, userId } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(200);
         expect(res.headers['x-ratelimit-limit']).toBeUndefined();
         expect(await h.store.accountCount(userId, day(h))).toBe(1);
@@ -325,7 +329,7 @@ describe('public-api guard', () => {
         vi.spyOn(console, 'error').mockImplementation(() => undefined);
         vi.spyOn(h.store, 'increment').mockRejectedValue(new Error('usage db down'));
         const { token } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: 'internal server error' });
         expect(res.text).not.toContain('usage db down');
@@ -338,11 +342,11 @@ describe('public-api guard', () => {
         router.get('/rates', h.api.guard('rates:read'), (_req, res) => res.json({ ok: true }));
         h.cli.app.use('/v2', router);
         const { token, userId } = await h.hostToken();
-        const first = await request(h.cli.app).get('/v2/rates').set(auth(token));
+        const first = await request(h.server).get('/v2/rates').set(auth(token));
         expect(first.status).toBe(200);
         expect(first.headers['x-ratelimit-remaining']).toBe('1');
-        expect((await request(h.cli.app).get('/v2/rates').set(auth(token))).status).toBe(200);
-        expect((await request(h.cli.app).get('/v2/rates').set(auth(token))).status).toBe(429);
+        expect((await request(h.server).get('/v2/rates').set(auth(token))).status).toBe(200);
+        expect((await request(h.server).get('/v2/rates').set(auth(token))).status).toBe(429);
         expect(await h.store.accountCount(userId, day(h))).toBe(2);
         expect((await h.api.usage.account(userId)).today).toBe(2);
     });
@@ -354,7 +358,7 @@ describe('public-api guard', () => {
         router.get('/rates', h.api.guard('rates:read'), (_req, res) => res.json({ ok: true }));
         h.cli.app.use('/v2', router);
         const banks = await h.hostToken('alice', ['banks:read']);
-        const res = await request(h.cli.app).get('/v2/rates').set(auth(banks.token));
+        const res = await request(h.server).get('/v2/rates').set(auth(banks.token));
         expect(res.status).toBe(403);
         expect(res.body).toEqual({ error: 'forbidden: missing permission rates:read' });
         expect(res.headers['x-ratelimit-limit']).toBeUndefined();
@@ -376,10 +380,8 @@ describe('public-api guard', () => {
             }),
         );
         const { token, userId } = await h.hostToken();
-        const server = http.createServer(h.cli.app);
-        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-        try {
-            const port = (server.address() as { port: number }).port;
+        {
+            const port = (h.server.address() as { port: number }).port;
             const req = http.get({ host: '127.0.0.1', port, path: '/v1/rates', headers: auth(token) });
             req.on('error', () => undefined);
             await waiting;
@@ -388,9 +390,6 @@ describe('public-api guard', () => {
             release();
             await new Promise((r) => setTimeout(r, 50));
             expect(await h.store.accountCount(userId, day(h))).toBe(0);
-        } finally {
-            server.closeAllConnections?.();
-            await new Promise<void>((r) => server.close(() => r()));
         }
     });
 
@@ -407,7 +406,7 @@ describe('public-api guard', () => {
             vi.spyOn(h.store, 'accountCount').mockRejectedValue(new Error('store down'));
         }
         const { token, userId } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        const res = await request(h.server).get('/v1/rates').set(auth(token));
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: 'internal server error' });
         vi.restoreAllMocks();
@@ -424,7 +423,7 @@ describe('public-api guard', () => {
             }),
         );
         const { token, id, userId } = await h.hostToken();
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(token))).status).toBe(200);
         expect(seen).toHaveLength(1);
         expect(seen[0]).toEqual({ userId, userName: 'alice', tokenId: id, audience: 'host', permissions: ['rates:read'] });
     });
@@ -437,8 +436,8 @@ describe('public-api guard', () => {
             }),
         );
         const { token } = await h.hostToken();
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(token))).status).toBe(200);
-        expect((await request(h.cli.app).get('/v1/rates').set(auth(token))).status).toBe(429);
+        expect((await request(h.server).get('/v1/rates').set(auth(token))).status).toBe(200);
+        expect((await request(h.server).get('/v1/rates').set(auth(token))).status).toBe(429);
     });
 
     it('usage on token views', async () => {
@@ -446,10 +445,10 @@ describe('public-api guard', () => {
         const a = await h.hostToken();
         const b = await h.hostToken();
         for (let i = 0; i < 3; i++) {
-            expect((await request(h.cli.app).get('/v1/rates').set(auth(a.token))).status).toBe(200);
+            expect((await request(h.server).get('/v1/rates').set(auth(a.token))).status).toBe(200);
         }
         const session = (await login(h.cli.app, 'alice', 'alicepass')).token;
-        const list = await request(h.cli.app).get(`${BASE}/tokens`).set(auth(session));
+        const list = await request(h.server).get(`${BASE}/tokens`).set(auth(session));
         expect(list.status).toBe(200);
         const byId = new Map<string, { usage: { today: number; last30Days: number; days: { date: string; requests: number }[] } }>(
             list.body.map((v: { id: string }) => [v.id, v]),
@@ -470,6 +469,18 @@ describe('public-api guard', () => {
         expect(Object.keys(account)).toEqual(['today', 'quota', 'tokens']);
     });
 
+    it('account usage reads the token days once', async () => {
+        const h = await start();
+        const a = await h.hostToken();
+        await h.hostToken();
+        await request(h.server).get('/v1/rates').set(auth(a.token));
+        const reads = vi.spyOn(h.store, 'tokenDays');
+        const account = await h.api.usage.account(a.userId);
+        expect(account.today).toBe(1);
+        expect(account.tokens.map((t) => t.usage.today)).toEqual([1, 0]);
+        expect(reads).toHaveBeenCalledTimes(1);
+    });
+
     it('usage: unknown user throws 404', async () => {
         const h = await start();
         await expect(h.api.usage.account('nobody')).rejects.toMatchObject({ status: 404, message: 'user not found' });
@@ -478,7 +489,7 @@ describe('public-api guard', () => {
     it('headers on handler errors', async () => {
         const h = await start((b) => b.setQuota(() => ({ requestsPerDay: 5, requestsPerMinute: null })));
         const { token } = await h.hostToken();
-        const res = await request(h.cli.app).get('/v1/missing').set(auth(token));
+        const res = await request(h.server).get('/v1/missing').set(auth(token));
         expect(res.status).toBe(404);
         expect(res.headers['x-ratelimit-limit']).toBe('5');
         expect(res.headers['x-ratelimit-remaining']).toBe('4');

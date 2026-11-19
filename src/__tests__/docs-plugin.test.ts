@@ -2,10 +2,11 @@
  * The docs plugin: markdown pages from a folder or code, front matter and variables,
  * served as JSON at `<base>/pages`.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import express from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder } from '../../plugins/users/index';
@@ -142,6 +143,37 @@ describe('docs plugin', () => {
     it('pages sort by the title as written, before variables are replaced', () => {
         const docs = new CliDocsBuilder().setName('Alpha').addPage('named', '# {{name}}').addPage('beta', '# Beta').build();
         expect(docs.pages.map((p) => p.slug)).toEqual(['beta', 'named']);
+    });
+
+    it('under a path prefix: {{baseUrl}} includes it; // or /\\ answers 400', async () => {
+        const { cli } = start();
+        const outer = express();
+        outer.use('/proxy', cli.app);
+        const page = await request(outer).get('/proxy/qcli/docs/pages/index').set('Host', 'localhost');
+        expect(page.body.markdown).toBe('Call http://localhost/proxy/v1/rates with help@ratebell.app and {{unknown}}.\n');
+        for (const base of ['//evil.example.com', '/\\evil.example.com']) {
+            const bad = express();
+            bad.use((req, res, next) => {
+                Object.defineProperty(req, 'baseUrl', { get: () => `${base}/qcli/docs`, set: () => undefined, configurable: true });
+                cli.app(req, res, next);
+            });
+            for (const p of ['/qcli/docs/pages', '/qcli/docs/pages/index']) {
+                const res = await request(bad).get(p);
+                expect(res.status, `${base} ${p}`).toBe(400);
+                expect(res.body).toEqual({ error: 'invalid path base' });
+            }
+        }
+    });
+
+    it('a folder skips symbolic links and files over 1 MB', () => {
+        const outside = folder({ 'secret.md': '# Secret' });
+        const dir = folder({ 'guide.md': '# Guide', 'big.md': '# Big\n' + 'x'.repeat(1024 * 1024) });
+        fs.symlinkSync(path.join(outside, 'secret.md'), path.join(dir, 'linked.md'));
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const docs = new CliDocsBuilder().addFolder(dir).build();
+        expect(docs.pages.map((p) => p.slug)).toEqual(['guide']);
+        expect(warn).toHaveBeenCalledWith('[docs] big.md is larger than 1 MB and is skipped');
+        warn.mockRestore();
     });
 
     it('front matter unclosed is body', () => {

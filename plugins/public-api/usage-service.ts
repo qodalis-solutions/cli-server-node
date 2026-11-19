@@ -37,7 +37,7 @@ export interface PublicApiAccountUsage {
 
 /** The users-plugin members the usage service reads. */
 export interface PublicApiUsageUsers {
-    apiTokens: { list(userId: string): Promise<Array<{ id: string; name: string }>> };
+    apiTokens: { list(userId: string): Promise<Array<{ id: string; name: string; usage?: ApiTokenUsage }>> };
     getUser(id: string): Promise<{ id: string; name: string } | undefined>;
     /** The users plugin's `authService`: the account's effective permissions for the quota resolver. */
     authService?: { getEffectivePermissions(user: { id: string; name: string }): Promise<string[]> };
@@ -96,12 +96,14 @@ export class PublicApiUsageService {
             requestsPerDay: normalizeLimit(resolved?.requestsPerDay),
             requestsPerMinute: normalizeLimit(resolved?.requestsPerMinute),
         };
+        // the views carry the usage (this plugin is their provider): one read of the counters
         const tokens = await this.users.apiTokens.list(user.id);
-        const usage = await this.tokenUsage(tokens.map((t) => t.id));
+        const missing = tokens.filter((t) => !t.usage).map((t) => t.id);
+        const usage = missing.length > 0 ? await this.tokenUsage(missing) : {};
         return {
             today: await this.store.accountCount(user.id, dayWindow(this.now())),
             quota,
-            tokens: tokens.map((t) => ({ tokenId: t.id, name: t.name, usage: usage[t.id] })),
+            tokens: tokens.map((t) => ({ tokenId: t.id, name: t.name, usage: t.usage ?? usage[t.id] })),
         };
     }
 }
