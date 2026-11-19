@@ -218,7 +218,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `eventSocketManager` | `attach(server)` for the WebSockets, `broadcastMessage`, `broadcastDisconnect` |
 | `eventBus` | The server's event bus: `publish(type, data, audience)`, `subscribe(pattern, handler)` (see [Server events](#server-events)) |
 | `logSocketManager` | Server log stream socket |
-| `mountPlugin(plugin)` | Mounts a plugin's routes (its `publicRoutes`, `"METHOD /path"` or `"GET /prefix/*"` for every GET/HEAD under a prefix, stay public on a protected server; never a CLI route) (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused, unless the plugin serves host routes (`cliRoutes: false`: public-api, docs, portal) |
+| `mountPlugin(plugin)` | Mounts a plugin's routes (its `publicRoutes` stay public on a protected server: `"METHOD /path"`, or for a plugin with `cliRoutes: false` also `"GET /prefix/*"` for every GET/HEAD under a prefix. A host-route plugin may declare only paths under its own prefix, never a bare `/*` or a non-GET prefix (`invalid public route: <entry>` at mount); its public requests are answered by that plugin alone, never by a host or CLI route) (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused, unless the plugin serves host routes (`cliRoutes: false`: public-api, docs, portal) |
 | `setAuth(auth)` | Installs or removes the server auth provider |
 | `mcp` | `{ enabled, path, addProvider(provider) }` |
 

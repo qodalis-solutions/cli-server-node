@@ -20,6 +20,6 @@ export {
     processorPermissions,
     normalizePath,
     isCliRoute,
-    isPublicPrefixRoute,
+    isUnderPrefix,
 } from './cli-server-auth-gate';
 export { authorizeWsUpgrade, rejectUpgrade, hostTokenRefusal, WsUpgradeAuthOptions, WsUpgradeAuthResult } from './ws-upgrade-auth';

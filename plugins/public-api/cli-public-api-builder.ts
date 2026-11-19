@@ -392,6 +392,10 @@ export class CliPublicApiBuilder {
             res.type('html').send(swaggerPage(pathBase + basePath, documentTitle(document())));
         });
         router.get('/swagger/assets/:file', swaggerAssets(swaggerUiDir()));
+        // every other path under the public `/swagger/*` prefix is this plugin's 404, never a host route
+        router.get('/swagger/*', (_req, res) => {
+            res.status(404).json({ error: 'not found' });
+        });
         // public on a protected server, under /api too (the gate never opens a CLI route this way)
         const publicRoutes = [
             ...['/openapi.json', '/swagger'].flatMap((p) => [`GET ${basePath}${p}`, `HEAD ${basePath}${p}`]),
