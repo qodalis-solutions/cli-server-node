@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'http';
 import type { Request } from 'express';
 import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
+import type { CliPermissionCatalog } from '../permissions/cli-permission-catalog';
 
 /** Identity of an authenticated caller (HTTP request or WebSocket). */
 export interface CliServerAuthContext {
@@ -62,13 +63,16 @@ export interface ICliServerAuth {
      * runtime options object: a provider that delegates sign-in to the host sets
      * `externalAuthentication` on it. `eventBus` is the server's event bus (the users
      * plugin publishes `user:*`, `group:*`, `token:*` and `session:*` on it); `broadcast`
-     * sends raw control messages (`session-kicked`).
+     * sends raw control messages (`session-kicked`). `permissions` is the server's
+     * permission catalog (`builder.permissions`): the users plugin adds its own entries
+     * and serves it at `GET /api/v1/qcli/permissions`.
      */
     attachToServer?(server: {
         allowedOrigins?: string[];
         broadcast: (message: Record<string, unknown>) => void;
         eventBus?: ICliEventBus;
         serverOptions?: CliServerRuntimeOptions;
+        permissions?: CliPermissionCatalog;
     }): void;
     /**
      * Re-validates a socket identity without sliding the session: the session still
