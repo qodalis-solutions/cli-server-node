@@ -28,7 +28,7 @@ cli.mountPlugin(docs);
 - **Folders:** every `*.md` file directly in the folder (no subfolders; names starting with `.` or `_` are skipped). The slug is the file name without `.md`, lower-cased, and must match `^[a-z0-9][a-z0-9-]*$`. `index` is the guides' home page. Folders are read once, by `build()`.
 - **Front matter:** only when the first line is exactly `---`, up to the next line that is exactly `---` (without one the whole file is the body). Lines `key: value` with `title`, `group` and `order` (an integer); other keys are ignored and quotes around a value are removed. The front matter is not part of the served markdown.
 - **Defaults:** `title` is the first `# ` heading of the body, else the slug; `group` is `Guides`; `order` is 0. Pages are ordered by `order`, then `title` (case-insensitive), then `slug`.
-- **Variables:** `{{ key }}` in titles and pages is replaced per request; unknown keys stay as written. Built in: `baseUrl` (`setBaseUrl`, else the request's `scheme://host`) and `name` (`setName`, default `Documentation`). Add your own with `setVariable(key, value)`.
+- **Variables:** `{{ key }}` in titles and pages is replaced per request; unknown keys stay as written. Built in: `baseUrl` (`setBaseUrl`, else the request's `scheme://host` plus the path the app is mounted under, e.g. a parent app's `app.use('/prefix', cli.app)`; a path base starting with `//` or `/\` answers 400 `{ "error": "invalid path base" }`) and `name` (`setName`, default `Documentation`). Add your own with `setVariable(key, value)`.
 
 ```markdown
 ---
@@ -54,7 +54,7 @@ No sign-in; credentials are ignored (the pages stay public on a protected server
 | `setBasePath(path)` | `/qcli/docs` | Where the pages are served (`/segment[/segment]`) |
 | `setTitle(title)` | `Guides` | The portal's label for the guides |
 | `setName(name)` | `Documentation` | The `{{name}}` variable |
-| `setBaseUrl(url)` | the request's `scheme://host` | The `{{baseUrl}}` variable |
+| `setBaseUrl(url)` | the request's `scheme://host` plus the parent mount's prefix | The `{{baseUrl}}` variable |
 | `setVariable(key, value)` | | A host variable (`^[A-Za-z][A-Za-z0-9_.-]*$`) |
 | `addFolder(path)` | | Pages from a folder |
 | `addPage(slug, markdown)` | | A page in code |

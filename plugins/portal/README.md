@@ -33,13 +33,13 @@ cli.mountPlugin(portal); // http://host/qcli/portal
 
 ## Routes
 
-The portal answers exactly these paths under its mount (GET and HEAD) and nothing else, so it can be mounted at `/` next to your own routes (`setPath('/')`): `GET /v1/rates` or `GET /health` are never shadowed, whatever the order they are registered in.
+The portal answers these paths under its mount (GET and HEAD). Away from `/` it also answers every other path under `assets/`, `guides/` and `reference/` with its own 404 `{ "error": "not found" }`; anything else under the mount falls through to your routes. At a root mount (`setPath('/')`) only the paths below are the portal's, and an unknown or missing one falls through, so `GET /v1/rates` or `GET /health` are never shadowed, whatever the order they are registered in.
 
 | Path | Answer |
 |---|---|
 | the mount, `/`, `/guides/<slug>`, `/reference`, `/reference/<tag>` | The site's `index.html` (`Cache-Control: no-cache`), its `<base href="/" />` rewritten to the mount |
 | `/portal.json` | Which sections exist, with the name, logo, theme and footer links (below) |
-| `/assets/<file>`, `/favicon.svg` | The site's files (`/assets/` cached for a year: their names change with each build); 404 when missing |
+| `/assets/<file>`, `/favicon.svg` | The site's files (`/assets/` cached for a year: their names change with each build). A missing asset: the portal's 404 `{ "error": "not found" }` away from `/`, falls through to your routes at a root mount; a missing `favicon.svg` always falls through |
 
 ```json
 {
