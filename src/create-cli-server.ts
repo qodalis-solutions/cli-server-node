@@ -246,12 +246,23 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;
     const publicRoutes = new Set<string>();
+    // The CLI's own routes (host tokens are refused there); mountPlugin adds the plugins' prefixes
+    const cliRoutePrefixes = new Set<string>([
+        '/api/qcli',
+        '/api/v1/qcli',
+        '/api/cli',
+        '/ws/qcli',
+        '/ws/v1/qcli',
+        normalizePath(basePath),
+        ...(mcpOptions ? [mcpPath] : []),
+    ]);
     app.use(
         createServerAuthGate(() => serverAuth, {
             registry,
             cliPrefixes: Array.from(new Set(['/api/v1/qcli', normalizePath(basePath)])),
             publicRoutes,
             mcpPaths: mcpOptions ? [mcpPath] : [],
+            cliRoutePrefixes,
         }),
     );
 
@@ -407,6 +418,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             builder.addInstalledPlugin(bundled);
         }
         plugin.setEventBus?.(eventBus);
+        cliRoutePrefixes.add(normalizePath(plugin.prefix));
+        if (plugin.dashboardPrefix) cliRoutePrefixes.add(normalizePath(plugin.dashboardPrefix));
         app.use(plugin.prefix, plugin.router);
         if (plugin.dashboardPrefix && plugin.dashboardRouter) {
             app.use(plugin.dashboardPrefix, plugin.dashboardRouter);

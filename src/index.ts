@@ -91,6 +91,8 @@ export {
     requiredServerPermissions,
     authorizeWsUpgrade,
     rejectUpgrade,
+    hostTokenRefusal,
+    isCliRoute,
 } from './auth';
 
 // MCP endpoint

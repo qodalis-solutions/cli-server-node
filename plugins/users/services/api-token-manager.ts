@@ -4,6 +4,16 @@ import { AuthService, INVALID_AUDIENCE } from './auth-service';
 import { HttpError, badRequest, forbidden, notFound } from '../errors';
 import { hasPermission } from '../permissions';
 
+/**
+ * A programming error, not an HTTP one: a missing user id must never reach the stores
+ * (where `getTokens(undefined)` would list every user's tokens).
+ */
+function requireUserId(userId: unknown): asserts userId is string {
+    if (typeof userId !== 'string' || userId === '') {
+        throw new TypeError('userId is required');
+    }
+}
+
 export type { ApiTokenCreateOptions, CreatedApiToken } from '../models';
 
 /**
@@ -22,12 +32,14 @@ export class ApiTokenManager {
     ) {}
 
     /**
-     * Creates a token for the user. 501 with an auth adapter unless API tokens are
+     * Creates a token for the user. A missing or empty `userId` throws a `TypeError` (every
+     * method). 501 with an auth adapter unless API tokens are
      * enabled with it; 404 `user not found`; 403 `account disabled`; 400 for a bad
      * audience; then the rules of `POST /tokens`, the `host` rules and the grant check
      * against the user's live permissions.
      */
     async create(userId: string, options: ApiTokenCreateOptions): Promise<CreatedApiToken> {
+        requireUserId(userId);
         if (this.flags.externalAuth && !this.flags.apiTokensWithExternalAuth) {
             throw new HttpError(501, 'Authentication is managed by the host application');
         }
@@ -50,6 +62,7 @@ export class ApiTokenManager {
 
     /** The user's tokens, oldest first, both audiences; empty for an unknown user. */
     async list(userId: string): Promise<ApiTokenView[]> {
+        requireUserId(userId);
         const user = await this.findUser(userId);
         if (!user) return [];
         const tokens = await this.authService.listApiTokens(user.id);
@@ -61,6 +74,7 @@ export class ApiTokenManager {
      * user, true once revoked. Audited with `actor` (default the owner's name).
      */
     async revoke(userId: string, tokenId: string, actor?: string): Promise<boolean> {
+        requireUserId(userId);
         const token = await this.authService.apiTokenStore.getToken(tokenId);
         if (!token || token.userId !== userId) return false;
         const ownerName = (await this.findUser(userId))?.name ?? userId;
@@ -77,6 +91,7 @@ export class ApiTokenManager {
      * 404 for an unknown user, 400 for a bad audience.
      */
     async grantablePermissions(userId: string, audience: ApiTokenAudience = 'cli'): Promise<CliPermission[]> {
+        requireUserId(userId);
         const user = await this.requireUser(userId);
         const aud = this.audienceOf(audience);
         const held = await this.authService.getEffectivePermissions(user);

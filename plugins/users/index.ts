@@ -58,6 +58,7 @@ export {
     EXPIRY_CONFLICT,
     HOST_TOKENS_CANNOT_USE_CLI_ROUTES,
     isHostToken,
+    hostTokenRefused,
 } from './services/auth-service';
 export { ApiTokenManager } from './services/api-token-manager';
 export type { AuthContext, AuthServiceOptions, UsersSessionEvent } from './services/auth-service';

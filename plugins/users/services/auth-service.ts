@@ -1051,9 +1051,23 @@ export function isHostToken(ctx: Pick<AuthContext, 'apiToken'> | undefined): boo
     return !!ctx?.apiToken && tokenAudience(ctx.apiToken) === 'host';
 }
 
-/** The token's audience; anything but `host` (absent in older stores) reads as `cli`. */
+/**
+ * The token's audience. Absent, null or empty (tokens stored before audiences, stores
+ * that drop the field) reads as `cli`; any other value that is not exactly `cli`
+ * reads as `host`, so an unexpected value fails closed on the CLI routes.
+ */
 export function tokenAudience(token: Pick<ApiToken, 'audience'>): ApiTokenAudience {
-    return token.audience === 'host' ? 'host' : 'cli';
+    const audience: unknown = token.audience;
+    return audience === undefined || audience === null || audience === '' || audience === 'cli' ? 'cli' : 'host';
+}
+
+/**
+ * The 403 a host token gets on a CLI route. `hostToken: true` lets the server's auth
+ * gate tell it apart: on paths the CLI does not serve (the host's own routes) the
+ * request goes on to the host's guard instead.
+ */
+export function hostTokenRefused(): HttpError & { hostToken: true } {
+    return Object.assign(forbidden(HOST_TOKENS_CANNOT_USE_CLI_ROUTES), { hostToken: true as const });
 }
 
 /** Serializes a user for the API: `disabled` always present, absent optionals omitted. */

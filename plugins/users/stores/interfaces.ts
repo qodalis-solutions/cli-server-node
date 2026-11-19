@@ -57,7 +57,8 @@ export interface ICliGroupStore {
 
 /**
  * API token storage. `tokenHash` is `SHA-256(token)` as hex — stores never
- * see raw tokens.
+ * see raw tokens. Stores must persist `audience`: dropping it turns host tokens
+ * into CLI tokens.
  */
 export interface ICliApiTokenStore {
     createToken(token: ApiToken): Promise<ApiToken>;

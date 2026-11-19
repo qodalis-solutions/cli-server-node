@@ -34,6 +34,12 @@ export interface CliServerRuntimeOptions {
 /** Error thrown by {@link ICliServerAuth.authenticateRequest}; rendered as `{ error }`. */
 export interface CliServerAuthError extends Error {
     status?: number;
+    /**
+     * Set on the 403 a host-audience API token gets: refused on the CLI's own routes,
+     * while on any other path (the host's own routes) the request goes on to the
+     * host's guard (`requireAuth` / `requirePermission`).
+     */
+    hostToken?: boolean;
 }
 
 /**
