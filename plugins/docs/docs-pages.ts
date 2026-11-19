@@ -36,14 +36,16 @@ function unquote(value: string): string {
  * `# ` line of the body, else the slug; group `Guides`; order 0.
  */
 export function parsePage(slug: string, text: string): DocsPage {
-    const source = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+    const source = text.replace(/^﻿/, '');
     const lines = source.split('\n');
+    // Front matter lines ignore a trailing `\r` (CRLF files); the body is kept as written
+    const bare = lines.map((line) => line.replace(/\r$/, ''));
     const front: Record<string, string> = {};
     let markdown = source;
-    if (lines[0] === '---') {
-        const end = lines.indexOf('---', 1);
+    if (bare[0] === '---') {
+        const end = bare.indexOf('---', 1);
         if (end > 0) {
-            for (const line of lines.slice(1, end)) {
+            for (const line of bare.slice(1, end)) {
                 const colon = line.indexOf(':');
                 if (colon <= 0) continue;
                 const key = line.slice(0, colon).trim();
@@ -61,7 +63,10 @@ export function parsePage(slug: string, text: string): DocsPage {
         }
         order = Number.parseInt(front.order, 10);
     }
-    const heading = markdown.split('\n').find((line) => line.startsWith('# '));
+    const heading = markdown
+        .split('\n')
+        .map((line) => line.replace(/\r$/, ''))
+        .find((line) => line.startsWith('# '));
     return {
         slug,
         title: front.title || (heading ? heading.slice(2).trim() : '') || slug,

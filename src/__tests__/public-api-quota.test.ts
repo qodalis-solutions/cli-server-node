@@ -310,6 +310,26 @@ describe('public-api guard', () => {
         expect(res.body).toEqual({ error: 'internal server error' });
     });
 
+    it('a resolver returning null is unlimited (still counted)', async () => {
+        const h = await start((b) => b.setQuota(() => null as unknown as PublicApiQuota));
+        const { token, userId } = await h.hostToken();
+        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        expect(res.status).toBe(200);
+        expect(res.headers['x-ratelimit-limit']).toBeUndefined();
+        expect(await h.store.accountCount(userId, day(h))).toBe(1);
+    });
+
+    it('a failing usage store: 500, the handler does not run', async () => {
+        const h = await start();
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.spyOn(h.store, 'increment').mockRejectedValue(new Error('usage db down'));
+        const { token } = await h.hostToken();
+        const res = await request(h.cli.app).get('/v1/rates').set(auth(token));
+        expect(res.status).toBe(500);
+        expect(res.body).toEqual({ error: 'internal server error' });
+        expect(res.text).not.toContain('usage db down');
+    });
+
     it('resolver gets the caller', async () => {
         const seen: QcliCaller[] = [];
         const h = await start((b) =>

@@ -153,6 +153,10 @@ export class CliDocsBuilder {
             res.setHeader('Cache-Control', 'no-cache');
             res.json(pages.map((p) => ({ slug: p.slug, title: replaceVariables(p.title, variables), group: p.group, order: p.order })));
         });
+        // a slug path with more segments is an unknown page too
+        router.get('/pages/:slug/*', (_req, res) => {
+            res.status(404).json({ error: PAGE_NOT_FOUND });
+        });
         router.get('/pages/:slug', (req, res) => {
             const page = bySlug.get(req.params.slug);
             if (!page) {
