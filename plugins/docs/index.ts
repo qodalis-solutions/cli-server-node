@@ -6,6 +6,7 @@ export {
     DEFAULT_DOCS_TITLE,
     DEFAULT_DOCS_NAME,
     PAGE_NOT_FOUND,
+    INVALID_PATH_BASE,
 } from './cli-docs-builder';
 export { DocsPage, DEFAULT_DOCS_GROUP, parsePage, isValidSlug, comparePages, replaceVariables } from './docs-pages';
 export { docsInstalledPlugin, DOCS_PLUGIN_ID } from './package-info';

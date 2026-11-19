@@ -9,6 +9,8 @@ export {
     DEFAULT_USAGE_RETENTION_DAYS,
     HOST_TOKEN_REQUIRED,
     NO_API_ACCESS,
+    INVALID_PATH_BASE,
+    mountPathBase,
 } from './cli-public-api-builder';
 export { PublicApiQuota, PublicApiQuotaResolver, QcliCaller } from './quota';
 export { IPublicApiUsageStore, InMemoryPublicApiUsageStore } from './usage-store';

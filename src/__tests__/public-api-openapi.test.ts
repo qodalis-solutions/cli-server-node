@@ -7,6 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import http from 'http';
 import path from 'path';
+import express from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
@@ -184,6 +185,7 @@ describe('public OpenAPI document', () => {
             setTokenUsageProvider: () => undefined,
             apiTokens: { list: async () => [] },
             getUser: async () => undefined,
+            serverAuth: { hasPermission: () => true },
         };
         const builder = new CliPublicApiBuilder().setUsers(users).setBasePath(value);
         expect(() => builder.build()).toThrow(`invalid public-api base path: ${value}`);
@@ -222,6 +224,45 @@ describe('public OpenAPI document', () => {
         expect(source).not.toHaveProperty('servers');
         expect(source).not.toHaveProperty('security');
         expect(source).not.toHaveProperty('components');
+    });
+
+    it('a document that cannot be serialised fails at build()', async () => {
+        const cyclic: Record<string, unknown> = { ...fixture() };
+        cyclic.self = cyclic;
+        await expect(start((b) => b.setOpenApi(cyclic))).rejects.toThrow('public-api: the OpenAPI document must be JSON-serialisable');
+        await expect(start((b) => b.setOpenApi({ ...fixture(), fn: () => 1 }))).rejects.toThrow(
+            'public-api: the OpenAPI document must be JSON-serialisable',
+        );
+    });
+
+    it('under a path prefix: servers and the swagger page include it', async () => {
+        const h = await start();
+        const outer = express();
+        outer.use('/proxy', h.cli.app);
+        const doc = (await request(outer).get('/proxy/qcli/api/openapi.json').set('Host', 'api.local')).body;
+        expect(doc.servers).toEqual([{ url: 'http://api.local/proxy' }]);
+        const page = (await request(outer).get('/proxy/qcli/api/swagger')).text;
+        expect(page).toContain('"/proxy/qcli/api/openapi.json"');
+        expect(page).toContain('/proxy/qcli/api/swagger/assets/swagger-ui-bundle.js');
+        expect((await request(outer).get('/proxy/qcli/api/swagger/assets/swagger-ui-bundle.js')).status).toBe(200);
+        // without a prefix nothing changes
+        expect((await request(h.cli.app).get('/qcli/api/openapi.json').set('Host', 'api.local')).body.servers).toEqual([{ url: 'http://api.local' }]);
+    });
+
+    it('a path base starting with // or /\\ answers 400', async () => {
+        const h = await start();
+        for (const base of ['//evil.example.com', '/\\evil.example.com']) {
+            const outer = express();
+            outer.use((req, res, next) => {
+                Object.defineProperty(req, 'baseUrl', { get: () => `${base}/qcli/api`, set: () => undefined, configurable: true });
+                h.cli.app(req, res, next);
+            });
+            for (const p of ['/qcli/api/openapi.json', '/qcli/api/swagger']) {
+                const res = await request(outer).get(p);
+                expect(res.status, `${base} ${p}`).toBe(400);
+                expect(res.body).toEqual({ error: 'invalid path base' });
+            }
+        }
     });
 
     it('without a document: an empty one with the additions', async () => {

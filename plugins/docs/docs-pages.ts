@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 
 /** A markdown page as the docs plugin serves it. */
@@ -14,6 +14,8 @@ export interface DocsPage {
 export const DEFAULT_DOCS_GROUP = 'Guides';
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+/** Larger page files are skipped (logged). */
+export const MAX_PAGE_BYTES = 1024 * 1024;
 const INTEGER = /^[+-]?\d+$/;
 
 /** True for a page slug: lower-case letters, digits and `-`, not starting with `-`. */
@@ -78,8 +80,8 @@ export function parsePage(slug: string, text: string): DocsPage {
 
 /**
  * The pages of a folder (relative to the working directory): every `*.md` file directly in
- * it, names starting with `.` or `_` skipped; the slug is the file name without `.md`,
- * lower-cased.
+ * it, names starting with `.` or `_`, symbolic links and files over 1 MB skipped; the slug
+ * is the file name without `.md`, lower-cased.
  */
 export function readFolder(folder: string): DocsPage[] {
     const dir = resolve(folder);
@@ -90,7 +92,13 @@ export function readFolder(folder: string): DocsPage[] {
     for (const name of readdirSync(dir).sort()) {
         if (!name.endsWith('.md') || name.startsWith('.') || name.startsWith('_')) continue;
         const file = join(dir, name);
-        if (!statSync(file).isFile()) continue;
+        // regular files only: symbolic links (which could point outside the folder) are skipped
+        const stat = lstatSync(file);
+        if (!stat.isFile()) continue;
+        if (stat.size > MAX_PAGE_BYTES) {
+            console.warn(`[docs] ${name} is larger than 1 MB and is skipped`);
+            continue;
+        }
         const slug = name.slice(0, -'.md'.length).toLowerCase();
         if (!isValidSlug(slug)) {
             throw new Error(`invalid docs page name: ${name}`);

@@ -7,6 +7,7 @@ export const DEFAULT_DOCS_BASE_PATH = '/qcli/docs';
 export const DEFAULT_DOCS_TITLE = 'Guides';
 export const DEFAULT_DOCS_NAME = 'Documentation';
 export const PAGE_NOT_FOUND = 'page not found';
+export const INVALID_PATH_BASE = 'invalid path base';
 
 const BUILT_IN_VARIABLES = new Set(['baseUrl', 'name']);
 
@@ -139,17 +140,28 @@ export class CliDocsBuilder {
         const basePath = this.basePath;
         const name = this.name;
         const baseUrl = this.baseUrl;
-        const variablesFor = (req: Request) =>
+        const variablesFor = (req: Request, pathBase: string) =>
             new Map<string, string>([
                 ...hostVariables,
-                ['baseUrl', baseUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}`],
+                ['baseUrl', baseUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}${pathBase}`],
                 ['name', name],
             ]);
+        // The path the app is mounted under (a parent app's `app.use('/prefix', cli.app)`);
+        // undefined (400) when it starts with `//` or `/\` and would point at another host
+        const pathBaseOf = (req: Request): string | undefined => {
+            const base = req.baseUrl.slice(0, Math.max(0, req.baseUrl.length - basePath.length));
+            return base.startsWith('//') || base.startsWith('/\\') ? undefined : base;
+        };
 
         // No sign-in, credentials ignored
         const router = Router();
         router.get('/pages', (req, res) => {
-            const variables = variablesFor(req);
+            const pathBase = pathBaseOf(req);
+            if (pathBase === undefined) {
+                res.status(400).json({ error: INVALID_PATH_BASE });
+                return;
+            }
+            const variables = variablesFor(req, pathBase);
             res.setHeader('Cache-Control', 'no-cache');
             res.json(pages.map((p) => ({ slug: p.slug, title: replaceVariables(p.title, variables), group: p.group, order: p.order })));
         });
@@ -163,7 +175,12 @@ export class CliDocsBuilder {
                 res.status(404).json({ error: PAGE_NOT_FOUND });
                 return;
             }
-            const variables = variablesFor(req);
+            const pathBase = pathBaseOf(req);
+            if (pathBase === undefined) {
+                res.status(400).json({ error: INVALID_PATH_BASE });
+                return;
+            }
+            const variables = variablesFor(req, pathBase);
             res.setHeader('Cache-Control', 'no-cache');
             res.json({
                 slug: page.slug,
@@ -174,12 +191,12 @@ export class CliDocsBuilder {
             });
         });
 
-        const publicPaths = ['/pages', ...pages.map((p) => `/pages/${p.slug}`)];
         return {
             prefix: basePath,
             router,
             cliRoutes: false,
-            publicRoutes: publicPaths.flatMap((p) => [`GET ${basePath}${p}`, `HEAD ${basePath}${p}`]),
+            // public on a protected server, under /api too (the gate never opens a CLI route this way)
+            publicRoutes: [`GET ${basePath}/pages`, `HEAD ${basePath}/pages`, `GET ${basePath}/pages/*`],
             pages,
             portalSection: { kind: 'docs', title: this.title, basePath },
             installedPlugin: docsInstalledPlugin,

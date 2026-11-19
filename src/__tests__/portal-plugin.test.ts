@@ -7,6 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import express from 'express';
+import { spawnSync } from 'child_process';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
@@ -284,25 +285,79 @@ describe('portal plugin', () => {
         expect(built.installedPlugin.id).toBe('@qodalis/cli-server-plugin-portal');
     });
 
-    it('resolves the site: explicit, sibling repo, bundled copy, npm package', () => {
+    it('resolves the site: explicit alone, else the npm package, the sibling repo (checkouts only), the bundled copy', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-portal-resolve-'));
-        const pkg = path.join(root, 'cli-server-node', 'plugins', 'portal');
+        const repo = path.join(root, 'cli-server-node');
+        const pkg = path.join(repo, 'plugins', 'portal');
+        const site = (dir: string) => {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'index.html'), '<base href="/" />');
+            return dir;
+        };
         fs.mkdirSync(path.join(pkg, 'dist'), { recursive: true });
         fs.writeFileSync(path.join(pkg, 'package.json'), '{}');
-        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), root)).toBeNull();
+        const noNpm = () => null;
+        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), noNpm)).toBeNull();
 
-        const bundled = path.join(pkg, 'site');
-        fs.mkdirSync(bundled);
-        fs.writeFileSync(path.join(bundled, 'index.html'), '<base href="/" />');
-        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), root)).toBe(bundled);
+        const bundled = site(path.join(pkg, 'site'));
+        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), noNpm)).toBe(bundled);
 
-        const sibling = path.join(root, 'cli-server-dashboard', 'portal', 'dist');
-        fs.mkdirSync(sibling, { recursive: true });
-        fs.writeFileSync(path.join(sibling, 'index.html'), '<base href="/" />');
-        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), root)).toBe(sibling);
+        // a sibling next to an installed package (no checkout) is never used
+        const sibling = site(path.join(root, 'cli-server-dashboard', 'portal', 'dist'));
+        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), noNpm)).toBe(bundled);
+        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: '@qodalis/cli-server-node' }));
+        fs.mkdirSync(path.join(repo, '.git'));
+        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), noNpm)).toBe(sibling);
 
-        expect(resolvePortalSiteDir(SITE, path.join(pkg, 'dist'), root)).toBe(SITE);
+        const npm = site(path.join(root, 'node_modules', '@qodalis', 'cli-server-portal', 'dist'));
+        expect(resolvePortalSiteDir(undefined, path.join(pkg, 'dist'), () => npm)).toBe(npm);
+
+        expect(resolvePortalSiteDir(SITE, path.join(pkg, 'dist'), () => npm)).toBe(SITE);
         // an explicit folder without a site is not replaced by another one
-        expect(resolvePortalSiteDir(root, path.join(pkg, 'dist'), root)).toBeNull();
+        expect(resolvePortalSiteDir(root, path.join(pkg, 'dist'), () => npm)).toBeNull();
     });
+
+    it.each([
+        ['--publish', 1],
+        ['', 0],
+    ])('copy-portal.js without a site source: %s exits %d', (flag, code) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-copy-portal-'));
+        const scripts = path.join(root, 'a', 'cli-server-node', 'plugins', 'portal', 'scripts');
+        fs.mkdirSync(scripts, { recursive: true });
+        fs.copyFileSync(path.join(__dirname, '..', '..', 'plugins', 'portal', 'scripts', 'copy-portal.js'), path.join(scripts, 'copy-portal.js'));
+        const result = spawnSync(process.execPath, [path.join(scripts, 'copy-portal.js'), ...(flag ? [flag] : [])], { cwd: root, encoding: 'utf8' });
+        expect(result.status).toBe(code);
+        expect(fs.existsSync(path.join(scripts, '..', 'site'))).toBe(false);
+    });
+
+    it('public on a protected server under /api: pages, assets, deep links; the CLI still needs a token', async () => {
+        const h = await start();
+        expect(h.users.protectServer).toBe(true);
+        const docs = new CliDocsBuilder().setBasePath('/api/docs').addFolder(DOCS).build();
+        h.cli.mountPlugin(docs);
+        h.cli.mountPlugin(portal().setPath('/api/developers').addSection(docs).addSection(h.api).build());
+        for (const p of [
+            '/api/developers',
+            '/api/developers/',
+            '/api/developers/portal.json',
+            '/api/developers/assets/app.js',
+            '/api/developers/favicon.svg',
+            '/api/developers/guides/auth',
+            '/api/developers/reference',
+            '/api/developers/reference/Rates',
+            '/api/docs/pages',
+            '/api/docs/pages/auth',
+        ]) {
+            const res = await request(h.cli.app).get(p);
+            expect(res.status, p).toBe(200);
+        }
+        // an unknown asset falls through to the gate-free 404, never a sign-in
+        expect((await request(h.cli.app).get('/api/developers/assets/missing.js')).status).toBe(404);
+        expect((await request(h.cli.app).get('/api/v1/qcli/commands')).status).toBe(401);
+        expect((await request(h.cli.app).get('/api/other')).status).toBe(401);
+        // segment boundary: a longer name is not under the public prefix
+        expect((await request(h.cli.app).get('/api/developersx/assets/app.js')).status).toBe(401);
+        expect((await request(h.cli.app).get('/api/developers/assetsx/app.js')).status).toBe(401);
+    });
+
 });

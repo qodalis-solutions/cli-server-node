@@ -40,6 +40,13 @@ export function loadOpenApiSource(source: object | string | undefined): () => Op
     if (!isObject(source)) {
         throw new Error('public-api: the OpenAPI document must be an object or a path to a JSON file');
     }
+    // checked once at startup: every request clones and serialises it
+    try {
+        structuredClone(source);
+        JSON.stringify(source);
+    } catch {
+        throw new Error('public-api: the OpenAPI document must be JSON-serialisable');
+    }
     return () => source;
 }
 

@@ -52,13 +52,13 @@ The portal answers exactly these paths under its mount (GET and HEAD) and nothin
 }
 ```
 
-`docs` and `api` are `null` when that plugin's section was not added (with neither, the site shows "Nothing published yet"). No sign-in is needed. On a protected server, mount the portal outside `/api` (the default `/qcli/portal` and `/` are): under `/api` the server's sign-in applies to the guide and reference pages.
+`docs` and `api` are `null` when that plugin's section was not added (with neither, the site shows "Nothing published yet"). No sign-in is needed, on a protected server too, under `/api` as well: the portal declares its pages, `portal.json`, `/assets/*`, `/guides/*` and `/reference/*` as public routes (the server never opens one of the CLI's own routes this way).
 
 When your app is mounted under a path (a parent Express app's `app.use('/prefix', cli.app)`), that prefix is added to the `portal.json` URLs and to `<base href>`. A prefix starting with `//` or `/\` (it would point them at another host) answers 400 `{ "error": "invalid path base" }` on the pages and `portal.json`.
 
 ## The site
 
-The site is found, in order: `setSiteDir(dir)` (then only there), the sibling `cli-server-dashboard/portal/dist` (development), the copy bundled into this package (`site/`, made by `npm run build` / `prepublishOnly`), `../cli-server-dashboard/portal/dist` from the working directory, then the `@qodalis/cli-server-portal` package. Without one, `[qcli] portal site not found; the portal is not served` is logged once and nothing is served, `portal.json` included.
+The site is found as on the .NET server: `setSiteDir(dir)` alone when given (no other location is tried); otherwise the installed `@qodalis/cli-server-portal` package, then the sibling `cli-server-dashboard/portal/dist` (only when this package is inside a git checkout of cli-server-node, never next to an installed package), then the copy bundled into this package (`site/`, made by `npm run build`; `prepublishOnly` fails when there is no site to bundle). Without one, `[qcli] portal site not found; the portal is not served` is logged once and nothing is served, `portal.json` included.
 
 ## Builder
 

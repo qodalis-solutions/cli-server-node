@@ -50,6 +50,11 @@ export interface ServerAuthGateOptions {
     cliPrefixes: string[];
     /** Extra public routes as `"METHOD /path"` (e.g. a plugin's own login). */
     publicRoutes: Set<string>;
+    /**
+     * Prefixes (normalized) under which every GET and HEAD is public: a plugin's
+     * `"GET /prefix/*"` entries (the portal's assets and pages). Never a CLI route.
+     */
+    publicPrefixes?: ReadonlySet<string>;
     /** MCP endpoint paths (normalized), requiring `commands:execute`. */
     mcpPaths?: string[];
     /**
@@ -65,6 +70,23 @@ export function isCliRoute(path: string, options: Pick<ServerAuthGateOptions, 'c
     if (!options.cliRoutePrefixes) return true;
     for (const prefix of options.cliRoutePrefixes) {
         if (path === prefix || path.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)) return true;
+    }
+    return false;
+}
+
+/**
+ * True for a GET or HEAD under one of the public prefixes (segment boundary), when the
+ * path is not one of the CLI's own routes.
+ */
+export function isPublicPrefixRoute(
+    method: string,
+    path: string,
+    options: Pick<ServerAuthGateOptions, 'publicPrefixes' | 'cliRoutePrefixes'>,
+): boolean {
+    if ((method !== 'GET' && method !== 'HEAD') || !options.publicPrefixes?.size) return false;
+    if (isCliRoute(path, options)) return false;
+    for (const prefix of options.publicPrefixes) {
+        if (path === prefix || path.startsWith(prefix === '/' ? '/' : `${prefix}/`)) return true;
     }
     return false;
 }
@@ -180,7 +202,11 @@ export function createServerAuthGate(
             next();
             return;
         }
-        if (options.publicRoutes.has(`${method} ${path}`) || auth.handlesPath(path, method)) {
+        if (
+            options.publicRoutes.has(`${method} ${path}`) ||
+            isPublicPrefixRoute(method, path, options) ||
+            auth.handlesPath(path, method)
+        ) {
             next();
             return;
         }

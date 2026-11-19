@@ -1,5 +1,5 @@
 export { CliUsersBuilder, generatePassword } from './cli-users-builder';
-export { UsersServerAuth, EXTERNAL_REQUEST, toQcliCaller } from './server-auth';
+export { UsersServerAuth, EXTERNAL_REQUEST, toQcliCaller, GUARD_ONLY_NEEDS_NO_CLI_ROUTES } from './server-auth';
 export type { UsersServerAuthContext, UsersServerAttachment } from './server-auth';
 export { RequestAuthenticator } from './middleware/auth-middleware';
 export { hashToken, isOriginAllowed, isSameOrigin, requestOrigin } from './security';

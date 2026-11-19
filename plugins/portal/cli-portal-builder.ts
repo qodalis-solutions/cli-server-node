@@ -225,7 +225,11 @@ export class CliPortalBuilder {
 
         const at = (p: string) => (mount === '/' ? p : `${mount}${p}`);
         const fixed = ['', '/', '/reference', '/portal.json', '/favicon.svg'].map((p) => (p === '' ? mount : at(p)));
-        result.publicRoutes = fixed.flatMap((p) => [`GET ${p}`, `HEAD ${p}`]);
+        // public on a protected server, under /api too (the gate never opens a CLI route this way)
+        result.publicRoutes = [
+            ...fixed.flatMap((p) => [`GET ${p}`, `HEAD ${p}`]),
+            ...['/assets/*', '/guides/*', '/reference/*'].map((p) => `GET ${at(p)}`),
+        ];
         return result;
     }
 }

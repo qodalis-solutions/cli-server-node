@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
+// `--publish` (prepublishOnly): a package without its site must not be published
+const publishing = process.argv.includes('--publish');
 const dest = path.resolve(__dirname, '..', 'site');
 
 // Start from an empty directory so assets of an older build are not kept
@@ -27,4 +29,8 @@ try {
     // Not installed
 }
 
+if (publishing) {
+    console.error('Error: portal site not found (cli-server-dashboard/portal/dist or @qodalis/cli-server-portal); not publishing without it');
+    process.exit(1);
+}
 console.warn('Warning: portal site not found — the portal will not be served');
