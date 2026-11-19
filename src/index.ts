@@ -133,6 +133,15 @@ export { createFilesystemRouter } from './controllers/filesystem-controller';
 // Extensions
 export { CliBuilder } from './extensions';
 
+// Permission catalog
+export {
+    CliPermission,
+    CliPermissionInput,
+    CliPermissionSurface,
+    CliPermissionCatalog,
+    CORE_PERMISSIONS,
+} from './permissions/cli-permission-catalog';
+
 // Jobs plugin (re-export for backward compatibility)
 export {
     CliJobsBuilder,

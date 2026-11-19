@@ -6,6 +6,12 @@ import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-s
 import { CliCommandRegistry } from '../services';
 import type { McpToolProvider } from '../mcp/mcp-types';
 import { CliInstalledPlugin, installedPluginOf, readInstalledPlugin } from '@qodalis/cli-server-abstractions';
+import {
+    CliPermissionCatalog,
+    CliPermissionInput,
+    CliPermissionSurface,
+    CORE_PERMISSIONS,
+} from '../permissions/cli-permission-catalog';
 
 const CORE_PACKAGE = '@qodalis/cli-server-node';
 const FILESYSTEM_PACKAGE = '@qodalis/cli-server-plugin-filesystem';
@@ -38,9 +44,32 @@ export class CliBuilder {
      */
     readonly serverOptions: CliServerRuntimeOptions = { externalAuthentication: false, jobsEnabled: false };
 
+    /**
+     * The permission catalog served by the users plugin (`GET /api/v1/qcli/permissions`):
+     * core's permissions, then the plugins', then the host's ({@link addPermissions}).
+     */
+    readonly permissions = new CliPermissionCatalog();
+
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
         this.addInstalledPlugin(corePlugin);
+        this.permissions.add(CORE_PERMISSIONS, 'cli');
+    }
+
+    /**
+     * Registers permissions in the catalog, at startup. The host registers the
+     * permissions its own routes check (`surface` `host`, the default), which host
+     * tokens may carry; plugins register theirs as `cli`. Throws on an invalid entry
+     * or a name already registered.
+     *
+     * @example
+     * ```ts
+     * builder.addPermissions([{ name: 'rates:read', description: 'Official exchange rates', group: 'Rates' }]);
+     * ```
+     */
+    addPermissions(entries: readonly CliPermissionInput[], surface: CliPermissionSurface = 'host'): CliBuilder {
+        this.permissions.add(entries, surface);
+        return this;
     }
 
     /**

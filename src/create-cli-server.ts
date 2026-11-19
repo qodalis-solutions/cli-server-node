@@ -383,6 +383,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             broadcast: (msg) => eventSocketManager.broadcastMessage(msg),
             eventBus,
             serverOptions,
+            permissions: builder.permissions,
         });
     };
 
