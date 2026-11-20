@@ -48,6 +48,8 @@ jobs:
           cd ../jobs && npx tsc
           cd ../audit && npx tsc
           cd ../users && npx tsc
+          cd ../public-api && npx tsc
+          cd ../docs && npx tsc
           cd ../data-explorer && npx tsc
           cd ../data-explorer-sql && npx tsc
           cd ../data-explorer-mongo && npx tsc
@@ -58,6 +60,7 @@ jobs:
           cd ../data-explorer-elasticsearch && npx tsc
           cd ../aws && npx tsc
           cd ../admin && npm install && npx tsc
+          cd ../portal && npm install && npx tsc
 
       - name: Build
         run: npm run build
@@ -110,6 +113,9 @@ jobs:
           publish_pkg plugins/audit
           publish_pkg plugins/users
           publish_pkg plugins/admin
+          publish_pkg plugins/public-api
+          publish_pkg plugins/docs
+          publish_pkg plugins/portal
           publish_pkg plugins/data-explorer
           for provider in sql postgres mysql mssql mongo redis elasticsearch; do
             publish_pkg plugins/data-explorer-$provider
