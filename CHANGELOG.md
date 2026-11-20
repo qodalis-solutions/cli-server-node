@@ -3,8 +3,9 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
-## Unreleased
+## 1.0.0-beta.29
 
+- The admin plugin embeds dashboard 1.0.0-beta.26: pick a new token's permissions from the server's list, host tokens marked, and a Requests today column when the server counts API usage. The portal plugin serves `@qodalis/cli-server-portal` 1.0.0-beta.26.
 - **Permission catalog.** The server keeps a catalog of known permissions (`{ name, description, group, surface }`): `builder.permissions`, `builder.addPermissions(entries, surface = 'host')`, `CliPermissionCatalog`, `CORE_PERMISSIONS`. Core registers its 11 route-policy permissions and the users plugin its 12 (both `cli`); the host adds the permissions its own routes check (`host`). Names are concrete lower-case `resource:action` permissions; an invalid entry throws `invalid permission entry: <name>`, a name registered twice (case-insensitive, also a host entry named like a users-plugin one) fails startup with `permission already registered: <name>`. The list order is every `cli` entry, then every `host` entry, each in registration order. The catalog is for choosing: CLI tokens and groups still accept any permission string.
 - **`GET /api/v1/qcli/permissions`** (users plugin): the catalog entries the caller holds (what they may put on a token); `?all=true` needs `users:read` (`403 permission denied: users:read`); other `all` values → 400.
 - **Token audience.** API tokens carry `audience`, `cli` (default, unchanged behaviour) or `host`, in every token view after `lastUsedAt`. `POST /tokens` accepts `audience: "cli"` only (`"host"` → 400 `host tokens can only be created by the host application`, other values → 400 `audience must be cli or host`). Stored tokens without an audience read as `cli`; any stored value other than `cli` reads as `host` (fail closed). Custom `ICliApiTokenStore`s must persist the field.

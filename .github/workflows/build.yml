@@ -51,6 +51,8 @@ jobs:
           cd ../jobs && npx tsc
           cd ../audit && npx tsc
           cd ../users && npx tsc
+          cd ../public-api && npx tsc
+          cd ../docs && npx tsc
           cd ../data-explorer && npx tsc
           cd ../data-explorer-sql && npx tsc
           cd ../data-explorer-mongo && npx tsc
@@ -60,6 +62,7 @@ jobs:
           cd ../data-explorer-redis && npx tsc
           cd ../data-explorer-elasticsearch && npx tsc
           cd ../admin && npx tsc
+          cd ../portal && npm install && npx tsc
           cd ../aws && npx tsc
 
       - name: Build
