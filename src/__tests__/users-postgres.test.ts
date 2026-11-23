@@ -3,18 +3,22 @@ import request from 'supertest';
 import { Pool } from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { CliUsersBuilder } from '../../plugins/users/index';
-import { createPostgresUsersStores, runPostgresMigrations } from '../../plugins/users-postgres';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { createPostgresUsersStores } from '../../plugins/users-postgres/index';
 
 /** Runs when QCLI_TEST_POSTGRES holds a connection string to an empty database the tests may wipe. */
 const url = process.env.QCLI_TEST_POSTGRES;
-const PREFIX = 'qcli_it_';
-const TABLES = ['users', 'groups', 'credentials', 'sessions', 'api_tokens', 'audit', 'schema_migrations'].map((t) => PREFIX + t);
+const PREFIX = 'QcliIt';
+const TABLES = ['Users', 'Groups', 'Credentials', 'Sessions', 'ApiTokens', 'AuditEntries', 'Migrations', 'MigrationRuns'].map((t) => `"${PREFIX}${t}"`);
+/** The first version's tables (never on npm, live on plugins.qodalis.com). */
+const V1 = ['qcli_users', 'qcli_groups', 'qcli_credentials', 'qcli_sessions', 'qcli_api_tokens', 'qcli_audit', 'qcli_schema_migrations'];
 const BASE = '/api/v1/qcli';
 const ROOT_PASS = 'root-pass-1234';
 
 describe.skipIf(!url)('users plugin on PostgreSQL', () => {
     const pool = new Pool({ connectionString: url });
-    const drop = () => pool.query(`DROP TABLE IF EXISTS ${TABLES.join(', ')}, it_orders, it_orders_migrations`);
+    const drop = () => pool.query(`DROP TABLE IF EXISTS ${TABLES.join(', ')}, ${V1.join(', ')}`);
 
     beforeEach(drop);
     afterAll(async () => {
@@ -73,29 +77,37 @@ describe.skipIf(!url)('users plugin on PostgreSQL', () => {
         second.plugin.dispose();
     });
 
-    it('applies the schema migrations once, and refuses a database migrated by a newer version', async () => {
+    it('applies the schema once, also when two servers start together, recorded as qcli-users', async () => {
         const stores = createPostgresUsersStores(pool, { tablePrefix: PREFIX });
-        await Promise.all([stores.init(), stores.init()]); // two servers starting together
-        const { rows } = await pool.query(`SELECT id, name FROM ${PREFIX}schema_migrations`);
-        expect(rows).toHaveLength(1);
+        await Promise.all([stores.init(), stores.init()]);
+        const { rows } = await pool.query(`SELECT "Source", "Id" FROM "${PREFIX}Migrations"`);
+        expect(rows).toEqual([{ Source: 'qcli-users', Id: '1' }]);
         await stores.init();
-        await pool.query(`INSERT INTO ${PREFIX}schema_migrations (id, name) VALUES (99, 'from the future')`);
-        await expect(stores.init()).rejects.toThrow(/migrations this version does not know \(99\)/);
+        const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_name LIKE '${PREFIX}%' ORDER BY table_name`);
+        expect(tables.rows.map((r) => r.table_name)).toEqual(
+            ['ApiTokens', 'AuditEntries', 'Credentials', 'Groups', 'MigrationRuns', 'Migrations', 'Sessions', 'Users'].map((t) => PREFIX + t),
+        );
     });
 
-    it('runs a host\'s own migrations in order, each once, and rolls back a failing one', async () => {
-        const migrations = [
-            { id: 2, name: 'orders.created_at', up: 'ALTER TABLE it_orders ADD COLUMN created_at bigint NOT NULL DEFAULT 0' },
-            { id: 1, name: 'create orders', up: 'CREATE TABLE it_orders (id text PRIMARY KEY)' },
-        ];
-        expect(await runPostgresMigrations(pool, 'it_orders_migrations', migrations)).toEqual([1, 2]);
-        expect(await runPostgresMigrations(pool, 'it_orders_migrations', migrations)).toEqual([]);
-        await expect(
-            runPostgresMigrations(pool, 'it_orders_migrations', [...migrations, { id: 3, name: 'broken', up: 'ALTER TABLE nope ADD COLUMN x int' }]),
-        ).rejects.toThrow(/migration 3 \(broken\) failed/);
-        const { rows } = await pool.query('SELECT id FROM it_orders_migrations ORDER BY id');
-        expect(rows.map((r) => r.id)).toEqual([1, 2]);
-        await expect(runPostgresMigrations(pool, 'it_orders_migrations', [migrations[1], migrations[1]])).rejects.toThrow(/duplicate migration id 1/);
+    it('adopts the first version\'s qcli_* tables with their data: renamed tables, columns and indexes', async () => {
+        await pool.query(readFileSync(join(__dirname, 'fixtures/users-postgres-v1.sql'), 'utf8'));
+        await pool.query('CREATE TABLE qcli_schema_migrations (id integer PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())');
+        await pool.query("INSERT INTO qcli_schema_migrations (id, name) VALUES (1, 'users, groups, credentials, sessions, api tokens, audit')");
+        await pool.query(
+            `INSERT INTO qcli_users (id, name, email, groups, created_at, updated_at) VALUES ('u1', 'mo', 'mo@example.com', '["admin"]', 1, 2)`,
+        );
+        await pool.query(`INSERT INTO qcli_audit (id, timestamp, event, username, entry) VALUES ('a1', 5, 'login', 'mo', '{"event":"login"}')`);
+
+        const stores = createPostgresUsersStores(pool, { tablePrefix: PREFIX });
+        await stores.init();
+        expect(await stores.userStore.getUser('mo')).toMatchObject({ id: 'u1', email: 'mo@example.com', groups: ['admin'] });
+        expect(await stores.auditStore.getEntries()).toEqual([{ event: 'login' }]);
+        const left = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'qcli\\_%'`);
+        expect(left.rows).toEqual([]);
+        const indexes = await pool.query(`SELECT indexname FROM pg_indexes WHERE tablename = '${PREFIX}Users' ORDER BY indexname`);
+        expect(indexes.rows.map((r) => r.indexname)).toEqual([`IX_${PREFIX}Users_Email`, `IX_${PREFIX}Users_Name`, `PK_${PREFIX}Users`]);
+        // names stay unique ignoring case after the move
+        await expect(stores.userStore.createUser({ name: 'MO', email: 'x@example.com' })).rejects.toThrow();
     });
 
     it('stores API tokens with audience, permissions and expiry, found by hash', async () => {

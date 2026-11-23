@@ -9,4 +9,3 @@ export {
     PostgresApiTokenStore,
     PostgresAuditStore,
 } from './postgres-users-stores';
-export { PostgresMigration, runPostgresMigrations } from './migrations';
