@@ -3,6 +3,10 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## Unreleased
+
+- **Users in PostgreSQL** (`@qodalis/cli-server-plugin-users-postgres`, new): `createPostgresUsersStores(connectionString | PoolConfig | Pool, { tablePrefix })` returns PostgreSQL stores for users, groups, passwords, sessions, API tokens and the audit log, for `CliUsersBuilder`, so accounts, sign-ins and tokens survive restarts. The schema is created and evolved by versioned migrations (`init()`, history in `qcli_schema_migrations`, applied in order under an advisory lock, refused when the database is newer than the package); `runPostgresMigrations` is exported for hosts' own tables. Behaviour matches the in-memory stores (the same contract tests run against both).
+
 ## 1.0.0-beta.29
 
 - The admin plugin embeds dashboard 1.0.0-beta.26: pick a new token's permissions from the server's list, host tokens marked, and a Requests today column when the server counts API usage. The portal plugin serves `@qodalis/cli-server-portal` 1.0.0-beta.26.

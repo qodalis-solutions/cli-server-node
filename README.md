@@ -252,6 +252,7 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | Package | Description |
 |---|---|
 | [`@qodalis/cli-server-plugin-users`](plugins/users/README.md) | Users, groups, permissions, sessions, API tokens; protects the whole server and adds the audit plugin |
+| [`@qodalis/cli-server-plugin-users-postgres`](plugins/users-postgres/README.md) | PostgreSQL stores for the users plugin (users, groups, passwords, sessions, API tokens, audit), with versioned migrations |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
 | [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
 | [`@qodalis/cli-server-plugin-public-api`](plugins/public-api/README.md) | Your public REST API: a host-token guard with per-account daily and per-minute quotas, usage per token, your OpenAPI document and Swagger UI at `/qcli/api` |

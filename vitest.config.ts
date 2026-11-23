@@ -20,6 +20,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/filesystem-sqlite/index.ts',
             ),
+            '@qodalis/cli-server-plugin-users-postgres': path.resolve(
+                __dirname,
+                'plugins/users-postgres/index.ts',
+            ),
             '@qodalis/cli-server-plugin-filesystem-s3': path.resolve(
                 __dirname,
                 'plugins/filesystem-s3/index.ts',
