@@ -24,6 +24,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/users-postgres/index.ts',
             ),
+            '@qodalis/cli-server-plugin-migrations': path.resolve(
+                __dirname,
+                'plugins/migrations/index.ts',
+            ),
             '@qodalis/cli-server-plugin-filesystem-s3': path.resolve(
                 __dirname,
                 'plugins/filesystem-s3/index.ts',

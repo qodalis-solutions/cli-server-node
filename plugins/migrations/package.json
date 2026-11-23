@@ -1,0 +1,44 @@
+{
+    "name": "@qodalis/cli-server-plugin-migrations",
+    "version": "1.0.0-beta.29",
+    "description": "Database migrations for the Qodalis CLI server: versioned schema changes of PostgreSQL, MySQL, SQL Server and SQLite, applied under a lock, tracked and run from the dashboard, the terminal and the API",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc"
+    },
+    "keywords": [
+        "cli",
+        "qodalis",
+        "migrations",
+        "database",
+        "postgres",
+        "mysql",
+        "sqlserver",
+        "sqlite",
+        "cli-server",
+        "plugin"
+    ],
+    "author": "Nicolae Lupei",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/qodalis-solutions/cli-server-node",
+        "directory": "plugins/migrations"
+    },
+    "dependencies": {
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions"
+    },
+    "peerDependencies": {
+        "express": "^4.18.0"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "typescript": "^5.6.0"
+    }
+}

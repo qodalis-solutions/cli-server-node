@@ -40,7 +40,8 @@ jobs:
 
       - name: Build plugins (filesystem first, then dependents)
         run: |
-          cd plugins/filesystem && npx tsc
+          cd plugins/migrations && npx tsc
+          cd ../filesystem && npx tsc
           cd ../weather && npx tsc
           cd ../filesystem-json && npx tsc
           cd ../filesystem-sqlite && npx tsc
@@ -113,6 +114,7 @@ jobs:
           publish_pkg plugins/jobs
           publish_pkg plugins/audit
           publish_pkg plugins/users
+          publish_pkg plugins/migrations
           publish_pkg plugins/users-postgres
           publish_pkg plugins/admin
           publish_pkg plugins/public-api

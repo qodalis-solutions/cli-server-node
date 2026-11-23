@@ -37,7 +37,8 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
-import { CliDashboardExtension, CliInstalledPlugin, ICliEventBus, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import { CliDashboardExtension, CliInstalledPlugin, ICliEventBus, ICliModule, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -77,6 +78,10 @@ export interface MountablePlugin {
      * fails startup with `invalid route permission: <path>`.
      */
     routePermissions?: CliRoutePermission[];
+    /** Terminal commands the plugin brings, registered with `builder.addModule` when mounted. */
+    module?: ICliModule;
+    /** Permissions the plugin checks, added to the server's catalog (`GET /api/v1/qcli/permissions`) when mounted. */
+    permissions?: CliPermissionInput[];
     /** Pages the plugin adds to the admin dashboard (`builder.addDashboardExtension`), registered when mounted. */
     dashboardExtensions?: CliDashboardExtension[];
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
@@ -496,6 +501,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             return { path, read: r.read, ...(r.write !== undefined ? { write: r.write } : {}) };
         });
         routePermissions.push(...declared);
+        if (plugin.permissions?.length) builder.addPermissions(plugin.permissions, 'cli');
+        if (plugin.module) builder.addModule(plugin.module);
         if (hostRoutes) {
             if (exact.length > 0 || prefixes.length > 0) {
                 const handler = Router();

@@ -19,6 +19,7 @@
             "@qodalis/cli-server-plugin-filesystem-sqlite": ["./plugins/filesystem-sqlite/index.ts"],
             "@qodalis/cli-server-plugin-users": ["./plugins/users/index.ts"],
             "@qodalis/cli-server-plugin-users-postgres": ["./plugins/users-postgres/index.ts"],
+            "@qodalis/cli-server-plugin-migrations": ["./plugins/migrations/index.ts"],
             "@qodalis/cli-server-plugin-filesystem-s3": ["./plugins/filesystem-s3/index.ts"],
             "@qodalis/cli-server-plugin-jobs": ["./plugins/jobs/index.ts"],
             "@qodalis/cli-server-plugin-audit": ["./plugins/audit/index.ts"],
