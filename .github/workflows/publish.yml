@@ -105,6 +105,10 @@ jobs:
             echo "::endgroup::"
           }
 
+          # The migrations plugin embeds the dashboard's Migrations page (prepublishOnly copies it)
+          npm install --no-save --no-package-lock --ignore-scripts --prefix plugins/migrations @qodalis/cli-dashboard-module-migrations
+          (cd plugins/migrations && npm run copy-dashboard && test -f dashboard/extension.js)
+
           publish_pkg packages/abstractions
           publish_pkg plugins/filesystem
           publish_pkg plugins/filesystem-json
