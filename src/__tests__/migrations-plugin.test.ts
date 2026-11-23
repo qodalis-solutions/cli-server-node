@@ -21,9 +21,9 @@ afterEach(() => {
     for (const dispose of disposables.splice(0)) dispose();
 });
 
-function server(options: { applyOnStartup?: boolean; list?: CliMigration[] } = {}) {
+function server(options: { applyOnStartup?: boolean; list?: CliMigration[]; mcp?: boolean } = {}) {
     const db = new Database(':memory:');
-    const cli = createCliServer();
+    const cli = createCliServer(options.mcp ? { mcp: true } : {});
     const audit = new InMemoryAuditStore();
     const plugin = new CliMigrationsBuilder()
         .addDatabase('main', { connection: sqliteConnection(db), applyOnStartup: options.applyOnStartup })
@@ -147,5 +147,34 @@ describe('migrations plugin', () => {
 
         const bad = server({ applyOnStartup: true, list: [{ id: '1', name: 'broken', up: 'CREATE TABLE' }] });
         await expect(bad.plugin.applyOnStartup()).rejects.toThrow(/migrations of main failed: app:1 broken: /);
+    });
+
+    it('serves the migrations_* MCP tools', async () => {
+        const { cli, plugin } = server({ mcp: true });
+        cli.mountPlugin(plugin);
+        let id = 1;
+        const call = async (name: string, args: Record<string, unknown> = {}) =>
+            (
+                await request(cli.app)
+                    .post('/api/qcli/mcp')
+                    .set('Accept', 'application/json, text/event-stream')
+                    .send({ jsonrpc: '2.0', id: id++, method: 'tools/call', params: { name, arguments: args } })
+            ).body.result as { content: Array<{ text: string }>; structuredContent?: Record<string, any>; isError?: boolean };
+
+        const tools = (await request(cli.app).post('/api/qcli/mcp').set('Accept', 'application/json, text/event-stream').send({ jsonrpc: '2.0', id: id++, method: 'tools/list' })).body.result.tools;
+        expect(tools.map((t: { name: string }) => t.name)).toEqual(
+            expect.arrayContaining(['migrations_status', 'migrations_runs', 'migrations_sql', 'migrations_up', 'migrations_down']),
+        );
+
+        expect((await call('migrations_status')).content[0].text).toBe('main (sqlite): 0 applied, 2 pending');
+        expect((await call('migrations_sql', { database: 'main', to: '1' })).content[0].text).toContain('CREATE TABLE "Notes"');
+        const up = await call('migrations_up', { database: 'main' });
+        expect(up.content[0].text).toBe('Applied 2 migration(s) (succeeded)');
+        expect(up.structuredContent).toMatchObject({ trigger: 'mcp', status: 'succeeded' });
+        expect((await call('migrations_status', { database: 'main' })).content[0].text).toMatch(/applied\s+app:2 create tags/);
+        expect((await call('migrations_down', { database: 'main', to: 'base' })).content[0].text).toBe('Rolled back 2 migration(s) (succeeded)');
+        expect((await call('migrations_runs', { database: 'main' })).structuredContent).toMatchObject({ total: 2 });
+        const unknown = await call('migrations_status', { database: 'nope' });
+        expect(unknown).toMatchObject({ isError: true, content: [{ text: 'unknown database: nope' }] });
     });
 });

@@ -6,6 +6,7 @@ import { CliMigrations } from './migrations';
 import { createMigrationsController, MigrationsPermissions } from './controller';
 import { CliMigrationsCommandProcessor } from './commands';
 import { migrationsInstalledPlugin } from './package-info';
+import { MigrationsMcpToolProvider } from './mcp';
 
 export const MIGRATIONS_PREFIX = '/api/v1/qcli/migrations';
 
@@ -25,6 +26,8 @@ export interface CliMigrationsPluginResult {
     /** `migrations:read` and `migrations:run`, added to the server's permission catalog by `mountPlugin`. */
     permissions: Array<{ name: string; description: string; group: string }>;
     installedPlugin: CliInstalledPlugin;
+    /** The `migrations_*` MCP tools, served when the server's MCP endpoint is on. */
+    mcpProviders: MigrationsMcpToolProvider[];
     /** The registered databases: run, status and history from code. */
     migrations: CliMigrations;
     setEventBus(eventBus: ICliEventBus): void;
@@ -109,6 +112,7 @@ export class CliMigrationsBuilder {
             },
             permissions: MIGRATIONS_PERMISSION_ENTRIES,
             installedPlugin: migrationsInstalledPlugin,
+            mcpProviders: [new MigrationsMcpToolProvider(migrations)],
             migrations,
             setEventBus: (bus) => migrations.setEventBus(bus),
             applyOnStartup: async () => {

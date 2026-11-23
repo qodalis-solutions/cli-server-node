@@ -24,4 +24,5 @@ export {
 export { quoteIdent, quoteTable, tableExists, columnExists, renameTable, renameColumn, adoptLegacyTable } from './dialects';
 export { createMigrationsController, MigrationsPermissions } from './controller';
 export { CliMigrationsCommandProcessor } from './commands';
+export { MigrationsMcpToolProvider, MigrationsMcpTool } from './mcp';
 export { migrationsInstalledPlugin, MIGRATIONS_PLUGIN_ID } from './package-info';
