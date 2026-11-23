@@ -14,7 +14,10 @@ export interface CliDashboardExtension {
     titles?: Record<string, string>;
     /** One emoji, or an http(s) or root-relative image URL. */
     icon?: string;
-    /** Navigation group: `overview`, `operations`, `data`, `access`, `system` (default; unknown values become it). */
+    /**
+     * Navigation group: `overview`, `operations`, `data`, `access`, `system` (default; unknown values become it), or
+     * `account`: listed in the dashboard's account menu (the signed-in user's menu) instead of the sidebar.
+     */
     group?: string;
     /** Order within the group (default 100). */
     order?: number;
@@ -39,7 +42,7 @@ export interface CliDashboardExtension {
     search?: string;
 }
 
-export const DASHBOARD_EXTENSION_GROUPS = ['overview', 'operations', 'data', 'access', 'system'] as const;
+export const DASHBOARD_EXTENSION_GROUPS = ['overview', 'operations', 'data', 'access', 'system', 'account'] as const;
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;

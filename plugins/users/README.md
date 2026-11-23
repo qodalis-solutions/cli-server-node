@@ -392,12 +392,23 @@ const usersPlugin = new CliUsersBuilder()
 - **`setReadOnlyGroups()`** (`readOnlyGroups: true`): `POST /groups`, `PUT /groups/{name}` and `DELETE /groups/{name}` answer `501 { "error": "Groups are managed by the host application" }` without calling the store, and the built-in `admin` and `users` groups are not seeded (the host's store provides the groups it needs).
 - Reads keep working. `GET /sessions/current` and the login response (`session`) carry `usersReadOnly` and `groupsReadOnly` (always present, `false` by default) so clients can hide `adduser`, `groupadd` and the like.
 
-## Dashboard page
+## Dashboard pages
 
-The admin dashboard's API tokens page is `@qodalis/cli-dashboard-module-tokens`, copied into this package at build
-(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/tokens/dist`, else the npm
-package) and served at `/qcli/modules/tokens` (outside the API, so the dashboard loads it without a token); it shows for
-users with no permission (each user sees their own tokens). It is registered with the Audit page of the audit plugin this plugin serves; none in guard-only mode. `new CliUsersBuilder().setDashboardDir(dir)` serves another build, `setDashboardDir(false)` leaves the page out.
+The plugin serves three pages of the admin dashboard, copied into this package at build (`npm run copy-dashboard`:
+the sibling `cli-server-dashboard/modules/<name>/dist`, else the npm package) and served outside the API, so the
+dashboard loads them without a token:
+
+- **Users** (users, groups, sessions; `users:read`): `@qodalis/cli-dashboard-module-users`, in `dashboard-users/`,
+  served at `/qcli/modules/users`.
+- **Account** (the signed-in user's profile and password change; every user, in the dashboard's account menu, group
+  `account`): the same build, served again at `/qcli/modules/account`; the module renders the page for this id. When the
+  host application signs users in (`setAuthAdapter`), the page hides the password change.
+- **API tokens** (every user sees their own tokens): `@qodalis/cli-dashboard-module-tokens`, in `dashboard/`, served at
+  `/qcli/modules/tokens`.
+
+They are registered with the Audit page of the audit plugin this plugin serves; none in guard-only mode.
+`new CliUsersBuilder().setUsersDashboardDir(dir)` and `setDashboardDir(dir)` (API tokens) serve another build, `false`
+leaves the pages out.
 
 ## License
 
