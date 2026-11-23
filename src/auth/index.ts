@@ -21,5 +21,6 @@ export {
     normalizePath,
     isCliRoute,
     isUnderPrefix,
+    CliRoutePermission,
 } from './cli-server-auth-gate';
 export { authorizeWsUpgrade, rejectUpgrade, hostTokenRefusal, WsUpgradeAuthOptions, WsUpgradeAuthResult } from './ws-upgrade-auth';
