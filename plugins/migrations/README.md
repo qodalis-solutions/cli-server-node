@@ -70,6 +70,9 @@ Permissions on a protected server: `migrations:read` for reading, `migrations:ru
 `migrations`, `migrations status <db>`, `migrations up <db> [--to <id>] [--dry-run] [--force]`,
 `migrations down <db> --to <id> [--dry-run]`.
 
+With the server's MCP endpoint on, AI clients get `migrations_status`, `migrations_runs`, `migrations_sql`
+(`migrations:read`), `migrations_up` and `migrations_down` (`migrations:run`); their runs are recorded with trigger `mcp`.
+
 ## Helpers for store authors
 
 `tableExists`, `columnExists`, `renameTable`, `renameColumn` and `adoptLegacyTable(db, legacy, table, columns)` (renames a
