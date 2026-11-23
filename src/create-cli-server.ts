@@ -37,7 +37,7 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
-import { CliInstalledPlugin, ICliEventBus, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import { CliDashboardExtension, CliInstalledPlugin, ICliEventBus, installedPluginOf } from '@qodalis/cli-server-abstractions';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -71,6 +71,8 @@ export interface MountablePlugin {
     installedPlugin?: CliInstalledPlugin;
     /** Further packages the plugin brings along and serves (the users plugin: the audit plugin), listed after it. */
     installedPlugins?: CliInstalledPlugin[];
+    /** Pages the plugin adds to the admin dashboard (`builder.addDashboardExtension`), registered when mounted. */
+    dashboardExtensions?: CliDashboardExtension[];
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
     setEventBus?(eventBus: ICliEventBus): void;
     /**
@@ -494,6 +496,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
         for (const bundled of plugin.installedPlugins ?? []) {
             builder.addInstalledPlugin(bundled);
+        }
+        for (const extension of plugin.dashboardExtensions ?? []) {
+            builder.addDashboardExtension(extension);
         }
         plugin.setEventBus?.(eventBus);
         if (!cliRoutes && !hostRoutes) {

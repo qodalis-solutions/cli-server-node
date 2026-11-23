@@ -54,6 +54,11 @@ export interface IBuilderLike {
      * `@qodalis/cli-server-node`), listed by `GET /plugins/installed`.
      */
     readonly installedPlugins?: ReadonlyArray<CliInstalledPlugin>;
+    /**
+     * The dashboard's extension pages (`CliBuilder.dashboardExtensions` of
+     * `@qodalis/cli-server-node`), listed by `GET /dashboard/extensions`.
+     */
+    readonly dashboardExtensions?: ReadonlyArray<object>;
 }
 
 /** The id of a module or command group: its name in lower case, spaces as dashes. */

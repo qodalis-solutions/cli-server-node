@@ -5,6 +5,7 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
 
 ## Unreleased
 
+- **Dashboard extensions** (cli-server-dashboard `docs/extensions.md`): `builder.addDashboardExtension({ id, title, titles?, icon?, group?, order?, permission?, entry, styles?, version? })`, or a mounted plugin's `dashboardExtensions`, adds a page to the admin dashboard, which loads `entry` (an ES module the plugin serves) and mounts it. The admin plugin lists them at `GET /api/v1/qcli/dashboard/extensions` (`{ extensions: [...] }`, registration order, behind the dashboard's sign-in, `Cache-Control: no-cache`). Invalid entries fail startup with `invalid dashboard extension: <reason>`, a repeated id with `dashboard extension already registered: <id>`. `CliDashboardExtension` and `validateDashboardExtension` are in `@qodalis/cli-server-abstractions`.
 - **Users in PostgreSQL** (`@qodalis/cli-server-plugin-users-postgres`, new): `createPostgresUsersStores(connectionString | PoolConfig | Pool, { tablePrefix })` returns PostgreSQL stores for users, groups, passwords, sessions, API tokens and the audit log, for `CliUsersBuilder`, so accounts, sign-ins and tokens survive restarts. The schema is created and evolved by versioned migrations (`init()`, history in `qcli_schema_migrations`, applied in order under an advisory lock, refused when the database is newer than the package); `runPostgresMigrations` is exported for hosts' own tables. Behaviour matches the in-memory stores (the same contract tests run against both).
 
 ## 1.0.0-beta.29
