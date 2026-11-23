@@ -563,7 +563,14 @@ export class CliJobScheduler implements ICliJobScheduler {
             const pageSize = 100;
             interrupted = [];
             for (let offset = 0; ; offset += pageSize) {
-                const page = await this._storage.getExecutions(reg.id, { limit: pageSize, offset, status: 'running' });
+                // With logs: the last entry tells when the run stopped
+                const page = await this.queryExecutions({
+                    jobIds: [reg.id],
+                    status: 'running',
+                    limit: pageSize,
+                    offset,
+                    includeLogs: true,
+                });
                 interrupted.push(...page.items.filter((e) => e.status === 'running'));
                 if (page.items.length < pageSize || offset + pageSize >= page.total) break;
             }

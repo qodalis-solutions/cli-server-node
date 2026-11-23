@@ -24,6 +24,7 @@ export {
     ICliJobStorageProvider,
     JobExecution,
     JobExecutionStatus,
+    JobExecutionSummary,
     JobState,
     JobStatus,
     JobLogEntry,

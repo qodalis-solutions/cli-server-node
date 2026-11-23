@@ -3,14 +3,19 @@ import {
     JobExecution,
     JobExecutionQuery,
     JobExecutionStatus,
+    JobExecutionSummary,
     JobHistoryRetention,
     JobState,
     jobHistoryRuleFor,
     matchesJobExecutionQuery,
     selectRunsBreakingRetention,
+    summarizeJobRuns,
 } from '@qodalis/cli-server-abstractions';
 
-/** Volatile, in-memory storage for job executions and state (lost on restart). */
+/**
+ * Volatile, in-memory storage for job executions and state (lost on restart). Lists return
+ * the executions with their logs (they are in memory already; see `JobExecutionQuery.includeLogs`).
+ */
 export class InMemoryJobStorageProvider implements ICliJobStorageProvider {
     private readonly _executions = new Map<string, JobExecution>();
     /** jobId -> execution IDs in insertion order */
@@ -60,6 +65,15 @@ export class InMemoryJobStorageProvider implements ICliJobStorageProvider {
         const offset = query.offset ?? 0;
         const limit = query.limit ?? 20;
         return { items: matches.slice(offset, offset + limit), total: matches.length };
+    }
+
+    async summarizeExecutions(since: Date, jobIds?: string[]): Promise<JobExecutionSummary[]> {
+        const ids = jobIds ? new Set(jobIds) : undefined;
+        return summarizeJobRuns(
+            Array.from(this._executions.values()).filter(
+                (e) => (!ids || ids.has(e.jobId)) && Date.parse(e.startedAt) >= since.getTime(),
+            ),
+        );
     }
 
     async prune(before: Date): Promise<number> {

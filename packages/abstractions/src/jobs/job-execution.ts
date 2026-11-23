@@ -21,8 +21,16 @@ export interface JobExecution {
     duration?: number;
     /** Error message if the execution failed. */
     error?: string;
-    /** Log entries recorded during execution. */
+    /**
+     * Log entries recorded during execution. A store may leave them out of lists (see
+     * `JobExecutionQuery.includeLogs`); `getExecution` returns a run with its logs.
+     */
     logs: JobLogEntry[];
+    /**
+     * How many log entries the execution has when a list left {@link logs} out; undefined
+     * when `logs` is complete.
+     */
+    logCount?: number;
     /** Zero-based retry attempt number. */
     retryAttempt: number;
     /**

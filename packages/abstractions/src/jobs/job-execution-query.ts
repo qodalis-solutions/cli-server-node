@@ -12,6 +12,11 @@ export interface JobExecutionQuery {
     limit?: number;
     /** Number of executions to skip (default 0). */
     offset?: number;
+    /**
+     * Load each execution's log entries. Lists may leave them out (a database store then
+     * sets `logCount` instead); `getExecution` always returns a run with its logs.
+     */
+    includeLogs?: boolean;
 }
 
 /** Lists one job's executions, newest first: the first `limit` matching `status`. */
