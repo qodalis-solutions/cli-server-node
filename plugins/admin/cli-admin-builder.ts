@@ -274,6 +274,13 @@ export class CliAdminBuilder {
         statusSampler.start();
         router.use('/status', authMiddleware, createStatusController(statusDeps, statusSampler));
 
+        // Pages plugins add to the dashboard (docs/extensions.md of the dashboard); the dashboard
+        // filters them by the user's permissions, each plugin's own API enforces them
+        router.get('/dashboard/extensions', authMiddleware, (_req, res) => {
+            res.setHeader('Cache-Control', 'no-cache');
+            res.json({ extensions: builder.dashboardExtensions ?? [] });
+        });
+
         // Plugins
         router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry, () => builder.installedPlugins ?? []));
 

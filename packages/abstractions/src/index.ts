@@ -79,3 +79,4 @@ export {
     cliEventBusFromBroadcast,
     resolveCliEventBus,
 } from './events';
+export { CliDashboardExtension, DASHBOARD_EXTENSION_GROUPS, validateDashboardExtension } from './dashboard-extension';

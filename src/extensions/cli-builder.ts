@@ -5,7 +5,13 @@ import { IFileStorageProvider, OsFileStorageProvider } from '@qodalis/cli-server
 import { DataExplorerBuilder, DataExplorerProviderFactory } from '@qodalis/cli-server-plugin-data-explorer';
 import { CliCommandRegistry } from '../services';
 import type { McpToolProvider } from '../mcp/mcp-types';
-import { CliInstalledPlugin, installedPluginOf, readInstalledPlugin } from '@qodalis/cli-server-abstractions';
+import {
+    CliDashboardExtension,
+    CliInstalledPlugin,
+    installedPluginOf,
+    readInstalledPlugin,
+    validateDashboardExtension,
+} from '@qodalis/cli-server-abstractions';
 import {
     CliPermissionCatalog,
     CliPermissionInput,
@@ -36,6 +42,7 @@ export class CliBuilder {
     private _dataExplorerBuilder?: DataExplorerBuilder;
     private readonly _mcpToolProviders: McpToolProvider[] = [];
     private readonly _installedPlugins: CliInstalledPlugin[] = [];
+    private readonly _dashboardExtensions: CliDashboardExtension[] = [];
 
     /**
      * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,
@@ -87,6 +94,34 @@ export class CliBuilder {
             this._installedPlugins.push({ ...resolved });
         }
         return this;
+    }
+
+    /**
+     * Adds a page to the admin dashboard: the dashboard lists it in its navigation and loads
+     * `entry` (an ES module the plugin serves) when it is opened. Served by the admin plugin at
+     * `GET /api/v1/qcli/dashboard/extensions`, in registration order. Throws
+     * `invalid dashboard extension: <reason>` or `dashboard extension already registered: <id>`.
+     *
+     * @example
+     * ```ts
+     * builder.addDashboardExtension({
+     *     id: 'billing', title: 'Billing', icon: '💳', group: 'data', permission: 'billing:read',
+     *     entry: '/billing/admin/extension.js', styles: ['/billing/admin/extension.css'],
+     * });
+     * ```
+     */
+    addDashboardExtension(extension: CliDashboardExtension): CliBuilder {
+        const valid = validateDashboardExtension(extension);
+        if (this._dashboardExtensions.some((e) => e.id === valid.id)) {
+            throw new Error(`dashboard extension already registered: ${valid.id}`);
+        }
+        this._dashboardExtensions.push(valid);
+        return this;
+    }
+
+    /** The dashboard extensions registered so far, in registration order. */
+    get dashboardExtensions(): ReadonlyArray<CliDashboardExtension> {
+        return this._dashboardExtensions;
     }
 
     /** The server plugin packages installed so far, the server itself (`Core`) first. */
