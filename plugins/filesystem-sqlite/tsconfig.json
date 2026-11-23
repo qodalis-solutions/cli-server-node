@@ -2,7 +2,9 @@
     "compilerOptions": {
         "target": "ES2022",
         "module": "commonjs",
-        "lib": ["ES2022"],
+        "lib": [
+            "ES2022"
+        ],
         "outDir": "./dist",
         "rootDir": "./",
         "strict": true,
@@ -16,9 +18,22 @@
         "resolveJsonModule": true,
         "baseUrl": ".",
         "paths": {
-            "@qodalis/cli-server-plugin-filesystem": ["../filesystem/dist"]
+            "@qodalis/cli-server-plugin-filesystem": [
+                "../filesystem/dist"
+            ],
+            "@qodalis/cli-server-plugin-migrations": [
+                "../migrations/dist"
+            ],
+            "@qodalis/cli-server-abstractions": [
+                "../../packages/abstractions/dist"
+            ]
         }
     },
-    "include": ["./**/*.ts"],
-    "exclude": ["node_modules", "dist"]
+    "include": [
+        "./**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
 }

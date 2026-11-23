@@ -426,3 +426,57 @@ describe.skipIf(!canRun)('SqliteFileStorageProvider (file-based persistence)', (
         }
     });
 });
+
+describe('SqliteFileStorageProvider table names (Qcli + PascalCase)', () => {
+    const tmp = () => require('path').join(require('os').tmpdir(), `qcli-fs-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+
+    it('upgrades a database of a previous release: files and its columns renamed, the data kept', async () => {
+        const file = tmp();
+        const Database = require('better-sqlite3');
+        const old = new Database(file);
+        old.exec(`CREATE TABLE files (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+            type TEXT NOT NULL CHECK(type IN ('file', 'directory')), content TEXT, size INTEGER NOT NULL DEFAULT 0,
+            permissions TEXT DEFAULT '644', created_at TEXT NOT NULL, modified_at TEXT NOT NULL, parent_path TEXT);
+            CREATE INDEX idx_files_parent ON files(parent_path);`);
+        const now = new Date().toISOString();
+        old.prepare(`INSERT INTO files (path, name, type, size, permissions, created_at, modified_at, parent_path) VALUES ('/', '', 'directory', 0, '755', ?, ?, NULL)`).run(now, now);
+        old.prepare(`INSERT INTO files (path, name, type, content, size, permissions, created_at, modified_at, parent_path) VALUES ('/a.txt', 'a.txt', 'file', 'hello', 5, '644', ?, ?, '/')`).run(now, now);
+        old.close();
+
+        const provider = new SqliteFileStorageProvider({ dbPath: file });
+        expect(await provider.readFile('/a.txt')).toBe('hello');
+        await provider.writeFile('/b.txt', 'world');
+        expect((await provider.list('/')).map((e) => e.name)).toEqual(['a.txt', 'b.txt']);
+
+        const check = new Database(file, { readonly: true });
+        const tables = check.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name").all().map((r: { name: string }) => r.name);
+        expect(tables).toEqual(expect.arrayContaining(['QcliFiles', 'IX_QcliFiles_ParentPath', 'QcliMigrations', 'QcliMigrationRuns']));
+        expect(tables).not.toContain('files');
+        expect(tables).not.toContain('idx_files_parent');
+        expect(check.prepare('PRAGMA table_info("QcliFiles")').all().map((c: { name: string }) => c.name)).toEqual([
+            'Id', 'Path', 'Name', 'Type', 'Content', 'Size', 'Permissions', 'CreatedAt', 'ModifiedAt', 'ParentPath',
+        ]);
+        expect(check.prepare('SELECT "Source", "Id" FROM "QcliMigrations" ORDER BY "Id"').all()).toEqual([
+            { Source: 'qcli-filesystem', Id: '1' },
+            { Source: 'qcli-filesystem', Id: '2' },
+        ]);
+        check.close();
+    });
+
+    it('keeps the old names with legacyTableNames, and takes a custom name', async () => {
+        const legacy = new SqliteFileStorageProvider({ dbPath: ':memory:', legacyTableNames: true });
+        await legacy.writeFile('/x.txt', 'x');
+        expect(await legacy.readFile('/x.txt')).toBe('x');
+        await legacy.connection.session(async (db) => {
+            expect((await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name)).toContain('files');
+        });
+
+        const custom = new SqliteFileStorageProvider({ dbPath: ':memory:', tables: { Files: 'MyFiles' } });
+        await custom.mkdir('/docs');
+        expect(await custom.exists('/docs')).toBe(true);
+        await custom.connection.session(async (db) => {
+            expect((await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name)).toContain('MyFiles');
+        });
+        expect(() => new SqliteFileStorageProvider({ dbPath: ':memory:', tables: { Files: 'x; DROP TABLE y' } })).toThrow('invalid table name');
+    });
+});

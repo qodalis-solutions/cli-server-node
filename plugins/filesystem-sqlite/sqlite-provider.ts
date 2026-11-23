@@ -13,11 +13,83 @@ import {
 } from '@qodalis/cli-server-plugin-filesystem';
 import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-plugin-filesystem';
 import { filesystemSqliteInstalledPlugin } from './package-info';
+import { qcliTableName, type CliTableNameOptions } from '@qodalis/cli-server-abstractions';
+import {
+    CliMigrationRunner,
+    adoptLegacyTable,
+    codeSource,
+    sqliteConnection,
+    tableExists,
+    type CliMigrationSource,
+    type CliSqlConnection,
+} from '@qodalis/cli-server-plugin-migrations';
 
 /** Configuration for the SQLite-backed file storage provider. */
-export interface SqliteProviderOptions {
+export interface SqliteProviderOptions extends Pick<CliTableNameOptions, 'tablePrefix' | 'legacyTableNames'> {
     /** Path to the SQLite database file, or ':memory:' for in-memory operation. */
     dbPath: string;
+    /** The table's name (default `QcliFiles`; the prefix and per-table override follow the plugin table names). */
+    tables?: { Files?: string };
+}
+
+/** The columns of a previous release (`files`), renamed by the first migration. */
+/**
+ * The row as the provider reads it: SQLite matches the columns case-insensitively but names results as declared,
+ * so every column is aliased.
+ */
+const ROW_COLUMNS_OF = (c: Columns) =>
+    `id AS id, path AS path, name AS name, type AS type, content AS content, size AS size, permissions AS permissions, "${c.CreatedAt}" AS created_at, "${c.ModifiedAt}" AS modified_at, "${c.ParentPath}" AS parent_path`;
+
+const LEGACY_COLUMNS = {
+    id: 'Id',
+    path: 'Path',
+    name: 'Name',
+    type: 'Type',
+    content: 'Content',
+    size: 'Size',
+    permissions: 'Permissions',
+    created_at: 'CreatedAt',
+    modified_at: 'ModifiedAt',
+    parent_path: 'ParentPath',
+} as const;
+
+type Columns = { CreatedAt: string; ModifiedAt: string; ParentPath: string };
+
+/** The schema of the files table as migrations (source `qcli-filesystem`); `table` is unquoted. */
+export function filesystemSqliteMigrations(table: string, legacy = false): CliMigrationSource {
+    return codeSource('qcli-filesystem', [
+        {
+            id: '1',
+            name: 'files table',
+            up: async (db) => {
+                if (!legacy) await adoptLegacyTable(db, 'files', table, LEGACY_COLUMNS);
+                if (await tableExists(db, table)) return;
+                const [created, modified, parent] = legacy ? ['created_at', 'modified_at', 'parent_path'] : ['CreatedAt', 'ModifiedAt', 'ParentPath'];
+                const col = (n: string) => (legacy ? n.toLowerCase() : n);
+                await db.exec(`CREATE TABLE "${table}" (
+                    "${col('Id')}" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    "${col('Path')}" TEXT NOT NULL UNIQUE,
+                    "${col('Name')}" TEXT NOT NULL,
+                    "${col('Type')}" TEXT NOT NULL CHECK("${col('Type')}" IN ('file', 'directory')),
+                    "${col('Content')}" TEXT,
+                    "${col('Size')}" INTEGER NOT NULL DEFAULT 0,
+                    "${col('Permissions')}" TEXT DEFAULT '644',
+                    "${created}" TEXT NOT NULL,
+                    "${modified}" TEXT NOT NULL,
+                    "${parent}" TEXT
+                )`);
+            },
+        },
+        {
+            id: '2',
+            name: 'index on the parent path',
+            up: async (db) => {
+                const parent = legacy ? 'parent_path' : 'ParentPath';
+                if (!legacy) await db.exec('DROP INDEX IF EXISTS "idx_files_parent"');
+                await db.exec(`CREATE INDEX IF NOT EXISTS "${legacy ? 'idx_files_parent' : `IX_${table}_ParentPath`}" ON "${table}" ("${parent}")`);
+            },
+        },
+    ]);
 }
 
 /**
@@ -31,6 +103,15 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     readonly name = 'sqlite';
 
     private db: DatabaseType;
+    /** The files table, quoted. */
+    private readonly table: string;
+    private readonly c: Columns;
+    /** Resolves once the schema is migrated and the root exists; every operation waits for it. */
+    readonly ready: Promise<void>;
+    /** The database, for the migrations plugin (`addDatabase('files', { connection })`). */
+    readonly connection: CliSqlConnection;
+    /** The files table's migrations (`qcli-filesystem`), to show them in the migrations plugin. */
+    readonly migrationSource: CliMigrationSource;
 
     constructor(options: SqliteProviderOptions) {
         const dbPath = options.dbPath;
@@ -44,34 +125,28 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
 
         this.db = new Database(dbPath);
         this.db.pragma('journal_mode = WAL');
-        this.initSchema();
-        this.ensureRoot();
-    }
-
-    private initSchema(): void {
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL CHECK(type IN ('file', 'directory')),
-                content TEXT,
-                size INTEGER NOT NULL DEFAULT 0,
-                permissions TEXT DEFAULT '644',
-                created_at TEXT NOT NULL,
-                modified_at TEXT NOT NULL,
-                parent_path TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_path);
-        `);
+        const legacy = options.legacyTableNames === true;
+        const name = qcliTableName('Files', { tablePrefix: options.tablePrefix, tables: options.tables, legacyTableNames: legacy }, 'files');
+        this.table = `"${name}"`;
+        this.c = legacy
+            ? { CreatedAt: 'created_at', ModifiedAt: 'modified_at', ParentPath: 'parent_path' }
+            : { CreatedAt: 'CreatedAt', ModifiedAt: 'ModifiedAt', ParentPath: 'ParentPath' };
+        this.connection = sqliteConnection(this.db);
+        this.migrationSource = filesystemSqliteMigrations(name, legacy);
+        // The schema is versioned: the first start after an upgrade renames `files` and its columns, keeping the data
+        const runner = new CliMigrationRunner('files', { connection: this.connection, tablePrefix: options.tablePrefix }).addSource(this.migrationSource);
+        this.ready = runner.up({ trigger: 'startup', wait: true }).then((run) => {
+            if ('status' in run && run.status === 'failed') throw new Error(`filesystem-sqlite schema: ${run.error}`);
+            this.ensureRoot();
+        });
     }
 
     private ensureRoot(): void {
-        const root = this.db.prepare('SELECT 1 FROM files WHERE path = ?').get('/');
+        const root = this.db.prepare(`SELECT 1 FROM ${this.table} WHERE path = ?`).get('/');
         if (!root) {
             const now = new Date().toISOString();
             this.db.prepare(
-                `INSERT INTO files (path, name, type, size, permissions, created_at, modified_at, parent_path)
+                `INSERT INTO ${this.table} (path, name, type, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             ).run('/', '', 'directory', 0, '755', now, now, null);
         }
@@ -101,10 +176,11 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     private getRow(path: string): FileRow | undefined {
-        return this.db.prepare('SELECT * FROM files WHERE path = ?').get(path) as FileRow | undefined;
+        return this.db.prepare(`SELECT ${ROW_COLUMNS_OF(this.c)} FROM ${this.table} WHERE path = ?`).get(path) as FileRow | undefined;
     }
 
     async list(path: string): Promise<FileEntry[]> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const node = this.getRow(normalized);
 
@@ -117,7 +193,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
         }
 
         const rows = this.db.prepare(
-            'SELECT name, type, size, modified_at, permissions FROM files WHERE parent_path = ? ORDER BY name'
+            `SELECT name AS name, type AS type, size AS size, ${this.c.ModifiedAt} AS modified_at, permissions AS permissions FROM ${this.table} WHERE ${this.c.ParentPath} = ? ORDER BY name`
         ).all(normalized) as FileRow[];
 
         return rows.map((r) => ({
@@ -130,6 +206,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async readFile(path: string): Promise<string> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const node = this.getRow(normalized);
 
@@ -145,6 +222,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async writeFile(path: string, content: string | Buffer): Promise<void> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const parentPath = this.getParentPath(normalized);
         const name = this.getBaseName(normalized);
@@ -169,17 +247,18 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
 
         if (existing) {
             this.db.prepare(
-                'UPDATE files SET content = ?, size = ?, modified_at = ? WHERE path = ?'
+                `UPDATE ${this.table} SET content = ?, size = ?, ${this.c.ModifiedAt} = ? WHERE path = ?`
             ).run(contentStr, size, now, normalized);
         } else {
             this.db.prepare(
-                `INSERT INTO files (path, name, type, content, size, permissions, created_at, modified_at, parent_path)
+                `INSERT INTO ${this.table} (path, name, type, content, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(normalized, name, 'file', contentStr, size, '644', now, now, parentPath);
         }
     }
 
     async stat(path: string): Promise<FileStat> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const node = this.getRow(normalized);
 
@@ -198,6 +277,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async mkdir(path: string, recursive: boolean = false): Promise<void> {
+        await this.ready;
         const normalized = this.normalizePath(path);
 
         if (recursive) {
@@ -218,7 +298,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
 
                 const now = new Date().toISOString();
                 this.db.prepare(
-                    `INSERT INTO files (path, name, type, size, permissions, created_at, modified_at, parent_path)
+                    `INSERT INTO ${this.table} (path, name, type, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
                 ).run(currentPath, part, 'directory', 0, '755', now, now, parentPath);
             }
@@ -242,13 +322,14 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
 
             const now = new Date().toISOString();
             this.db.prepare(
-                `INSERT INTO files (path, name, type, size, permissions, created_at, modified_at, parent_path)
+                `INSERT INTO ${this.table} (path, name, type, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(normalized, name, 'directory', 0, '755', now, now, parentPath);
         }
     }
 
     async remove(path: string, recursive: boolean = false): Promise<void> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const node = this.getRow(normalized);
 
@@ -263,14 +344,15 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
         if (recursive) {
             // Delete the path itself and all children
             this.db.prepare(
-                "DELETE FROM files WHERE path = ? OR path LIKE ? || '/%'"
+                `DELETE FROM ${this.table} WHERE path = ? OR path LIKE ? || '/%'`
             ).run(normalized, normalized);
         } else {
-            this.db.prepare('DELETE FROM files WHERE path = ?').run(normalized);
+            this.db.prepare(`DELETE FROM ${this.table} WHERE path = ?`).run(normalized);
         }
     }
 
     async copy(src: string, dest: string): Promise<void> {
+        await this.ready;
         const normalizedSrc = this.normalizePath(src);
         const normalizedDest = this.normalizePath(dest);
 
@@ -297,19 +379,19 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
         const copyTransaction = this.db.transaction(() => {
             // Remove existing destination if any
             this.db.prepare(
-                "DELETE FROM files WHERE path = ? OR path LIKE ? || '/%'"
+                `DELETE FROM ${this.table} WHERE path = ? OR path LIKE ? || '/%'`
             ).run(normalizedDest, normalizedDest);
 
             // Copy the source node
             this.db.prepare(
-                `INSERT INTO files (path, name, type, content, size, permissions, created_at, modified_at, parent_path)
+                `INSERT INTO ${this.table} (path, name, type, content, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(normalizedDest, destName, srcNode.type, srcNode.content, srcNode.size, srcNode.permissions, now, now, destParentPath);
 
             // If it's a directory, copy all children
             if (srcNode.type === 'directory') {
                 const children = this.db.prepare(
-                    "SELECT * FROM files WHERE path LIKE ? || '/%'"
+                    `SELECT ${ROW_COLUMNS_OF(this.c)} FROM ${this.table} WHERE path LIKE ? || '/%'`
                 ).all(normalizedSrc) as FileRow[];
 
                 for (const child of children) {
@@ -318,7 +400,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
                     const newParentPath = this.getParentPath(newPath);
 
                     this.db.prepare(
-                        `INSERT INTO files (path, name, type, content, size, permissions, created_at, modified_at, parent_path)
+                        `INSERT INTO ${this.table} (path, name, type, content, size, permissions, ${this.c.CreatedAt}, ${this.c.ModifiedAt}, ${this.c.ParentPath})
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
                     ).run(newPath, child.name, child.type, child.content, child.size, child.permissions, now, now, newParentPath);
                 }
@@ -329,6 +411,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async move(src: string, dest: string): Promise<void> {
+        await this.ready;
         const normalizedSrc = this.normalizePath(src);
         const normalizedDest = this.normalizePath(dest);
 
@@ -353,18 +436,18 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
         const moveTransaction = this.db.transaction(() => {
             // Remove existing destination if any
             this.db.prepare(
-                "DELETE FROM files WHERE path = ? OR path LIKE ? || '/%'"
+                `DELETE FROM ${this.table} WHERE path = ? OR path LIKE ? || '/%'`
             ).run(normalizedDest, normalizedDest);
 
             // Update the source node path
             this.db.prepare(
-                'UPDATE files SET path = ?, name = ?, parent_path = ? WHERE path = ?'
+                `UPDATE ${this.table} SET path = ?, name = ?, ${this.c.ParentPath} = ? WHERE path = ?`
             ).run(normalizedDest, destName, destParentPath, normalizedSrc);
 
             // Update all children paths
             if (srcNode.type === 'directory') {
                 const children = this.db.prepare(
-                    "SELECT path FROM files WHERE path LIKE ? || '/%'"
+                    `SELECT path AS path FROM ${this.table} WHERE path LIKE ? || '/%'`
                 ).all(normalizedSrc) as { path: string }[];
 
                 for (const child of children) {
@@ -373,7 +456,7 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
                     const newParentPath = this.getParentPath(newPath);
 
                     this.db.prepare(
-                        'UPDATE files SET path = ?, parent_path = ? WHERE path = ?'
+                        `UPDATE ${this.table} SET path = ?, ${this.c.ParentPath} = ? WHERE path = ?`
                     ).run(newPath, newParentPath, child.path);
                 }
             }
@@ -383,12 +466,14 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async exists(path: string): Promise<boolean> {
+        await this.ready;
         const normalized = this.normalizePath(path);
-        const row = this.db.prepare('SELECT 1 FROM files WHERE path = ?').get(normalized);
+        const row = this.db.prepare(`SELECT 1 FROM ${this.table} WHERE path = ?`).get(normalized);
         return row !== undefined;
     }
 
     async getDownloadStream(path: string): Promise<Readable> {
+        await this.ready;
         const normalized = this.normalizePath(path);
         const node = this.getRow(normalized);
 
@@ -406,11 +491,12 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     }
 
     async uploadFile(path: string, content: Buffer): Promise<void> {
+        await this.ready;
         await this.writeFile(path, content);
     }
 }
 
-/** Raw row shape returned by SQLite queries against the `files` table. */
+/** Raw row shape returned by the provider's queries (aliased to these names). */
 interface FileRow {
     id: number;
     path: string;
