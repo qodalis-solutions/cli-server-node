@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import type { CliDashboardExtension, CliInstalledPlugin, ICliAuditStore, ICliEventBus, ICliModule } from '@qodalis/cli-server-abstractions';
+import type { CliDashboardModulePage, CliInstalledPlugin, ICliAuditStore, ICliEventBus, ICliModule } from '@qodalis/cli-server-abstractions';
 import { CliMigrationRunner, type CliMigrationDatabaseOptions, type CliMigrationRun } from './runner';
 import { codeSource, sqlFolderSource, type CliMigration, type CliMigrationSource } from './sources';
 import { CliDatabases } from './databases';
@@ -7,7 +7,7 @@ import { createDatabasesController, DatabasesPermissions } from './controller';
 import { CliDatabasesCommandProcessor } from './commands';
 import { databasesInstalledPlugin } from './package-info';
 import { DatabasesMcpToolProvider } from './mcp';
-import { DATABASES_DASHBOARD_PREFIX, findDatabasesPage, databasesPage } from './dashboard-page';
+import { databasesDashboardPage } from './dashboard-page';
 
 export const DATABASES_PREFIX = '/api/v1/qcli/databases';
 
@@ -27,10 +27,8 @@ export interface CliDatabasesPluginResult {
     /** `databases:read` and `databases:migrate`, added to the server's permission catalog by `mountPlugin`. */
     permissions: Array<{ name: string; description: string; group: string }>;
     installedPlugin: CliInstalledPlugin;
-    /** The databases page of the admin dashboard (`/qcli/databases`), when its build is there. */
-    dashboardPrefix?: string;
-    dashboardRouter?: Router;
-    dashboardExtensions: CliDashboardExtension[];
+    /** The databases page of the admin dashboard and its Overview cards (`/qcli/databases`), when its build is there. */
+    dashboardPages: CliDashboardModulePage[];
     /** The `databases_*` and `migrations_*` MCP tools, served when the server's MCP endpoint is on. */
     mcpProviders: DatabasesMcpToolProvider[];
     /** The registered databases: stats, migration runs, status and history from code. */
@@ -114,8 +112,7 @@ export class CliDatabasesBuilder {
         }
         databases.setAuditStore(this.auditStore);
         const processor = new CliDatabasesCommandProcessor(databases);
-        const pageDir = this.dashboardDir === false ? undefined : findDatabasesPage(this.dashboardDir);
-        const page = pageDir ? databasesPage(pageDir) : undefined;
+        const page = databasesDashboardPage(this.dashboardDir);
         return {
             prefix: DATABASES_PREFIX,
             router: createDatabasesController(databases),
@@ -130,8 +127,7 @@ export class CliDatabasesBuilder {
             },
             permissions: DATABASES_PERMISSION_ENTRIES,
             installedPlugin: databasesInstalledPlugin,
-            ...(page ? { dashboardPrefix: DATABASES_DASHBOARD_PREFIX, dashboardRouter: page.router } : {}),
-            dashboardExtensions: page ? [page.extension] : [],
+            dashboardPages: page ? [page] : [],
             mcpProviders: [new DatabasesMcpToolProvider(databases)],
             databases,
             setEventBus: (bus) => databases.setEventBus(bus),

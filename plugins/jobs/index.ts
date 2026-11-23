@@ -14,3 +14,4 @@ export {
     JobStatsJob,
     JobStatsResponse,
 } from './cli-jobs-stats';
+export { JOBS_DASHBOARD_MODULE, jobsDashboardPage } from './dashboard-page';

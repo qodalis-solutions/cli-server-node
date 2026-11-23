@@ -392,6 +392,13 @@ const usersPlugin = new CliUsersBuilder()
 - **`setReadOnlyGroups()`** (`readOnlyGroups: true`): `POST /groups`, `PUT /groups/{name}` and `DELETE /groups/{name}` answer `501 { "error": "Groups are managed by the host application" }` without calling the store, and the built-in `admin` and `users` groups are not seeded (the host's store provides the groups it needs).
 - Reads keep working. `GET /sessions/current` and the login response (`session`) carry `usersReadOnly` and `groupsReadOnly` (always present, `false` by default) so clients can hide `adduser`, `groupadd` and the like.
 
+## Dashboard page
+
+The admin dashboard's API tokens page is `@qodalis/cli-dashboard-module-tokens`, copied into this package at build
+(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/tokens/dist`, else the npm
+package) and served at `/qcli/modules/tokens` (outside the API, so the dashboard loads it without a token); it shows for
+users with no permission (each user sees their own tokens). It is registered with the Audit page of the audit plugin this plugin serves; none in guard-only mode. `new CliUsersBuilder().setDashboardDir(dir)` serves another build, `setDashboardDir(false)` leaves the page out.
+
 ## License
 
 MIT

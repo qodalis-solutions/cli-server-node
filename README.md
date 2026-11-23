@@ -310,6 +310,31 @@ sign-in). Every page is listed whatever the caller's permissions; the dashboard 
 may not see and the plugin's own API enforces access. Invalid entries fail startup
 (`invalid dashboard extension: <reason>`, `dashboard extension already registered: <id>`).
 
+Two optional fields: `widgets` (slots the module fills besides its page: `overview`, cards on the dashboard's
+Overview; `palette`, entries of its command palette) and `search` (a path below the page ending where search
+text goes, e.g. `/?q=`: the palette offers "Search <title> for …").
+
+### Pages the plugins bring
+
+The dashboard core holds only the server's own pages; every plugin page is a dashboard module
+(`@qodalis/cli-dashboard-module-<name>`) that the plugin owning its API embeds and serves at
+`/qcli/modules/<id>` (outside the API, so the dashboard loads it without a token):
+
+| Page | Registered by | Permission | Leave it out |
+|---|---|---|---|
+| Jobs (Overview cards, palette entries, search) | jobs plugin | `jobs:read` | `new CliJobsBuilder().setDashboardDir(false)` |
+| Audit (search) | audit plugin (served by the users plugin with the audit plugin it adds) | `audit:read` | `new CliAuditBuilder().setDashboardDir(false)` |
+| API tokens | users plugin (not in guard-only mode) | none: each user sees their own | `new CliUsersBuilder().setDashboardDir(false)` |
+| Filesystem | the server, with a file storage provider | `files:read` | `builder.setDashboardModuleDir('filesystem', false)` |
+| Data explorer | the server, with a data explorer provider | `data:query` | `builder.setDashboardModuleDir('data-explorer', false)` |
+| Databases (Overview cards) | databases plugin (at `/qcli/databases`) | `databases:read` | `new CliDatabasesBuilder().setDashboardDir(false)` |
+
+Each package copies its module's build at build/pack time (`npm run copy-dashboard`: the sibling
+`cli-server-dashboard/modules/<name>/dist`, else the npm package); a package without the build shows no page.
+`setDashboardDir(dir)` / `setDashboardModuleDir(id, dir)` serve another build. A plugin of your own does the same
+with `dashboardModulePage(dir, { id, title, ... })` from `@qodalis/cli-server-abstractions` and returns it in its
+result's `dashboardPages`.
+
 ## Server events
 
 `createCliServer` creates one event bus (`eventBus`). Everything that changes something publishes on it, and the

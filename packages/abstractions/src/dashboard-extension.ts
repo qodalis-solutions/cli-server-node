@@ -26,12 +26,24 @@ export interface CliDashboardExtension {
     styles?: string[];
     /** Shown in the page's error panel. */
     version?: string;
+    /**
+     * Slots the module fills besides its page: `overview` (cards on the dashboard's Overview: stats, panels,
+     * "Needs attention" items), `palette` (entries of the dashboard's command palette, e.g. jump to a job). The
+     * dashboard loads the module there too.
+     */
+    widgets?: string[];
+    /**
+     * A path below the page ending where search text goes (`/?q=`): the command palette offers
+     * "Search <title> for …" and opens `/x/<id><search><text>`.
+     */
+    search?: string;
 }
 
 export const DASHBOARD_EXTENSION_GROUPS = ['overview', 'operations', 'data', 'access', 'system'] as const;
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
+const WIDGET = /^[a-z][a-z0-9-]{0,39}$/;
 
 const invalid = (reason: string) => new Error(`invalid dashboard extension: ${reason}`);
 
@@ -57,7 +69,7 @@ function isIcon(value: unknown): value is string {
  */
 export function validateDashboardExtension(input: CliDashboardExtension): CliDashboardExtension {
     if (!input || typeof input !== 'object') throw invalid('not an object');
-    const { id, title, titles, icon, group, order, permission, entry, styles, version } = input;
+    const { id, title, titles, icon, group, order, permission, entry, styles, version, widgets, search } = input;
     if (typeof id !== 'string' || !ID.test(id)) throw invalid(`id must match ${ID.source}`);
     if (typeof title !== 'string' || title.trim().length === 0 || title.length > 40) throw invalid(`${id}: title must be 1-40 characters`);
     if (typeof entry !== 'string' || !isUrl(entry)) throw invalid(`${id}: entry must be a root-relative path or an http(s) URL`);
@@ -98,6 +110,18 @@ export function validateDashboardExtension(input: CliDashboardExtension): CliDas
     if (version !== undefined) {
         if (typeof version !== 'string' || version.length === 0 || version.length > 50) throw invalid(`${id}: version must be 1-50 characters`);
         out.version = version;
+    }
+    if (widgets !== undefined && widgets !== null) {
+        if (!Array.isArray(widgets) || widgets.length > 10 || !widgets.every((w) => typeof w === 'string' && WIDGET.test(w))) {
+            throw invalid(`${id}: widgets must be at most 10 slot names matching ${WIDGET.source}`);
+        }
+        if (widgets.length > 0) out.widgets = [...new Set(widgets)];
+    }
+    if (search !== undefined && search !== null) {
+        if (typeof search !== 'string' || !search.startsWith('/') || search.startsWith('//') || search.length > 200 || /[\s\u0000-\u001f\u007f]/.test(search)) {
+            throw invalid(`${id}: search must be a path below the page (e.g. /?q=)`);
+        }
+        out.search = search;
     }
     return out;
 }

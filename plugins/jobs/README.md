@@ -202,6 +202,13 @@ const plugin = new CliJobsBuilder()
 
 Besides the required methods, a storage may implement `queryExecutions(query)` (listing across jobs in one query; without it the scheduler merges the per-job listings), `pruneHistory(retention)` (the [history retention](#history-retention): per job, delete the runs past its age or count limits, never a running run or the job's newest run; database storages should delete set-based, e.g. the runs not among the newest N, `selectRunsBreakingRetention` does it for runs held in memory), `prune(before)` (delete the executions started before a date; the history retention falls back to it when `pruneHistory` is missing and every job has an age limit) and `deleteExecution(id)` (used by `discard()`; without it discarded runs are kept). The in-memory storage implements all four.
 
+## Dashboard page
+
+The admin dashboard's Jobs page is `@qodalis/cli-dashboard-module-jobs`, copied into this package at build
+(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/jobs/dist`, else the npm
+package) and served at `/qcli/modules/jobs` (outside the API, so the dashboard loads it without a token); it shows for
+users with `jobs:read`. The page also brings the Overview's job cards (active jobs, runs of the last 24 hours, failing jobs under "Needs attention") and command palette entries (jump to a job, search the jobs). `new CliJobsBuilder().setDashboardDir(dir)` serves another build, `setDashboardDir(false)` leaves the page out.
+
 ## License
 
 MIT

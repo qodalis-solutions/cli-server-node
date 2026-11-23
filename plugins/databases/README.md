@@ -99,7 +99,7 @@ The admin dashboard shows a Databases page (group Data, `databases:read`): the d
 an overview (size, connections, transactions and queries per second over the last minutes, cache hit ratio, largest
 tables), its migrations by status and the runs; with `databases:migrate`, Apply pending / Migrate to here / Roll back
 to here with the SQL each run executes. It is `@qodalis/cli-dashboard-module-databases`, copied into the package at build (`dashboard/`) and served
-at `/qcli/databases`; the plugin registers it as a dashboard extension when mounted. `setDashboardDir(dir)` serves
+at `/qcli/databases`; the plugin registers it as a dashboard extension when mounted, with cards on the dashboard's Overview (`widgets: ["overview"]`). `setDashboardDir(dir)` serves
 another build, `setDashboardDir(false)` leaves the page out.
 
 ## Helpers for store authors

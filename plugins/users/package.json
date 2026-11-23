@@ -6,11 +6,15 @@
     "types": "dist/index.d.ts",
     "files": [
         "dist",
+        "dashboard",
         "LICENSE",
         "README.md"
     ],
     "scripts": {
-        "build": "tsc"
+        "copy-dashboard": "node scripts/copy-dashboard.js",
+        "prebuild": "npm run copy-dashboard",
+        "build": "tsc",
+        "prepublishOnly": "npm run copy-dashboard"
     },
     "keywords": [
         "cli",
@@ -29,6 +33,7 @@
         "directory": "plugins/users"
     },
     "dependencies": {
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions",
         "@qodalis/cli-server-plugin-audit": "file:../audit"
     },
     "peerDependencies": {

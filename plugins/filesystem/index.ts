@@ -13,3 +13,4 @@ export { FileSystemModule } from './filesystem-module';
 // For the provider packages (filesystem-json, -sqlite, -s3), which list themselves as installed plugins
 export { CliInstalledPlugin, CLI_INSTALLED_PLUGIN, readInstalledPlugin } from '@qodalis/cli-server-abstractions';
 export { filesystemInstalledPlugin } from './package-info';
+export { FILESYSTEM_DASHBOARD_MODULE, filesystemDashboardPage } from './dashboard-page';
