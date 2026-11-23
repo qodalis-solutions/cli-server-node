@@ -3,6 +3,8 @@ import path from 'path';
 
 export default defineConfig({
     resolve: {
+        // One copy of each driver, the root's, even when a plugin has its own (after building it): the tests mock them
+        dedupe: ['@elastic/elasticsearch', 'ioredis', 'mssql', 'mysql2', 'pg', 'mongodb', 'better-sqlite3'],
         alias: {
             '@qodalis/cli-server-abstractions': path.resolve(
                 __dirname,
