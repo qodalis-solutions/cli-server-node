@@ -22,6 +22,10 @@ import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { AwsModule } from '@qodalis/cli-server-plugin-aws';
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
+import { CliDatabasesBuilder, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
+import Database from 'better-sqlite3';
+import * as os from 'os';
+import * as path from 'path';
 import { SampleHealthCheckJob } from './sample-health-check-job';
 import { addPublicApi } from './public-api';
 
@@ -324,6 +328,44 @@ mountPlugin(adminPlugin);
 mountPlugin(usersPlugin);
 
 // -----------------------------------------------------------
+// Databases: a demo SQLite database with three migrations, left pending so
+// the dashboard's Databases page and `databases up demo` have work to do.
+// QCLI_DEMO_POSTGRES (a connection string) adds a PostgreSQL database, to see
+// a server's connections and load.
+// -----------------------------------------------------------
+const databasesBuilder = new CliDatabasesBuilder()
+    .addDatabase('demo', {
+        connection: sqliteConnection(new Database(process.env.QCLI_DEMO_DB ?? path.join(os.tmpdir(), 'qcli-demo.sqlite'))),
+    })
+    .addMigrations('demo', 'app', [
+        {
+            id: '0001',
+            name: 'create notes',
+            up: 'CREATE TABLE Notes (Id INTEGER PRIMARY KEY, Title TEXT NOT NULL, CreatedAt TEXT NOT NULL)',
+            down: 'DROP TABLE Notes',
+        },
+        {
+            id: '0002',
+            name: 'create tags',
+            up: 'CREATE TABLE Tags (Id INTEGER PRIMARY KEY, Name TEXT NOT NULL UNIQUE)',
+            down: 'DROP TABLE Tags',
+        },
+        {
+            id: '0003',
+            name: 'index notes by date',
+            up: 'CREATE INDEX IX_Notes_CreatedAt ON Notes (CreatedAt)',
+            down: 'DROP INDEX IX_Notes_CreatedAt',
+        },
+    ]);
+if (process.env.QCLI_DEMO_POSTGRES) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Pool } = require('pg') as typeof import('pg');
+    databasesBuilder.addDatabase('postgres', { connection: postgresConnection(new Pool({ connectionString: process.env.QCLI_DEMO_POSTGRES, max: 4 })) });
+}
+const databasesPlugin = databasesBuilder.build();
+mountPlugin(databasesPlugin);
+
+// -----------------------------------------------------------
 // Public API (host tokens, quotas, OpenAPI + Swagger UI), guides and the portal
 // -----------------------------------------------------------
 addPublicApi({ app, builder, mountPlugin }, usersPlugin);
@@ -337,6 +379,7 @@ const server = app.listen(port, () => {
     console.log(`  Dashboard: http://localhost:${port}/qcli/admin/`);
     console.log(`  Users API: http://localhost:${port}/api/v1/qcli/users`);
     console.log(`  MCP:       http://localhost:${port}/api/qcli/mcp`);
+    console.log(`  Databases: http://localhost:${port}/api/v1/qcli/databases`);
     console.log(`  Portal:    http://localhost:${port}/qcli/portal/`);
     console.log(`  Swagger:   http://localhost:${port}/qcli/api/swagger`);
     console.log(`  Public:    http://localhost:${port}/v1/demo/time (host token, demo:read)`);

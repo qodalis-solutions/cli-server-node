@@ -53,17 +53,17 @@ The provider keeps the files in one table, `QcliFiles` (plugin tables are `Qcli`
 | `ModifiedAt` | `TEXT` | ISO 8601 modification timestamp |
 | `ParentPath` | `TEXT` | Path of the parent directory |
 
-The schema is versioned with `@qodalis/cli-server-plugin-migrations` (source `qcli-filesystem`, history in
+The schema is versioned with `@qodalis/cli-server-plugin-databases` (source `qcli-filesystem`, history in
 `QcliMigrations` of the same database). Opening a database of an earlier release renames its `files` table and
 columns to these names, keeping the data. Options: `tablePrefix` (default `Qcli`), `tables: { Files: 'MyFiles' }`,
 and `legacyTableNames: true` to keep `files` and its snake_case columns. To see and run the table's migrations from
-the dashboard, register the store's database with the migrations plugin:
+the dashboard, register the store's database with the databases plugin:
 `builder.addDatabase('files', { connection: provider.connection }).addSource('files', provider.migrationSource)`.
 
 ## Dependencies
 
 - `better-sqlite3`
-- `@qodalis/cli-server-plugin-migrations`
+- `@qodalis/cli-server-plugin-databases`
 
 ## License
 

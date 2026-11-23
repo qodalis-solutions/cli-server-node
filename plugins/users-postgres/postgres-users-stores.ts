@@ -11,7 +11,7 @@ import {
     tableExists,
     type CliMigrationSource,
     type CliSqlConnection,
-} from '@qodalis/cli-server-plugin-migrations';
+} from '@qodalis/cli-server-plugin-databases';
 import type {
     ApiToken,
     CreateGroupDto,
@@ -50,9 +50,9 @@ export interface PostgresUsersStores {
      * `QcliMigrations`); safe to run on every start, also from several processes at once.
      */
     init(): Promise<void>;
-    /** The database, for the migrations plugin (`addDatabase('users', { connection })`). */
+    /** The database, for the databases plugin (`addDatabase('users', { connection })`). */
     connection: CliSqlConnection;
-    /** The stores' migrations (`qcli-users`), to show and run them from the migrations plugin. */
+    /** The stores' migrations (`qcli-users`), to show and run them from the databases plugin. */
     migrationSource: CliMigrationSource;
     /** Closes the pool when the stores created it. */
     close(): Promise<void>;

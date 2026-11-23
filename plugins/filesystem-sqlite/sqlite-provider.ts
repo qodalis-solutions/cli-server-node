@@ -22,7 +22,7 @@ import {
     tableExists,
     type CliMigrationSource,
     type CliSqlConnection,
-} from '@qodalis/cli-server-plugin-migrations';
+} from '@qodalis/cli-server-plugin-databases';
 
 /** Configuration for the SQLite-backed file storage provider. */
 export interface SqliteProviderOptions extends Pick<CliTableNameOptions, 'tablePrefix' | 'legacyTableNames'> {
@@ -108,9 +108,9 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
     private readonly c: Columns;
     /** Resolves once the schema is migrated and the root exists; every operation waits for it. */
     readonly ready: Promise<void>;
-    /** The database, for the migrations plugin (`addDatabase('files', { connection })`). */
+    /** The database, for the databases plugin (`addDatabase('files', { connection })`). */
     readonly connection: CliSqlConnection;
-    /** The files table's migrations (`qcli-filesystem`), to show them in the migrations plugin. */
+    /** The files table's migrations (`qcli-filesystem`), to show them in the databases plugin. */
     readonly migrationSource: CliMigrationSource;
 
     constructor(options: SqliteProviderOptions) {

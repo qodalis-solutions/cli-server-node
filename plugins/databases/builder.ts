@@ -2,39 +2,39 @@ import type { Router } from 'express';
 import type { CliDashboardExtension, CliInstalledPlugin, ICliAuditStore, ICliEventBus, ICliModule } from '@qodalis/cli-server-abstractions';
 import { CliMigrationRunner, type CliMigrationDatabaseOptions, type CliMigrationRun } from './runner';
 import { codeSource, sqlFolderSource, type CliMigration, type CliMigrationSource } from './sources';
-import { CliMigrations } from './migrations';
-import { createMigrationsController, MigrationsPermissions } from './controller';
-import { CliMigrationsCommandProcessor } from './commands';
-import { migrationsInstalledPlugin } from './package-info';
-import { MigrationsMcpToolProvider } from './mcp';
-import { MIGRATIONS_DASHBOARD_PREFIX, findMigrationsPage, migrationsPage } from './dashboard-page';
+import { CliDatabases } from './databases';
+import { createDatabasesController, DatabasesPermissions } from './controller';
+import { CliDatabasesCommandProcessor } from './commands';
+import { databasesInstalledPlugin } from './package-info';
+import { DatabasesMcpToolProvider } from './mcp';
+import { DATABASES_DASHBOARD_PREFIX, findDatabasesPage, databasesPage } from './dashboard-page';
 
-export const MIGRATIONS_PREFIX = '/api/v1/qcli/migrations';
+export const DATABASES_PREFIX = '/api/v1/qcli/databases';
 
 /** The permissions the plugin adds to the server's catalog. */
-export const MIGRATIONS_PERMISSION_ENTRIES = [
-    { name: MigrationsPermissions.Read, description: 'See database migrations and their runs', group: 'Migrations' },
-    { name: MigrationsPermissions.Run, description: 'Apply and roll back database migrations', group: 'Migrations' },
+export const DATABASES_PERMISSION_ENTRIES = [
+    { name: DatabasesPermissions.Read, description: 'See databases, their stats and migrations', group: 'Databases' },
+    { name: DatabasesPermissions.Migrate, description: 'Apply and roll back database migrations', group: 'Databases' },
 ];
 
-export interface CliMigrationsPluginResult {
-    prefix: typeof MIGRATIONS_PREFIX;
+export interface CliDatabasesPluginResult {
+    prefix: typeof DATABASES_PREFIX;
     router: Router;
-    /** `migrations:read` for GET, `migrations:run` for up and down (enforced on a protected server). */
+    /** `databases:read` for GET, `databases:migrate` for up and down (enforced on a protected server). */
     routePermissions: Array<{ path: string; read: string; write: string }>;
-    /** The `migrations` terminal commands, registered by `mountPlugin`. */
+    /** The `databases` terminal commands, registered by `mountPlugin`. */
     module: ICliModule;
-    /** `migrations:read` and `migrations:run`, added to the server's permission catalog by `mountPlugin`. */
+    /** `databases:read` and `databases:migrate`, added to the server's permission catalog by `mountPlugin`. */
     permissions: Array<{ name: string; description: string; group: string }>;
     installedPlugin: CliInstalledPlugin;
-    /** The migrations page of the admin dashboard (`/qcli/migrations`), when its build is there. */
+    /** The databases page of the admin dashboard (`/qcli/databases`), when its build is there. */
     dashboardPrefix?: string;
     dashboardRouter?: Router;
     dashboardExtensions: CliDashboardExtension[];
-    /** The `migrations_*` MCP tools, served when the server's MCP endpoint is on. */
-    mcpProviders: MigrationsMcpToolProvider[];
-    /** The registered databases: run, status and history from code. */
-    migrations: CliMigrations;
+    /** The `databases_*` and `migrations_*` MCP tools, served when the server's MCP endpoint is on. */
+    mcpProviders: DatabasesMcpToolProvider[];
+    /** The registered databases: stats, migration runs, status and history from code. */
+    databases: CliDatabases;
     setEventBus(eventBus: ICliEventBus): void;
     /**
      * Applies the pending migrations of the databases marked `applyOnStartup`, one after another, waiting for
@@ -44,21 +44,22 @@ export interface CliMigrationsPluginResult {
 }
 
 /**
- * The migrations plugin: versioned schema changes of relational databases (PostgreSQL, MySQL, SQL Server,
- * SQLite), applied under a lock, recorded in `QcliMigrations` / `QcliMigrationRuns`, and shown, run and rolled
- * back from the dashboard, the terminal (`migrations`) and the API at `/api/v1/qcli/migrations`.
+ * The databases plugin: the server's relational databases (PostgreSQL, MySQL, SQL Server, SQLite) with their size,
+ * load and largest tables, and their migrations: versioned schema changes applied under a lock, recorded in
+ * `QcliMigrations` / `QcliMigrationRuns`, and shown, run and rolled back from the dashboard, the terminal
+ * (`databases`), MCP and the API at `/api/v1/qcli/databases`.
  *
  * @example
  * ```ts
- * const migrations = new CliMigrationsBuilder()
+ * const databases = new CliDatabasesBuilder()
  *     .addDatabase('main', { connection: postgresConnection(pool), applyOnStartup: true })
  *     .addSqlFolder('main', './migrations')
  *     .build();
- * await migrations.applyOnStartup();
- * mountPlugin(migrations);
+ * await databases.applyOnStartup();
+ * mountPlugin(databases);
  * ```
  */
-export class CliMigrationsBuilder {
+export class CliDatabasesBuilder {
     private readonly databases: Array<{ name: string; options: CliMigrationDatabaseOptions; sources: CliMigrationSource[] }> = [];
     private auditStore?: ICliAuditStore;
     private dashboardDir?: string | false;
@@ -66,7 +67,7 @@ export class CliMigrationsBuilder {
     /** Registers a database (its name is used in the API, the terminal and the dashboard). */
     addDatabase(name: string, options: CliMigrationDatabaseOptions): this {
         if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error(`invalid database name: ${name}`);
-        if (this.databases.some((d) => d.name === name)) throw new Error(`migration database already added: ${name}`);
+        if (this.databases.some((d) => d.name === name)) throw new Error(`database already added: ${name}`);
         this.databases.push({ name, options, sources: [] });
         return this;
     }
@@ -74,7 +75,7 @@ export class CliMigrationsBuilder {
     /** Adds a source of migrations to a database; sources apply in the order they were added. */
     addSource(database: string, source: CliMigrationSource): this {
         const db = this.databases.find((d) => d.name === database);
-        if (!db) throw new Error(`unknown migration database: ${database}`);
+        if (!db) throw new Error(`unknown database: ${database}`);
         db.sources.push(source);
         return this;
     }
@@ -96,7 +97,7 @@ export class CliMigrationsBuilder {
     }
 
     /**
-     * Where the dashboard's migrations page is (`@qodalis/cli-dashboard-module-migrations`'s build); by default the
+     * Where the dashboard's databases page is (`@qodalis/cli-dashboard-module-databases`'s build); by default the
      * copy next to the plugin, else the installed package. `false` leaves the page out.
      */
     setDashboardDir(dir: string | false): this {
@@ -104,40 +105,40 @@ export class CliMigrationsBuilder {
         return this;
     }
 
-    build(): CliMigrationsPluginResult {
-        const migrations = new CliMigrations();
+    build(): CliDatabasesPluginResult {
+        const databases = new CliDatabases();
         for (const db of this.databases) {
             const runner = new CliMigrationRunner(db.name, db.options);
             for (const source of db.sources) runner.addSource(source);
-            migrations.add(runner);
+            databases.add(runner);
         }
-        migrations.setAuditStore(this.auditStore);
-        const processor = new CliMigrationsCommandProcessor(migrations);
-        const pageDir = this.dashboardDir === false ? undefined : findMigrationsPage(this.dashboardDir);
-        const page = pageDir ? migrationsPage(pageDir) : undefined;
+        databases.setAuditStore(this.auditStore);
+        const processor = new CliDatabasesCommandProcessor(databases);
+        const pageDir = this.dashboardDir === false ? undefined : findDatabasesPage(this.dashboardDir);
+        const page = pageDir ? databasesPage(pageDir) : undefined;
         return {
-            prefix: MIGRATIONS_PREFIX,
-            router: createMigrationsController(migrations),
-            routePermissions: [{ path: MIGRATIONS_PREFIX, read: MigrationsPermissions.Read, write: MigrationsPermissions.Run }],
+            prefix: DATABASES_PREFIX,
+            router: createDatabasesController(databases),
+            routePermissions: [{ path: DATABASES_PREFIX, read: DatabasesPermissions.Read, write: DatabasesPermissions.Migrate }],
             module: {
-                name: 'migrations',
-                version: migrationsInstalledPlugin.version ?? '1.0.0',
-                description: 'Database migrations: status, apply, roll back',
+                name: 'databases',
+                version: databasesInstalledPlugin.version ?? '1.0.0',
+                description: 'Databases: size, load, largest tables and migrations',
                 author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
                 icon: '🗄️',
                 processors: [processor],
             },
-            permissions: MIGRATIONS_PERMISSION_ENTRIES,
-            installedPlugin: migrationsInstalledPlugin,
-            ...(page ? { dashboardPrefix: MIGRATIONS_DASHBOARD_PREFIX, dashboardRouter: page.router } : {}),
+            permissions: DATABASES_PERMISSION_ENTRIES,
+            installedPlugin: databasesInstalledPlugin,
+            ...(page ? { dashboardPrefix: DATABASES_DASHBOARD_PREFIX, dashboardRouter: page.router } : {}),
             dashboardExtensions: page ? [page.extension] : [],
-            mcpProviders: [new MigrationsMcpToolProvider(migrations)],
-            migrations,
-            setEventBus: (bus) => migrations.setEventBus(bus),
+            mcpProviders: [new DatabasesMcpToolProvider(databases)],
+            databases,
+            setEventBus: (bus) => databases.setEventBus(bus),
             applyOnStartup: async () => {
                 const runs: CliMigrationRun[] = [];
                 for (const db of this.databases.filter((d) => d.options.applyOnStartup)) {
-                    const run = await migrations.run(db.name, 'up', { trigger: 'startup', wait: true });
+                    const run = await databases.run(db.name, 'up', { trigger: 'startup', wait: true });
                     runs.push(run);
                     if (run.status === 'failed') throw new Error(`migrations of ${db.name} failed: ${run.error}`);
                 }

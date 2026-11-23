@@ -1,11 +1,11 @@
 import { Router, Request, Response, NextFunction, json } from 'express';
 import { CliMigrationError, type CliMigrationRunOptions } from './runner';
-import type { CliMigrations } from './migrations';
+import type { CliDatabases } from './databases';
 
-/** Permissions of the migrations API (declared as route permissions; a protected server enforces them). */
-export const MigrationsPermissions = {
-    Read: 'migrations:read',
-    Run: 'migrations:run',
+/** Permissions of the databases API (declared as route permissions; a protected server enforces them). */
+export const DatabasesPermissions = {
+    Read: 'databases:read',
+    Migrate: 'databases:migrate',
 } as const;
 
 function callerName(req: Request): string | undefined {
@@ -13,15 +13,16 @@ function callerName(req: Request): string | undefined {
 }
 
 /**
- * `GET /` databases, `GET /:db` migrations, `GET /:db/runs`, `GET /:db/sql` (dry run), `POST /:db/up`,
- * `POST /:db/down`. Errors answer `{ error }`: 404 unknown database or migration, 409 busy or blocked.
+ * `GET /` databases, `GET /:db` one of them, `GET /:db/stats`, `GET /:db/migrations`, `GET /:db/migrations/runs`,
+ * `GET /:db/migrations/sql` (dry run), `POST /:db/migrations/up`, `POST /:db/migrations/down`. Errors answer
+ * `{ error }`: 404 unknown database or migration, 409 busy or blocked.
  */
-export function createMigrationsController(migrations: CliMigrations): Router {
+export function createDatabasesController(databases: CliDatabases): Router {
     const router = Router();
     router.use(json({ limit: '16kb' }));
     const wrap = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
     const runner = (req: Request) => {
-        const db = migrations.database(req.params.db);
+        const db = databases.database(req.params.db);
         if (!db) throw new CliMigrationError(`unknown database: ${req.params.db}`, 404);
         return db;
     };
@@ -32,21 +33,29 @@ export function createMigrationsController(migrations: CliMigrations): Router {
     };
 
     router.get('/', wrap(async (_req, res) => {
-        res.json({ databases: await migrations.overview() });
+        res.json({ databases: await databases.overview() });
     }));
 
     router.get('/:db', wrap(async (req, res) => {
+        res.json(await databases.summary(runner(req)));
+    }));
+
+    router.get('/:db/stats', wrap(async (req, res) => {
+        res.json(await databases.stats(runner(req).name));
+    }));
+
+    router.get('/:db/migrations', wrap(async (req, res) => {
         const db = runner(req);
         res.json({ name: db.name, dialect: db.dialect, sources: db.sourceNames, migrations: await db.status() });
     }));
 
-    router.get('/:db/runs', wrap(async (req, res) => {
+    router.get('/:db/migrations/runs', wrap(async (req, res) => {
         const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
         const page = Math.max(1, Number(req.query.page) || 1);
         res.json(await runner(req).runs(size, (page - 1) * size));
     }));
 
-    router.get('/:db/sql', wrap(async (req, res) => {
+    router.get('/:db/migrations/sql', wrap(async (req, res) => {
         const db = runner(req);
         const direction = req.query.direction === 'down' ? 'down' : 'up';
         const to = text(req.query.to, 'to');
@@ -65,10 +74,10 @@ export function createMigrationsController(migrations: CliMigrations): Router {
                 trigger: 'api',
             };
             if (direction === 'down' && !options.to) throw new CliMigrationError('to is required to roll back (an id, or base for everything)', 400);
-            res.json(await migrations.run(req.params.db, direction, options));
+            res.json(await databases.run(req.params.db, direction, options));
         });
-    router.post('/:db/up', run('up'));
-    router.post('/:db/down', run('down'));
+    router.post('/:db/migrations/up', run('up'));
+    router.post('/:db/migrations/down', run('down'));
 
     router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
         if (err instanceof CliMigrationError) {
