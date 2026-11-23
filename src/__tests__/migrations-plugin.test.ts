@@ -4,6 +4,9 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import Database from 'better-sqlite3';
 import { CliMigrationsBuilder, sqliteConnection, type CliMigration } from '@qodalis/cli-server-plugin-migrations';
 import { createCliServer, CliServerResult } from '../create-cli-server';
@@ -176,5 +179,36 @@ describe('migrations plugin', () => {
         expect((await call('migrations_runs', { database: 'main' })).structuredContent).toMatchObject({ total: 2 });
         const unknown = await call('migrations_status', { database: 'nope' });
         expect(unknown).toMatchObject({ isError: true, content: [{ text: 'unknown database: nope' }] });
+    });
+
+    it("serves the dashboard's migrations page to anyone and registers it, or leaves it out", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-migrations-page-'));
+        fs.writeFileSync(path.join(dir, 'extension.js'), 'export default {};');
+        fs.writeFileSync(path.join(dir, 'extension.css'), '.x{}');
+        disposables.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+        const db = new Database(':memory:');
+        const cli = createCliServer();
+        const users = new CliUsersBuilder().setOptions({ defaultAdminPassword: 'root-pass-123', protectServer: true }).build(cli.eventBus);
+        await users.ready;
+        cli.mountPlugin(users);
+        disposables.push(() => {
+            users.dispose();
+            cli.eventSocketManager.dispose();
+            cli.logSocketManager.dispose();
+            db.close();
+        });
+        const plugin = new CliMigrationsBuilder().addDatabase('main', { connection: sqliteConnection(db) }).setDashboardDir(dir).build();
+        cli.mountPlugin(plugin);
+
+        const [extension] = cli.builder.dashboardExtensions;
+        expect(extension).toMatchObject({ id: 'migrations', group: 'data', permission: 'migrations:read', icon: '🗄️' });
+        expect(extension.titles?.ro).toBe('Migrări');
+        expect(extension.entry).toMatch(/^\/qcli\/migrations\/extension\.js\?v=[0-9a-f]{12}$/);
+        const js = await request(cli.app).get('/qcli/migrations/extension.js');
+        expect(js.status).toBe(200);
+        expect(js.text).toBe('export default {};');
+        expect((await request(cli.app).get(API)).status).toBe(401);
+
+        expect(new CliMigrationsBuilder().setDashboardDir(false).build()).toMatchObject({ dashboardExtensions: [] });
     });
 });

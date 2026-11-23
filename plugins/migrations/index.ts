@@ -25,4 +25,5 @@ export { quoteIdent, quoteTable, tableExists, columnExists, renameTable, renameC
 export { createMigrationsController, MigrationsPermissions } from './controller';
 export { CliMigrationsCommandProcessor } from './commands';
 export { MigrationsMcpToolProvider, MigrationsMcpTool } from './mcp';
+export { MIGRATIONS_DASHBOARD_PREFIX, findMigrationsPage, migrationsPage } from './dashboard-page';
 export { migrationsInstalledPlugin, MIGRATIONS_PLUGIN_ID } from './package-info';
