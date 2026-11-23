@@ -86,6 +86,8 @@ describe('dashboardModulePage', () => {
 
     it('validates and keeps widgets and search', () => {
         const base = { id: 'jobs', title: 'Jobs', entry: '/x.js' };
+        expect(validateDashboardExtension({ ...base, group: 'account' }).group).toBe('account');
+        expect(validateDashboardExtension({ ...base, group: 'elsewhere' }).group).toBe('system');
         expect(validateDashboardExtension({ ...base, widgets: ['overview', 'palette', 'overview'], search: '/?q=' })).toEqual({
             ...base,
             widgets: ['overview', 'palette'],
@@ -128,23 +130,67 @@ describe('dashboard pages of the plugins', () => {
         expect(new CliAuditBuilder().setDashboardDir(false).build().dashboardPages).toEqual([]);
     });
 
-    it("users: API tokens page and the Audit page of the audit plugin it serves; none in guard-only mode", () => {
+    it("users: Users, Account and API tokens pages and the Audit page of the audit plugin it serves; none in guard-only mode", async () => {
         const audit = new CliAuditBuilder().setDashboardDir(build()).build();
-        const users = new CliUsersBuilder().setDashboardDir(build()).setAuditPlugin(audit).build(() => {});
+        const users = new CliUsersBuilder().setUsersDashboardDir(build('export const users = 1;')).setDashboardDir(build()).setAuditPlugin(audit).build(() => {});
         disposables.push(() => users.dispose());
-        expect(users.dashboardPages.map((p) => p.extension.id)).toEqual(['tokens', 'audit']);
-        const tokens = users.dashboardPages[0].extension;
+        expect(users.dashboardPages.map((p) => p.extension.id)).toEqual(['users', 'account', 'tokens', 'audit']);
+        const [usersPage, accountPage, tokensPage] = users.dashboardPages;
+        expect(usersPage.prefix).toBe('/qcli/modules/users');
+        expect(usersPage.extension).toMatchObject({ id: 'users', title: 'Users', icon: '👥', group: 'access', order: 5, permission: 'users:read', search: '/?q=' });
+        expect(usersPage.extension.titles?.ro).toBe('Utilizatori');
+        expect(usersPage.extension.entry).toMatch(/^\/qcli\/modules\/users\/extension\.js\?v=[0-9a-f]{12}$/);
+        expect(TITLES(usersPage.extension)).toEqual(LANGUAGES);
+        expect(accountPage.prefix).toBe('/qcli/modules/account');
+        expect(accountPage.extension).toMatchObject({ id: 'account', title: 'Account', icon: '👤', group: 'account', order: 0 });
+        expect(accountPage.extension.permission).toBeUndefined();
+        expect(accountPage.extension.titles?.ru).toBe('Учётная запись');
+        expect(accountPage.extension.entry).toMatch(/^\/qcli\/modules\/account\/extension\.js\?v=[0-9a-f]{12}$/);
+        expect(accountPage.extension.styles).toEqual([expect.stringMatching(/^\/qcli\/modules\/account\/extension\.css\?v=/)]);
+        expect(TITLES(accountPage.extension)).toEqual(LANGUAGES);
+        // The extensions pass validation as they are (`account` is a known group)
+        expect(validateDashboardExtension(accountPage.extension).group).toBe('account');
+        expect(validateDashboardExtension(usersPage.extension)).toEqual(usersPage.extension);
+        const tokens = tokensPage.extension;
         expect(tokens).toMatchObject({ id: 'tokens', title: 'API tokens', icon: '🔑', group: 'access', order: 10 });
         expect(tokens.permission).toBeUndefined();
         expect(tokens.titles?.ro).toBe('Tokenuri API');
         expect(TITLES(tokens)).toEqual(LANGUAGES);
 
-        const none = new CliUsersBuilder().setDashboardDir(false).setAuditPlugin(new CliAuditBuilder().setDashboardDir(false).build()).build(() => {});
+        // One build served at both prefixes
+        const app = express();
+        for (const page of users.dashboardPages) app.use(page.prefix, page.handler);
+        expect((await request(app).get('/qcli/modules/users/extension.js')).text).toBe('export const users = 1;');
+        expect((await request(app).get('/qcli/modules/account/extension.js')).text).toBe('export const users = 1;');
+        expect((await request(app).get('/qcli/modules/account/assets/logo.svg')).headers['content-type']).toBe('image/svg+xml');
+
+        const none = new CliUsersBuilder()
+            .setUsersDashboardDir(false)
+            .setDashboardDir(false)
+            .setAuditPlugin(new CliAuditBuilder().setDashboardDir(false).build())
+            .build(() => {});
         disposables.push(() => none.dispose());
         expect(none.dashboardPages).toEqual([]);
-        const guard = new CliUsersBuilder().setGuardOnly(true).setDashboardDir(build()).setAuditPlugin(audit).build(() => {});
+        // A folder without a build: no Users or Account page
+        const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-module-'));
+        disposables.push(() => fs.rmSync(empty, { recursive: true, force: true }));
+        const unbuilt = new CliUsersBuilder().setUsersDashboardDir(empty).setDashboardDir(build()).setAuditPlugin(new CliAuditBuilder().setDashboardDir(false).build()).build(() => {});
+        disposables.push(() => unbuilt.dispose());
+        expect(unbuilt.dashboardPages.map((p) => p.extension.id)).toEqual(['tokens']);
+        const guard = new CliUsersBuilder().setGuardOnly(true).setUsersDashboardDir(build()).setDashboardDir(build()).setAuditPlugin(audit).build(() => {});
         disposables.push(() => guard.dispose());
         expect(guard.dashboardPages).toEqual([]);
+    });
+
+    it('users: Users and Account pages also when the host application signs users in', () => {
+        const users = new CliUsersBuilder()
+            .setAuthAdapter(() => null)
+            .setUsersDashboardDir(build())
+            .setDashboardDir(false)
+            .setAuditPlugin(new CliAuditBuilder().setDashboardDir(false).build())
+            .build(() => {});
+        disposables.push(() => users.dispose());
+        expect(users.dashboardPages.map((p) => p.extension.id)).toEqual(['users', 'account']);
     });
 
     it('core: Filesystem and Data explorer pages with their APIs, or none', async () => {
@@ -186,6 +232,7 @@ describe('dashboard pages of the plugins', () => {
         const cli = createCliServer();
         const users = new CliUsersBuilder()
             .setOptions({ defaultAdminPassword: 'root-pass-123', protectServer: true })
+            .setUsersDashboardDir(false)
             .setDashboardDir(false)
             .setAuditPlugin(new CliAuditBuilder().setDashboardDir(false).build())
             .build(cli.eventBus);

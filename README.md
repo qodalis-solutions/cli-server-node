@@ -297,7 +297,7 @@ cli.builder.addDashboardExtension({
     title: 'Billing',
     titles: { de: 'Abrechnung' },
     icon: '💳',
-    group: 'data', // overview, operations, data, access, system
+    group: 'data', // overview, operations, data, access, system; account: in the account menu (the signed-in user's menu) instead of the sidebar
     permission: 'billing:read',
     entry: '/billing/admin/extension.js', // served by your plugin, same origin
     styles: ['/billing/admin/extension.css'],

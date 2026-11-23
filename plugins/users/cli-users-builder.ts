@@ -32,7 +32,7 @@ import { DEFAULT_LINK_APPROVAL_URL, LinkService } from './services/link-service'
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP, USERS_PERMISSION_ENTRIES } from './permissions';
 import { CliInstalledPlugin, usersInstalledPlugin } from './package-info';
-import { tokensDashboardPage } from './dashboard-page';
+import { tokensDashboardPage, usersDashboardPages } from './dashboard-page';
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -58,8 +58,9 @@ export interface UsersPluginResult {
     /** Packages listed among the server's installed plugins with this one (the audit plugin). */
     installedPlugins: CliInstalledPlugin[];
     /**
-     * The admin dashboard's API tokens page (`/qcli/modules/tokens`) and the Audit page of the audit plugin this
-     * plugin serves, when the packages carry their builds; none in guard-only mode.
+     * The admin dashboard's Users and Account pages (`/qcli/modules/users`, `/qcli/modules/account`), API tokens page
+     * (`/qcli/modules/tokens`) and the Audit page of the audit plugin this plugin serves, when the packages carry their
+     * builds; none in guard-only mode.
      */
     dashboardPages: CliDashboardModulePage[];
     apiTokenStore: ICliApiTokenStore;
@@ -119,6 +120,7 @@ export interface UsersPluginResult {
 export class CliUsersBuilder {
     private options: UsersModuleOptions = {};
     private dashboardDir?: string | false;
+    private usersDashboardDir?: string | false;
 
     /** Merge raw options (`UsersModuleOptions`). */
     setOptions(options: UsersModuleOptions): this {
@@ -166,6 +168,16 @@ export class CliUsersBuilder {
      */
     setDashboardDir(dir: string | false): this {
         this.dashboardDir = dir;
+        return this;
+    }
+
+    /**
+     * Where the dashboard's Users and Account pages are (`@qodalis/cli-dashboard-module-users`'s build, served at
+     * `/qcli/modules/users` and `/qcli/modules/account`); by default the copy next to the plugin, else the installed
+     * package. `false` leaves both pages out.
+     */
+    setUsersDashboardDir(dir: string | false): this {
+        this.usersDashboardDir = dir;
         return this;
     }
 
@@ -439,6 +451,7 @@ export class CliUsersBuilder {
 
         const router = Router();
         const tokensPage = guardOnly ? undefined : tokensDashboardPage(this.dashboardDir);
+        const usersPages = guardOnly ? [] : usersDashboardPages(this.usersDashboardDir);
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
         const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
         // Guard-only: the router serves nothing (the managing service serves these routes)
@@ -512,7 +525,7 @@ export class CliUsersBuilder {
             dispose: () => clearInterval(cleanupInterval),
             installedPlugin: usersInstalledPlugin,
             installedPlugins: [auditPlugin.installedPlugin],
-            dashboardPages: guardOnly ? [] : [...(tokensPage ? [tokensPage] : []), ...(auditPlugin.dashboardPages ?? [])],
+            dashboardPages: guardOnly ? [] : [...usersPages, ...(tokensPage ? [tokensPage] : []), ...(auditPlugin.dashboardPages ?? [])],
         };
     }
 }
