@@ -207,7 +207,8 @@ describe('databases plugin', () => {
         const plugin = new CliDatabasesBuilder().addDatabase('main', { connection: sqliteConnection(db) }).setDashboardDir(dir).build();
         cli.mountPlugin(plugin);
 
-        const [extension] = cli.builder.dashboardExtensions;
+        // The users plugin's pages (tokens, audit) are there too when their builds are present
+        const extension = cli.builder.dashboardExtensions.find((e) => e.id === 'databases')!;
         expect(extension).toMatchObject({ id: 'databases', group: 'data', order: 20, permission: 'databases:read', icon: '🗄️', widgets: ['overview'] });
         expect(extension.titles?.ro).toBe('Baze de date');
         expect(extension.entry).toMatch(/^\/qcli\/databases\/extension\.js\?v=[0-9a-f]{12}$/);

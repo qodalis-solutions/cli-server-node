@@ -1,6 +1,6 @@
 import type { ICliAuditStore, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliMigrationError, CliMigrationRunner, type CliMigrationRun, type CliMigrationRunOptions } from './runner';
-import { collectDatabaseStats, databaseSize, type CliDatabaseStats } from './stats';
+import { collectDatabaseStats, databaseSizeOn, type CliDatabaseStats } from './stats';
 
 /** A database in the list (`GET /api/v1/qcli/databases`). */
 export interface CliDatabaseSummary {
@@ -67,8 +67,7 @@ export class CliDatabases {
             sources: db.sourceNames,
         };
         try {
-            const [states, runs, sizeBytes] = await Promise.all([db.status(), db.runs(1, 0), databaseSize(db.connection)]);
-            const last = runs.items[0];
+            const { states, lastRun: last, more: sizeBytes } = await db.overview(databaseSizeOn);
             return {
                 ...base,
                 ...(sizeBytes !== undefined ? { sizeBytes } : {}),

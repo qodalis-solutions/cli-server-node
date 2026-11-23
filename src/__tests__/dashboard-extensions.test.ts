@@ -171,6 +171,7 @@ describe('GET /api/v1/qcli/dashboard/extensions', () => {
         const login = await request(cli.app).post(`${V1}/sessions`).send({ username: 'root', password: 'root-pass-123' });
         const res = await request(cli.app).get(`${V1}/dashboard/extensions`).set('Authorization', `Bearer ${login.body.token}`);
         expect(res.status).toBe(200);
-        expect(res.body.extensions.map((e: CliDashboardExtension) => e.id)).toEqual(['marketplace']);
+        // Besides the users plugin's own pages (tokens, audit) when their builds are present
+        expect(res.body.extensions.map((e: CliDashboardExtension) => e.id)).toContain('marketplace');
     });
 });

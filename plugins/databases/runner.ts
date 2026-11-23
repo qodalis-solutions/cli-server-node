@@ -206,6 +206,19 @@ export class CliMigrationRunner {
         return this.options.connection.session(async (db) => this.statesOf(loaded, await this.history(db), await this.lastFailure(db)));
     }
 
+    /**
+     * The statuses and the last run in one session, with `more` run in the same session (the databases list adds the
+     * size): one connection per database instead of one per query.
+     */
+    async overview<T>(more: (db: CliSqlSession) => Promise<T>): Promise<{ states: CliMigrationState[]; lastRun?: CliMigrationRun; more: T }> {
+        const loaded = await this.load();
+        return this.options.connection.session(async (db) => {
+            const states = this.statesOf(loaded, await this.history(db), await this.lastFailure(db));
+            const lastRun = (await this.runsOn(db, 1, 0)).items[0];
+            return { states, ...(lastRun ? { lastRun } : {}), more: await more(db) };
+        });
+    }
+
     /** The latest runs, newest first. */
     async runs(limit = 20, offset = 0): Promise<{ items: CliMigrationRun[]; total: number }> {
         return this.options.connection.session((db) => this.runsOn(db, limit, offset));

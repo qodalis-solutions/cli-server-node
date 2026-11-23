@@ -157,7 +157,11 @@ export function mssqlConnection(pool: MssqlPool): CliSqlConnection {
     };
 }
 
-/** A SQLite database from a `better-sqlite3` Database (one connection: sessions run one after another). */
+/**
+ * A SQLite database from a `better-sqlite3` Database (one connection: sessions run one after another). When the
+ * handle is shared with other code (e.g. the filesystem-sqlite provider), that code's statements are not queued: a
+ * migration's code step must not await other I/O inside its transaction, or those statements land in it.
+ */
 export function sqliteConnection(db: SqliteDatabase): CliSqlConnection {
     let queue: Promise<unknown> = Promise.resolve();
     const session: CliSqlSession = {

@@ -89,3 +89,4 @@ export {
     resolveDashboardModulePage,
 } from './dashboard-module';
 export * from './table-names';
+export { CliCaller, getCliCaller, runAsCliCaller } from './cli-caller';
