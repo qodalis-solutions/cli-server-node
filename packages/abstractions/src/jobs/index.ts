@@ -5,6 +5,7 @@ export { CliJobOptions, JobOverlapPolicy } from './cli-job-options';
 export {
     ICliJobStorageProvider,
     queryJobExecutions,
+    summarizeJobExecutions,
     pruneJobExecutions,
     deleteJobExecution,
 } from './cli-job-storage-provider';
@@ -15,6 +16,7 @@ export {
     matchesJobExecutionQuery,
     mergeJobExecutions,
 } from './job-execution-query';
+export { JobExecutionSummary, summarizeJobRuns } from './job-execution-summary';
 export { JobState, JobStatus } from './job-state';
 export { JobLogEntry, JobLogLevel } from './log-entry';
 export {

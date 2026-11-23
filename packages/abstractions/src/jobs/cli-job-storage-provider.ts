@@ -1,5 +1,6 @@
 import { JobExecution, JobExecutionStatus } from './job-execution';
 import { JobExecutionQuery, mergeJobExecutions } from './job-execution-query';
+import { JobExecutionSummary, summarizeJobRuns } from './job-execution-summary';
 import { JobState } from './job-state';
 import { JobHistoryRetention } from './job-history-retention';
 
@@ -8,7 +9,8 @@ export interface ICliJobStorageProvider {
     /** Persists or updates a job execution record. */
     saveExecution(execution: JobExecution): Promise<void>;
     /**
-     * Retrieves paginated execution records for a job.
+     * Retrieves paginated execution records for a job. A store may leave the logs out (setting
+     * `logCount`); {@link getExecution} returns a run with its logs.
      * @param jobId - Job identifier.
      * @param options - Pagination and filter options.
      * @returns Paginated result with items and total count.
@@ -23,6 +25,14 @@ export interface ICliJobStorageProvider {
      * per job, which needs `query.jobIds`. Implement it to query the store once.
      */
     queryExecutions?(query: JobExecutionQuery): Promise<{ items: JobExecution[]; total: number }>;
+    /**
+     * Per job and status, how many runs started at or after `since` and when the newest one
+     * started ("last success per job", "runs in the last 24 hours") without loading the runs.
+     * Only the jobs of `jobIds`, or every job. Optional: without it {@link summarizeJobExecutions}
+     * pages through {@link queryJobExecutions} and groups in memory; database stores implement
+     * it with a `GROUP BY`.
+     */
+    summarizeExecutions?(since: Date, jobIds?: string[]): Promise<JobExecutionSummary[]>;
     /**
      * Deletes the executions (and their logs) that started before `before`; returns
      * how many. Run it on a schedule to keep the history bounded. Optional: without
@@ -42,7 +52,7 @@ export interface ICliJobStorageProvider {
      * returns whether it was deleted. Optional: without it every execution is kept.
      */
     deleteExecution?(executionId: string): Promise<boolean>;
-    /** Retrieves a single execution record by ID, or null if not found. */
+    /** Retrieves a single execution record by ID, with its logs, or null if not found. */
     getExecution(executionId: string): Promise<JobExecution | null>;
     /** Persists the current state (active/paused/stopped) for a job. */
     saveJobState(jobId: string, state: JobState): Promise<void>;
@@ -68,6 +78,28 @@ export async function queryJobExecutions(
     return mergeJobExecutions(query, query.jobIds, (jobId, limit, status) =>
         storage.getExecutions(jobId, { limit, offset: 0, status }),
     );
+}
+
+/**
+ * Per job and status, the number of runs started at or after `since` and the start of the
+ * newest one: the storage's own `summarizeExecutions`, else its runs read a page at a time
+ * (without logs) and grouped in memory (which, like {@link queryJobExecutions}, needs
+ * `jobIds` when the storage has no query of its own).
+ */
+export async function summarizeJobExecutions(
+    storage: ICliJobStorageProvider,
+    since: Date,
+    jobIds?: string[],
+): Promise<JobExecutionSummary[]> {
+    if (storage.summarizeExecutions) return storage.summarizeExecutions(since, jobIds);
+    const pageSize = 500;
+    const runs: JobExecution[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+        const page = await queryJobExecutions(storage, { jobIds, since, limit: pageSize, offset });
+        runs.push(...page.items);
+        if (page.items.length < pageSize || offset + page.items.length >= page.total) break;
+    }
+    return summarizeJobRuns(runs);
 }
 
 /** Deletes the executions started before `before` (`storage.prune`); 0 when the storage keeps everything. */

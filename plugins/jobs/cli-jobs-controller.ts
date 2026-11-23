@@ -231,10 +231,13 @@ function actorOf(req: Request): { actor?: string } {
     return name ? { actor: name } : {};
 }
 
-/** An execution in a list: without its logs, with their count and the run's properties. */
+/**
+ * An execution in a list: without its logs, with their count (the store's `logCount` when it
+ * left the logs out) and the run's properties.
+ */
 function toListItem(exec: JobExecution): Omit<JobExecution, 'logs'> & { logCount: number } {
-    const { logs, ...rest } = exec;
-    return { ...rest, properties: exec.properties ?? {}, logCount: logs?.length ?? 0 };
+    const { logs, logCount, ...rest } = exec;
+    return { ...rest, properties: exec.properties ?? {}, logCount: logCount ?? logs?.length ?? 0 };
 }
 
 /**
