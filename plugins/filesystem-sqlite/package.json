@@ -31,7 +31,7 @@
     "dependencies": {
         "@qodalis/cli-server-abstractions": "^1.0.0-beta.29",
         "@qodalis/cli-server-plugin-filesystem": "^1.0.0-beta.2",
-        "@qodalis/cli-server-plugin-migrations": "^1.0.0-beta.29",
+        "@qodalis/cli-server-plugin-databases": "^1.0.0-beta.29",
         "better-sqlite3": "^13.0.3"
     },
     "devDependencies": {

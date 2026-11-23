@@ -54,7 +54,7 @@ jobs:
 
       - name: Build plugins
         run: |
-          cd plugins/migrations && npx tsc
+          cd plugins/databases && npx tsc
           cd ../filesystem && npx tsc
           cd ../weather && npx tsc
           cd ../filesystem-json && npx tsc

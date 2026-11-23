@@ -49,7 +49,7 @@ Times are epoch milliseconds (`bigint`), as in the users plugin's models.
 
 ## Migrations
 
-The schema is the migration source `qcli-users` of the [migrations plugin](../migrations/README.md): `init()` applies
+The schema is the migration source `qcli-users` of the [databases plugin](../databases/README.md): `init()` applies
 what the database does not have yet, under the plugin's lock, recording it in `QcliMigrations` /
 `QcliMigrationRuns`. A database with tables of the first preview (`qcli_users`, ...) is adopted by the first
 migration: tables, columns and indexes are renamed and the data kept.
@@ -58,7 +58,7 @@ To see and run the users schema from the dashboard and the terminal, register it
 plugin:
 
 ```ts
-const migrations = new CliMigrationsBuilder()
+const migrations = new CliDatabasesBuilder()
     .addDatabase('users', { connection: stores.connection })
     .addSource('users', stores.migrationSource)
     .build();

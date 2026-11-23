@@ -40,7 +40,7 @@ jobs:
 
       - name: Build plugins (filesystem first, then dependents)
         run: |
-          cd plugins/migrations && npx tsc
+          cd plugins/databases && npx tsc
           cd ../filesystem && npx tsc
           cd ../weather && npx tsc
           cd ../filesystem-json && npx tsc
@@ -105,9 +105,9 @@ jobs:
             echo "::endgroup::"
           }
 
-          # The migrations plugin embeds the dashboard's Migrations page (prepublishOnly copies it)
-          npm install --no-save --no-package-lock --ignore-scripts --prefix plugins/migrations @qodalis/cli-dashboard-module-migrations
-          (cd plugins/migrations && npm run copy-dashboard && test -f dashboard/extension.js)
+          # The databases plugin embeds the dashboard's Databases page (prepublishOnly copies it)
+          npm install --no-save --no-package-lock --ignore-scripts --prefix plugins/databases @qodalis/cli-dashboard-module-databases
+          (cd plugins/databases && npm run copy-dashboard && test -f dashboard/extension.js)
 
           publish_pkg packages/abstractions
           publish_pkg plugins/filesystem
@@ -118,7 +118,7 @@ jobs:
           publish_pkg plugins/jobs
           publish_pkg plugins/audit
           publish_pkg plugins/users
-          publish_pkg plugins/migrations
+          publish_pkg plugins/databases
           publish_pkg plugins/users-postgres
           publish_pkg plugins/admin
           publish_pkg plugins/public-api

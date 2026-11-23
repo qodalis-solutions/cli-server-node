@@ -112,6 +112,11 @@ export class CliMigrationRunner {
         return this.options.connection.dialect;
     }
 
+    /** The database's connection (stats run on it too). */
+    get connection(): CliSqlConnection {
+        return this.options.connection;
+    }
+
     /** Adds a source; sources apply in the order they were added. */
     addSource(source: CliMigrationSource): this {
         if (this.sources.some((s) => s.name === source.name)) throw new Error(`migration source already added to ${this.name}: ${source.name}`);

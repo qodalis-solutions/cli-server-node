@@ -30,7 +30,7 @@
     },
     "dependencies": {
         "@qodalis/cli-server-abstractions": "^1.0.0-beta.29",
-        "@qodalis/cli-server-plugin-migrations": "^1.0.0-beta.29",
+        "@qodalis/cli-server-plugin-databases": "^1.0.0-beta.29",
         "@qodalis/cli-server-plugin-users": "^1.0.0-beta.29",
         "pg": "^8.13.0"
     },

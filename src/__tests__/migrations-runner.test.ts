@@ -22,9 +22,11 @@ import {
     mysqlConnection,
     mssqlConnection,
     sqliteConnection,
+    collectDatabaseStats,
+    databaseSize,
     type CliSqlConnection,
     type CliMigrationRun,
-} from '@qodalis/cli-server-plugin-migrations';
+} from '@qodalis/cli-server-plugin-databases';
 
 interface Target {
     name: string;
@@ -115,6 +117,42 @@ describe.each(targets)('migrations runner on $name', (target) => {
                 .catch(() => undefined);
             await close();
         }
+    });
+
+    it('collects the stats: version, size, largest tables and, on servers, connections and counters', async () => {
+        const { connection, prefix, runner } = await setup();
+        const t = `${prefix}S`;
+        const insert = {
+            postgres: `INSERT INTO "${t}" ("Id") VALUES (1), (2), (3)`,
+            sqlite: `INSERT INTO "${t}" ("Id") VALUES (1), (2), (3)`,
+            mysql: `INSERT INTO \`${t}\` (\`Id\`) VALUES (1), (2), (3)`,
+            mssql: `INSERT INTO [${t}] ([Id]) VALUES (1), (2), (3)`,
+        };
+        await runner([codeSource('app', [{ id: '1', name: 'stats table', up: createTable(t)[connection.dialect] }])]).up();
+        await connection.session((db) => db.exec(insert[connection.dialect]));
+        if (connection.dialect === 'postgres') await connection.session((db) => db.exec(`ANALYZE "${t}"`));
+        if (connection.dialect === 'mysql') await connection.session((db) => db.exec(`ANALYZE TABLE \`${t}\``));
+
+        const stats = await collectDatabaseStats('main', connection);
+        expect(stats).toMatchObject({ name: 'main', dialect: connection.dialect, unavailable: [] });
+        expect(stats.server?.version).toMatch(/\d/);
+        expect(stats.size?.bytes).toBeGreaterThan(0);
+        expect(await databaseSize(connection)).toBeGreaterThan(0);
+        const table = stats.tables?.find((x) => x.name === t);
+        expect(stats.tables!.length).toBeLessThanOrEqual(10);
+        if (connection.dialect === 'sqlite') {
+            expect(table).toMatchObject({ name: t, rows: 3 });
+            expect(stats.connections).toBeUndefined();
+        } else {
+            expect(stats.server?.uptimeSeconds).toBeGreaterThan(0);
+            expect(stats.connections?.open).toBeGreaterThan(0);
+            expect(stats.connections?.max).toBeGreaterThan(0);
+            expect(stats.counters?.transactions ?? stats.counters?.queries).toBeGreaterThan(0);
+            expect(stats.cacheHitRatio).toBeGreaterThanOrEqual(0);
+            expect(stats.cacheHitRatio).toBeLessThanOrEqual(1);
+        }
+        // Small tables can rank below others; it is there when the database has at most 10 tables
+        if (stats.tables!.length < 10) expect(table?.name).toBe(t);
     });
 
     it('applies a folder of SQL files in order, records them and the run, and has nothing to do afterwards', async () => {

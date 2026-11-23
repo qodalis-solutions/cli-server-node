@@ -1,6 +1,6 @@
 /**
- * The migrations plugin on a server: API, route permissions, terminal commands, the run event, the audit entry and
- * the startup apply (SQLite).
+ * The databases plugin on a server: API (list, stats, migrations), route permissions, terminal commands, MCP, the
+ * migration run event, the audit entry and the startup apply (SQLite).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
@@ -8,11 +8,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import Database from 'better-sqlite3';
-import { CliMigrationsBuilder, sqliteConnection, type CliMigration } from '@qodalis/cli-server-plugin-migrations';
+import { CliDatabasesBuilder, sqliteConnection, type CliMigration } from '@qodalis/cli-server-plugin-databases';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, InMemoryAuditStore } from '../../plugins/users/index';
 
-const API = '/api/v1/qcli/migrations';
+const API = '/api/v1/qcli/databases';
 
 const migrations: CliMigration[] = [
     { id: '1', name: 'create notes', up: 'CREATE TABLE "Notes" ("Id" INTEGER PRIMARY KEY)', down: 'DROP TABLE "Notes"' },
@@ -28,7 +28,7 @@ function server(options: { applyOnStartup?: boolean; list?: CliMigration[]; mcp?
     const db = new Database(':memory:');
     const cli = createCliServer(options.mcp ? { mcp: true } : {});
     const audit = new InMemoryAuditStore();
-    const plugin = new CliMigrationsBuilder()
+    const plugin = new CliDatabasesBuilder()
         .addDatabase('main', { connection: sqliteConnection(db), applyOnStartup: options.applyOnStartup })
         .addMigrations('main', 'app', options.list ?? migrations)
         .setAuditStore(audit)
@@ -41,7 +41,7 @@ function server(options: { applyOnStartup?: boolean; list?: CliMigration[]; mcp?
     return { cli, plugin, audit, db };
 }
 
-/** Runs `migrations <sub> <value> --args` as the web terminal sends it (already parsed). */
+/** Runs `databases <sub> <value> --args` as the web terminal sends it (already parsed). */
 async function execute(cli: CliServerResult, line: string) {
     const words = line.split(/\s+/).slice(1);
     const chainCommands: string[] = [];
@@ -57,7 +57,7 @@ async function execute(cli: CliServerResult, line: string) {
             } else {
                 args[w.slice(2)] = true;
             }
-        } else if (positionals.length === 0 && ['status', 'up', 'down'].includes(w) && chainCommands.length === 0) {
+        } else if (positionals.length === 0 && ['list', 'stats', 'migrations', 'up', 'down'].includes(w) && chainCommands.length === 0) {
             chainCommands.push(w);
         } else {
             positionals.push(w);
@@ -65,70 +65,75 @@ async function execute(cli: CliServerResult, line: string) {
     }
     const res = await request(cli.app)
         .post('/api/v1/qcli/execute')
-        .send({ command: 'migrations', chainCommands, value: positionals.join(' ') || undefined, positionals, args, rawCommand: line });
+        .send({ command: 'databases', chainCommands, value: positionals.join(' ') || undefined, positionals, args, rawCommand: line });
     return JSON.stringify(res.body);
 }
 
-describe('migrations plugin', () => {
+describe('databases plugin', () => {
     it('lists, shows, runs and rolls back through the API, publishing the run and auditing it', async () => {
         const { cli, plugin, audit } = server();
         const events: Array<{ type: string; data: Record<string, unknown> }> = [];
-        cli.eventBus.subscribe('migrations:*', (e) => void events.push({ type: e.type, data: e.data }));
+        cli.eventBus.subscribe('databases:*', (e) => void events.push({ type: e.type, data: e.data }));
         cli.mountPlugin(plugin);
 
         const overview = await request(cli.app).get(API);
-        expect(overview.body).toEqual({ databases: [{ name: 'main', dialect: 'sqlite', sources: ['app'], applied: 0, pending: 2, problems: 0 }] });
+        expect(overview.body).toEqual({
+            databases: [{ name: 'main', dialect: 'sqlite', sources: ['app'], sizeBytes: expect.any(Number), applied: 0, pending: 2, problems: 0 }],
+        });
+        expect((await request(cli.app).get(`${API}/main`)).body).toMatchObject({ name: 'main', pending: 2 });
 
-        const detail = await request(cli.app).get(`${API}/main`);
+        const detail = await request(cli.app).get(`${API}/main/migrations`);
         expect(detail.body.migrations.map((m: { id: string; status: string }) => `${m.id}:${m.status}`)).toEqual(['1:pending', '2:pending']);
 
-        const sql = await request(cli.app).get(`${API}/main/sql`).query({ to: '1' });
+        const sql = await request(cli.app).get(`${API}/main/migrations/sql`).query({ to: '1' });
         expect(sql.body.sql).toContain('CREATE TABLE "Notes"');
         expect(sql.body.sql).not.toContain('"Tags"');
 
-        const up = await request(cli.app).post(`${API}/main/up`).send({});
+        const up = await request(cli.app).post(`${API}/main/migrations/up`).send({});
         expect(up.status).toBe(200);
         expect(up.body).toMatchObject({ direction: 'up', status: 'succeeded', trigger: 'api' });
         expect(up.body.applied.map((a: { id: string }) => a.id)).toEqual(['1', '2']);
-        expect(events).toEqual([{ type: 'migrations:run', data: expect.objectContaining({ database: 'main', direction: 'up', status: 'succeeded', count: 2 }) }]);
+        expect(events).toEqual([{ type: 'databases:migration-run', data: expect.objectContaining({ database: 'main', direction: 'up', status: 'succeeded', count: 2 }) }]);
         const entries = await audit.getEntries();
         expect(entries[0]).toMatchObject({ event: 'migrations.up', target: 'database:main', details: 'app:1, app:2' });
 
-        const down = await request(cli.app).post(`${API}/main/down`).send({ to: '1' });
+        const down = await request(cli.app).post(`${API}/main/migrations/down`).send({ to: '1' });
         expect(down.body.applied.map((a: { id: string }) => a.id)).toEqual(['2']);
-        expect((await request(cli.app).post(`${API}/main/down`).send({})).body).toEqual({
+        expect((await request(cli.app).post(`${API}/main/migrations/down`).send({})).body).toEqual({
             error: 'to is required to roll back (an id, or base for everything)',
         });
 
-        const runs = await request(cli.app).get(`${API}/main/runs`);
+        const runs = await request(cli.app).get(`${API}/main/migrations/runs`);
         expect(runs.body.total).toBe(2);
         expect(runs.body.items[0].direction).toBe('down');
         expect((await request(cli.app).get(`${API}/nope`)).status).toBe(404);
-        expect((await request(cli.app).post(`${API}/main/up`).send({ to: 'x'.repeat(300) })).status).toBe(400);
+        expect((await request(cli.app).post(`${API}/main/migrations/up`).send({ to: 'x'.repeat(300) })).status).toBe(400);
     });
 
     it('brings its commands, its permissions and its installed-plugin entry', async () => {
         const { cli, plugin } = server();
         cli.mountPlugin(plugin);
-        expect(cli.builder.permissions.all().map((p) => p.name)).toEqual(expect.arrayContaining(['migrations:read', 'migrations:run']));
-        expect(cli.builder.installedPlugins.map((p) => p.id)).toContain('@qodalis/cli-server-plugin-migrations');
+        expect(cli.builder.permissions.all().map((p) => p.name)).toEqual(expect.arrayContaining(['databases:read', 'databases:migrate']));
+        expect(cli.builder.installedPlugins.map((p) => p.id)).toContain('@qodalis/cli-server-plugin-databases');
 
-        expect(await execute(cli, 'migrations')).toContain('main (sqlite): 0 applied, 2 pending');
-        expect(await execute(cli, 'migrations up --dry-run')).toContain('CREATE TABLE');
-        expect(await execute(cli, 'migrations up main --to 1')).toContain('Applied 1 migration(s) (succeeded)');
-        expect(await execute(cli, 'migrations status main')).toMatch(/applied\s+app:1\s+create notes/);
-        expect(await execute(cli, 'migrations down main')).toContain('--to is required');
-        expect(await execute(cli, 'migrations down main --to base')).toContain('Rolled back 1 migration(s)');
+        expect(await execute(cli, 'databases')).toMatch(/main \(sqlite\) [\d.]+ K?B: 0 applied, 2 pending/);
+        expect(await execute(cli, 'databases list')).toContain('0 applied, 2 pending');
+        expect(await execute(cli, 'databases up --dry-run')).toContain('CREATE TABLE');
+        expect(await execute(cli, 'databases up main --to 1')).toContain('Applied 1 migration(s) (succeeded)');
+        expect(await execute(cli, 'databases migrations main')).toMatch(/applied\s+app:1\s+create notes/);
+        expect(await execute(cli, 'databases stats main')).toMatch(/Largest tables.*Notes/);
+        expect(await execute(cli, 'databases down main')).toContain('--to is required');
+        expect(await execute(cli, 'databases down main --to base')).toContain('Rolled back 1 migration(s)');
     });
 
-    it('on a protected server, reading needs migrations:read and running migrations:run', async () => {
+    it('on a protected server, reading needs databases:read and running databases:migrate', async () => {
         const { cli, plugin } = server();
         const users = new CliUsersBuilder().setOptions({ defaultAdminPassword: 'root-pass-123' }).build(cli.eventBus);
         await users.ready;
         cli.mountPlugin(users);
         cli.mountPlugin(plugin);
         disposables.push(() => users.dispose());
-        await users.groupStore.createGroup({ name: 'viewers', permissions: ['migrations:read'] });
+        await users.groupStore.createGroup({ name: 'viewers', permissions: ['databases:read'] });
         await users.userStore.createUser({ name: 'viewer', email: 'v@example.com', groups: ['viewers'] });
         await users.authService.setPassword((await users.userStore.getUser('viewer'))!.id, 'viewer-pass-123');
         const login = async (username: string, password: string) =>
@@ -138,8 +143,8 @@ describe('migrations plugin', () => {
 
         expect((await request(cli.app).get(API)).status).toBe(401);
         expect((await request(cli.app).get(API).set('Authorization', `Bearer ${viewer}`)).status).toBe(200);
-        expect((await request(cli.app).post(`${API}/main/up`).set('Authorization', `Bearer ${viewer}`).send({})).status).toBe(403);
-        const up = await request(cli.app).post(`${API}/main/up`).set('Authorization', `Bearer ${root}`).send({});
+        expect((await request(cli.app).post(`${API}/main/migrations/up`).set('Authorization', `Bearer ${viewer}`).send({})).status).toBe(403);
+        const up = await request(cli.app).post(`${API}/main/migrations/up`).set('Authorization', `Bearer ${root}`).send({});
         expect(up.body).toMatchObject({ status: 'succeeded', actor: 'root' });
     });
 
@@ -152,7 +157,7 @@ describe('migrations plugin', () => {
         await expect(bad.plugin.applyOnStartup()).rejects.toThrow(/migrations of main failed: app:1 broken: /);
     });
 
-    it('serves the migrations_* MCP tools', async () => {
+    it('serves the databases_* and migrations_* MCP tools', async () => {
         const { cli, plugin } = server({ mcp: true });
         cli.mountPlugin(plugin);
         let id = 1;
@@ -166,10 +171,12 @@ describe('migrations plugin', () => {
 
         const tools = (await request(cli.app).post('/api/qcli/mcp').set('Accept', 'application/json, text/event-stream').send({ jsonrpc: '2.0', id: id++, method: 'tools/list' })).body.result.tools;
         expect(tools.map((t: { name: string }) => t.name)).toEqual(
-            expect.arrayContaining(['migrations_status', 'migrations_runs', 'migrations_sql', 'migrations_up', 'migrations_down']),
+            expect.arrayContaining(['databases_list', 'databases_stats', 'migrations_status', 'migrations_runs', 'migrations_sql', 'migrations_up', 'migrations_down']),
         );
 
         expect((await call('migrations_status')).content[0].text).toBe('main (sqlite): 0 applied, 2 pending');
+        expect((await call('databases_list')).structuredContent).toMatchObject({ databases: [{ name: 'main', pending: 2 }] });
+        expect((await call('databases_stats', { database: 'main' })).structuredContent).toMatchObject({ name: 'main', dialect: 'sqlite', unavailable: [] });
         expect((await call('migrations_sql', { database: 'main', to: '1' })).content[0].text).toContain('CREATE TABLE "Notes"');
         const up = await call('migrations_up', { database: 'main' });
         expect(up.content[0].text).toBe('Applied 2 migration(s) (succeeded)');
@@ -181,8 +188,8 @@ describe('migrations plugin', () => {
         expect(unknown).toMatchObject({ isError: true, content: [{ text: 'unknown database: nope' }] });
     });
 
-    it("serves the dashboard's migrations page to anyone and registers it, or leaves it out", async () => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-migrations-page-'));
+    it("serves the dashboard's databases page to anyone and registers it, or leaves it out", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-databases-page-'));
         fs.writeFileSync(path.join(dir, 'extension.js'), 'export default {};');
         fs.writeFileSync(path.join(dir, 'extension.css'), '.x{}');
         disposables.push(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -197,18 +204,18 @@ describe('migrations plugin', () => {
             cli.logSocketManager.dispose();
             db.close();
         });
-        const plugin = new CliMigrationsBuilder().addDatabase('main', { connection: sqliteConnection(db) }).setDashboardDir(dir).build();
+        const plugin = new CliDatabasesBuilder().addDatabase('main', { connection: sqliteConnection(db) }).setDashboardDir(dir).build();
         cli.mountPlugin(plugin);
 
         const [extension] = cli.builder.dashboardExtensions;
-        expect(extension).toMatchObject({ id: 'migrations', group: 'data', permission: 'migrations:read', icon: '🗄️' });
-        expect(extension.titles?.ro).toBe('Migrări');
-        expect(extension.entry).toMatch(/^\/qcli\/migrations\/extension\.js\?v=[0-9a-f]{12}$/);
-        const js = await request(cli.app).get('/qcli/migrations/extension.js');
+        expect(extension).toMatchObject({ id: 'databases', group: 'data', permission: 'databases:read', icon: '🗄️' });
+        expect(extension.titles?.ro).toBe('Baze de date');
+        expect(extension.entry).toMatch(/^\/qcli\/databases\/extension\.js\?v=[0-9a-f]{12}$/);
+        const js = await request(cli.app).get('/qcli/databases/extension.js');
         expect(js.status).toBe(200);
         expect(js.text).toBe('export default {};');
         expect((await request(cli.app).get(API)).status).toBe(401);
 
-        expect(new CliMigrationsBuilder().setDashboardDir(false).build()).toMatchObject({ dashboardExtensions: [] });
+        expect(new CliDatabasesBuilder().setDashboardDir(false).build()).toMatchObject({ dashboardExtensions: [] });
     });
 });

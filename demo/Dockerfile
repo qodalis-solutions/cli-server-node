@@ -14,6 +14,7 @@ COPY plugins/weather/package.json plugins/weather/
 COPY plugins/jobs/package.json plugins/jobs/
 COPY plugins/audit/package.json plugins/audit/
 COPY plugins/users/package.json plugins/users/
+COPY plugins/databases/package.json plugins/databases/
 COPY plugins/admin/package.json plugins/admin/
 COPY plugins/public-api/package.json plugins/public-api/
 COPY plugins/docs/package.json plugins/docs/
@@ -42,6 +43,7 @@ RUN cd plugins/filesystem && npx tsc \
     && cd ../jobs && npx tsc \
     && cd ../audit && npx tsc \
     && cd ../users && npx tsc \
+    && cd ../migrations && node scripts/copy-dashboard.js && npx tsc \
     && cd ../data-explorer && npx tsc \
     && cd ../data-explorer-sql && npx tsc \
     && cd ../data-explorer-mongo && npx tsc \

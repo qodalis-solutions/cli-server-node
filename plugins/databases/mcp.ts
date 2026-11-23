@@ -1,14 +1,14 @@
 import { CliMigrationError, type CliMigrationRunOptions } from './runner';
-import type { CliMigrations } from './migrations';
-import { MigrationsPermissions } from './controller';
+import type { CliDatabases } from './databases';
+import { DatabasesPermissions } from './controller';
 
 // The server's MCP tool shapes, repeated here so the plugin does not depend on @qodalis/cli-server-node
 // (mountPlugin registers `mcpProviders` with the server's MCP endpoint).
 type PropertySchema = { type: 'string' | 'integer' | 'boolean'; description?: string; default?: unknown };
 type ToolResult = { text: string; structured?: Record<string, unknown>; isError: boolean };
 
-/** An MCP tool of the migrations plugin (structurally the server's `McpTool`). */
-export interface MigrationsMcpTool {
+/** An MCP tool of the databases plugin (structurally the server's `McpTool`). */
+export interface DatabasesMcpTool {
     name: string;
     description: string;
     inputSchema: { type: 'object'; properties: Record<string, PropertySchema>; required: string[]; additionalProperties: false };
@@ -17,7 +17,7 @@ export interface MigrationsMcpTool {
     call(args: Record<string, unknown>, context: { auth?: { userName?: string } }): Promise<ToolResult>;
 }
 
-const schema = (properties: Record<string, PropertySchema>, required: string[] = []): MigrationsMcpTool['inputSchema'] => ({
+const schema = (properties: Record<string, PropertySchema>, required: string[] = []): DatabasesMcpTool['inputSchema'] => ({
     type: 'object',
     properties,
     required,
@@ -26,20 +26,20 @@ const schema = (properties: Record<string, PropertySchema>, required: string[] =
 const json = (value: Record<string, unknown>, text?: string): ToolResult => ({ text: text ?? JSON.stringify(value, null, 2), structured: value, isError: false });
 const error = (message: string): ToolResult => ({ text: message, isError: true });
 
-const dbProp = { database: { type: 'string' as const, description: 'Database name (see migrations_status without one)' } };
+const dbProp = { database: { type: 'string' as const, description: 'Database name (see databases_list)' } };
 const toUp = { type: 'string' as const, description: 'Stop after this migration (id or source:id); omit for all pending' };
 const toDown = { type: 'string' as const, description: 'Roll back to this migration, keeping it (id or source:id), or base for everything' };
 
 /**
- * Migrations tools: `migrations_status`, `migrations_runs`, `migrations_sql` (`migrations:read`),
- * `migrations_up` and `migrations_down` (`migrations:run`).
+ * Databases tools: `databases_list`, `databases_stats`, `migrations_status`, `migrations_runs`, `migrations_sql`
+ * (`databases:read`), `migrations_up` and `migrations_down` (`databases:migrate`).
  */
-export class MigrationsMcpToolProvider {
-    readonly name = 'migrations';
+export class DatabasesMcpToolProvider {
+    readonly name = 'databases';
 
-    constructor(private readonly migrations: CliMigrations) {}
+    constructor(private readonly migrations: CliDatabases) {}
 
-    getTools(): MigrationsMcpTool[] {
+    getTools(): DatabasesMcpTool[] {
         const m = this.migrations;
         const guarded =
             (fn: (args: Record<string, unknown>, actor?: string) => Promise<ToolResult>) =>
@@ -68,10 +68,33 @@ export class MigrationsMcpToolProvider {
 
         return [
             {
+                name: 'databases_list',
+                description: 'The registered databases: dialect, size in bytes, applied / pending / problem migration counts and the last migration run',
+                inputSchema: schema({}),
+                requiredPermissions: [DatabasesPermissions.Read],
+                annotations: { readOnlyHint: true },
+                call: guarded(async () => {
+                    const databases = await m.overview();
+                    const text = databases
+                        .map((d) => `${d.name} (${d.dialect})${d.sizeBytes !== undefined ? ` ${d.sizeBytes} bytes` : ''}: ${d.error ? `error: ${d.error}` : `${d.applied} applied, ${d.pending} pending`}`)
+                        .join('\n');
+                    return json({ databases }, text || 'No databases');
+                }),
+            },
+            {
+                name: 'databases_stats',
+                description:
+                    'Stats of a database: server version and uptime, size (data, indexes, log), connections (active, open, max), cumulative load counters (queries, transactions, rows read/written), cache hit ratio and the 10 largest tables',
+                inputSchema: schema(dbProp, ['database']),
+                requiredPermissions: [DatabasesPermissions.Read],
+                annotations: { readOnlyHint: true },
+                call: guarded(async (args) => json({ ...(await m.stats(runner(args).name)) })),
+            },
+            {
                 name: 'migrations_status',
                 description: 'Without a database: every database with its applied, pending and problem counts. With one: its migrations and their status (applied, pending, changed, missing, failed)',
                 inputSchema: schema(dbProp),
-                requiredPermissions: [MigrationsPermissions.Read],
+                requiredPermissions: [DatabasesPermissions.Read],
                 annotations: { readOnlyHint: true },
                 call: guarded(async (args) => {
                     if (!optional(args.database)) {
@@ -91,7 +114,7 @@ export class MigrationsMcpToolProvider {
                 name: 'migrations_runs',
                 description: 'Run history of a database, newest first: direction, trigger, who, status, error and what each run applied',
                 inputSchema: schema({ ...dbProp, limit: { type: 'integer', description: 'Maximum runs (1-100)', default: 20 } }, ['database']),
-                requiredPermissions: [MigrationsPermissions.Read],
+                requiredPermissions: [DatabasesPermissions.Read],
                 annotations: { readOnlyHint: true },
                 call: guarded(async (args) => {
                     const limit = Math.min(Math.max(Number(args.limit ?? 20) || 20, 1), 100);
@@ -105,7 +128,7 @@ export class MigrationsMcpToolProvider {
                     { ...dbProp, direction: { type: 'string', description: 'up (default) or down' }, to: { type: 'string', description: 'As for migrations_up / migrations_down' } },
                     ['database'],
                 ),
-                requiredPermissions: [MigrationsPermissions.Read],
+                requiredPermissions: [DatabasesPermissions.Read],
                 annotations: { readOnlyHint: true },
                 call: guarded(async (args) => {
                     const db = runner(args);
@@ -123,14 +146,14 @@ export class MigrationsMcpToolProvider {
                 name: 'migrations_up',
                 description: 'Apply the pending migrations of a database (all, or up to one), under its lock; refused while a migration is changed or missing unless force',
                 inputSchema: schema({ ...dbProp, to: toUp, force: { type: 'boolean', description: 'Run although a migration is changed or missing' } }, ['database']),
-                requiredPermissions: [MigrationsPermissions.Run],
+                requiredPermissions: [DatabasesPermissions.Migrate],
                 call: run('up'),
             },
             {
                 name: 'migrations_down',
                 description: 'Roll back the migrations of a database applied after a migration (to), running their down scripts',
                 inputSchema: schema({ ...dbProp, to: toDown, force: { type: 'boolean', description: 'Run although a migration is changed or missing' } }, ['database', 'to']),
-                requiredPermissions: [MigrationsPermissions.Run],
+                requiredPermissions: [DatabasesPermissions.Migrate],
                 annotations: { destructiveHint: true },
                 call: run('down'),
             },

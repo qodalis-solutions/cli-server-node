@@ -1,31 +1,31 @@
 const fs = require('fs');
 const path = require('path');
 
-// The migrations page of the dashboard (@qodalis/cli-dashboard-module-migrations), served at /qcli/migrations
+// The databases page of the dashboard (@qodalis/cli-dashboard-module-databases), served at /qcli/databases
 const dest = path.resolve(__dirname, '..', 'dashboard');
 
 // Start from an empty directory so assets of an older build are not kept
 fs.rmSync(dest, { recursive: true, force: true });
 
 // Source 1: sibling repo (development)
-const devSrc = path.resolve(__dirname, '..', '..', '..', '..', 'cli-server-dashboard', 'modules', 'migrations', 'dist');
+const devSrc = path.resolve(__dirname, '..', '..', '..', '..', 'cli-server-dashboard', 'modules', 'databases', 'dist');
 if (fs.existsSync(path.join(devSrc, 'extension.js'))) {
     fs.cpSync(devSrc, dest, { recursive: true });
-    console.log('Migrations page copied from dev repo');
+    console.log('Databases page copied from dev repo');
     process.exit(0);
 }
 
 // Source 2: npm package
 try {
-    const pkgPath = require.resolve('@qodalis/cli-dashboard-module-migrations/package.json');
+    const pkgPath = require.resolve('@qodalis/cli-dashboard-module-databases/package.json');
     const npmSrc = path.join(path.dirname(pkgPath), 'dist');
     if (fs.existsSync(path.join(npmSrc, 'extension.js'))) {
         fs.cpSync(npmSrc, dest, { recursive: true });
-        console.log('Migrations page copied from npm package');
+        console.log('Databases page copied from npm package');
         process.exit(0);
     }
 } catch {
     // Not installed
 }
 
-console.warn('Warning: the migrations page was not found; the dashboard will not show it');
+console.warn('Warning: the databases page was not found; the dashboard will not show it');
