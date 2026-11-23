@@ -67,6 +67,21 @@ export interface ServerAuthGateOptions {
      * reach the host's own guard. Without it every path counts as a CLI route.
      */
     cliRoutePrefixes?: ReadonlySet<string>;
+    /**
+     * Permissions plugins declare for their routes (`MountablePlugin.routePermissions`): a GET or HEAD under
+     * `path` needs `read`, any other method `write` (default `read`). `mountPlugin` adds them.
+     */
+    routePermissions?: readonly CliRoutePermission[];
+}
+
+/** The permissions a protected server requires under a path (see `MountablePlugin.routePermissions`). */
+export interface CliRoutePermission {
+    /** A path (normalized, e.g. `/api/v1/qcli/migrations`): the route itself and every route below it. */
+    path: string;
+    /** Needed for GET and HEAD. */
+    read: string;
+    /** Needed for every other method (default `read`). */
+    write?: string;
 }
 
 /** True when `path` (normalized) is one of the CLI's own routes (see `cliRoutePrefixes`). */
@@ -131,6 +146,13 @@ export function requiredServerPermissions(method: string, path: string, body: an
     }
     if (path === '/api/v1/qcli/audit' || path.startsWith('/api/v1/qcli/audit/')) {
         return [method === 'GET' ? P.AuditRead : P.AuditClear];
+    }
+    // The longest declared path wins, so a plugin can narrow a route below another's
+    const declared = (options.routePermissions ?? [])
+        .filter((r) => isUnderPrefix(path, r.path))
+        .sort((a, b) => b.path.length - a.path.length)[0];
+    if (declared) {
+        return [method === 'GET' || method === 'HEAD' ? declared.read : (declared.write ?? declared.read)];
     }
     return [];
 }

@@ -19,7 +19,7 @@ import {
     trustedProxyHops,
 } from './auth/cli-server-auth';
 import { DataExplorerCaller } from '@qodalis/cli-server-abstractions';
-import { createServerAuthGate, isUnderPrefix, normalizePath } from './auth/cli-server-auth-gate';
+import { createServerAuthGate, isUnderPrefix, normalizePath, type CliRoutePermission } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
 import {
@@ -71,6 +71,12 @@ export interface MountablePlugin {
     installedPlugin?: CliInstalledPlugin;
     /** Further packages the plugin brings along and serves (the users plugin: the audit plugin), listed after it. */
     installedPlugins?: CliInstalledPlugin[];
+    /**
+     * Permissions the plugin's routes need on a protected server: a GET or HEAD under `path` needs `read`,
+     * any other method `write` (default `read`). Paths must be under the plugin's `prefix`; any other entry
+     * fails startup with `invalid route permission: <path>`.
+     */
+    routePermissions?: CliRoutePermission[];
     /** Pages the plugin adds to the admin dashboard (`builder.addDashboardExtension`), registered when mounted. */
     dashboardExtensions?: CliDashboardExtension[];
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
@@ -271,6 +277,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;
     const publicRoutes = new Set<string>();
+    // Route permissions the mounted plugins declare
+    const routePermissions: CliRoutePermission[] = [];
     // Public routes of host-route plugins (exact entries and `GET /prefix/*` entries): the gate
     // hands such a request to that plugin's router alone, never to a host route
     const hostPublic: Array<{ exact: Set<string>; prefixes: string[]; handler: Router }> = [];
@@ -299,6 +307,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             hostPublicHandler,
             mcpPaths: mcpOptions ? [mcpPath] : [],
             cliRoutePrefixes,
+            routePermissions,
         }),
     );
 
@@ -478,6 +487,15 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             }
             exact.push(`${method} ${exactPath}`);
         }
+        const declared = (plugin.routePermissions ?? []).map((r) => {
+            const path = typeof r?.path === 'string' && r.path.startsWith('/') ? normalizePath(r.path) : '';
+            const valid = (p: unknown) => typeof p === 'string' && p.trim().length > 0;
+            if (!path || !underMount(path) || !valid(r.read) || (r.write !== undefined && !valid(r.write))) {
+                throw new Error(`invalid route permission: ${r?.path}`);
+            }
+            return { path, read: r.read, ...(r.write !== undefined ? { write: r.write } : {}) };
+        });
+        routePermissions.push(...declared);
         if (hostRoutes) {
             if (exact.length > 0 || prefixes.length > 0) {
                 const handler = Router();
