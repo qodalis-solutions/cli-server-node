@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import type { CliInstalledPlugin, ICliAuditStore, ICliEventBus, ICliModule } from '@qodalis/cli-server-abstractions';
+import type { CliDashboardExtension, CliInstalledPlugin, ICliAuditStore, ICliEventBus, ICliModule } from '@qodalis/cli-server-abstractions';
 import { CliMigrationRunner, type CliMigrationDatabaseOptions, type CliMigrationRun } from './runner';
 import { codeSource, sqlFolderSource, type CliMigration, type CliMigrationSource } from './sources';
 import { CliMigrations } from './migrations';
@@ -7,6 +7,7 @@ import { createMigrationsController, MigrationsPermissions } from './controller'
 import { CliMigrationsCommandProcessor } from './commands';
 import { migrationsInstalledPlugin } from './package-info';
 import { MigrationsMcpToolProvider } from './mcp';
+import { MIGRATIONS_DASHBOARD_PREFIX, findMigrationsPage, migrationsPage } from './dashboard-page';
 
 export const MIGRATIONS_PREFIX = '/api/v1/qcli/migrations';
 
@@ -26,6 +27,10 @@ export interface CliMigrationsPluginResult {
     /** `migrations:read` and `migrations:run`, added to the server's permission catalog by `mountPlugin`. */
     permissions: Array<{ name: string; description: string; group: string }>;
     installedPlugin: CliInstalledPlugin;
+    /** The migrations page of the admin dashboard (`/qcli/migrations`), when its build is there. */
+    dashboardPrefix?: string;
+    dashboardRouter?: Router;
+    dashboardExtensions: CliDashboardExtension[];
     /** The `migrations_*` MCP tools, served when the server's MCP endpoint is on. */
     mcpProviders: MigrationsMcpToolProvider[];
     /** The registered databases: run, status and history from code. */
@@ -56,6 +61,7 @@ export interface CliMigrationsPluginResult {
 export class CliMigrationsBuilder {
     private readonly databases: Array<{ name: string; options: CliMigrationDatabaseOptions; sources: CliMigrationSource[] }> = [];
     private auditStore?: ICliAuditStore;
+    private dashboardDir?: string | false;
 
     /** Registers a database (its name is used in the API, the terminal and the dashboard). */
     addDatabase(name: string, options: CliMigrationDatabaseOptions): this {
@@ -89,6 +95,15 @@ export class CliMigrationsBuilder {
         return this;
     }
 
+    /**
+     * Where the dashboard's migrations page is (`@qodalis/cli-dashboard-module-migrations`'s build); by default the
+     * copy next to the plugin, else the installed package. `false` leaves the page out.
+     */
+    setDashboardDir(dir: string | false): this {
+        this.dashboardDir = dir;
+        return this;
+    }
+
     build(): CliMigrationsPluginResult {
         const migrations = new CliMigrations();
         for (const db of this.databases) {
@@ -98,6 +113,8 @@ export class CliMigrationsBuilder {
         }
         migrations.setAuditStore(this.auditStore);
         const processor = new CliMigrationsCommandProcessor(migrations);
+        const pageDir = this.dashboardDir === false ? undefined : findMigrationsPage(this.dashboardDir);
+        const page = pageDir ? migrationsPage(pageDir) : undefined;
         return {
             prefix: MIGRATIONS_PREFIX,
             router: createMigrationsController(migrations),
@@ -112,6 +129,8 @@ export class CliMigrationsBuilder {
             },
             permissions: MIGRATIONS_PERMISSION_ENTRIES,
             installedPlugin: migrationsInstalledPlugin,
+            ...(page ? { dashboardPrefix: MIGRATIONS_DASHBOARD_PREFIX, dashboardRouter: page.router } : {}),
+            dashboardExtensions: page ? [page.extension] : [],
             mcpProviders: [new MigrationsMcpToolProvider(migrations)],
             migrations,
             setEventBus: (bus) => migrations.setEventBus(bus),

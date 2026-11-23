@@ -73,6 +73,14 @@ Permissions on a protected server: `migrations:read` for reading, `migrations:ru
 With the server's MCP endpoint on, AI clients get `migrations_status`, `migrations_runs`, `migrations_sql`
 (`migrations:read`), `migrations_up` and `migrations_down` (`migrations:run`); their runs are recorded with trigger `mcp`.
 
+## Dashboard page
+
+The admin dashboard shows a Migrations page (group Data, `migrations:read`): the databases, each one's migrations by
+status, the runs, and, with `migrations:run`, Apply pending / Migrate to here / Roll back to here with the SQL each run
+executes. It is `@qodalis/cli-dashboard-module-migrations`, copied into the package at build (`dashboard/`) and served
+at `/qcli/migrations`; the plugin registers it as a dashboard extension when mounted. `setDashboardDir(dir)` serves
+another build, `setDashboardDir(false)` leaves the page out.
+
 ## Helpers for store authors
 
 `tableExists`, `columnExists`, `renameTable`, `renameColumn` and `adoptLegacyTable(db, legacy, table, columns)` (renames a
