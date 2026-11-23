@@ -43,6 +43,7 @@ export class CliBuilder {
     private readonly _mcpToolProviders: McpToolProvider[] = [];
     private readonly _installedPlugins: CliInstalledPlugin[] = [];
     private readonly _dashboardExtensions: CliDashboardExtension[] = [];
+    private readonly _dashboardModuleDirs = new Map<string, string | false>();
 
     /**
      * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,
@@ -117,6 +118,21 @@ export class CliBuilder {
         }
         this._dashboardExtensions.push(valid);
         return this;
+    }
+
+    /**
+     * Where the build of a dashboard page the server itself serves is (`filesystem`, `data-explorer`:
+     * `@qodalis/cli-dashboard-module-<id>`); by default the copy in the plugin package, else the installed module
+     * package. `false` leaves the page out.
+     */
+    setDashboardModuleDir(id: 'filesystem' | 'data-explorer', dir: string | false): CliBuilder {
+        this._dashboardModuleDirs.set(id, dir);
+        return this;
+    }
+
+    /** The build set with `setDashboardModuleDir` (undefined: the default). */
+    dashboardModuleDir(id: 'filesystem' | 'data-explorer'): string | false | undefined {
+        return this._dashboardModuleDirs.get(id);
     }
 
     /** The dashboard extensions registered so far, in registration order. */

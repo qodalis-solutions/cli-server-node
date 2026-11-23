@@ -129,6 +129,13 @@ builder.addDataExplorerProvider(provider, {
 | `@qodalis/cli-server-plugin-data-explorer-elasticsearch` | Elasticsearch |
 | `@qodalis/cli-server-plugin-data-explorer-redis` | Redis |
 
+## Dashboard page
+
+The admin dashboard's Data explorer page is `@qodalis/cli-dashboard-module-data-explorer`, copied into this package at build
+(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/data-explorer/dist`, else the npm
+package) and served at `/qcli/modules/data-explorer` (outside the API, so the dashboard loads it without a token); it shows for
+users with `data:query`. The server registers it when a data explorer provider is added (it serves the data explorer API). `builder.setDashboardModuleDir('data-explorer', dir)` serves another build, `false` leaves the page out.
+
 ## License
 
 MIT

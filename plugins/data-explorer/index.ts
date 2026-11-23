@@ -29,3 +29,4 @@ export {
     DataExplorerRateLimiter,
     MASK,
 } from './data-explorer-policy';
+export { DATA_EXPLORER_DASHBOARD_MODULE, dataExplorerDashboardPage } from './dashboard-page';

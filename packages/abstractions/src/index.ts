@@ -80,4 +80,12 @@ export {
     resolveCliEventBus,
 } from './events';
 export { CliDashboardExtension, DASHBOARD_EXTENSION_GROUPS, validateDashboardExtension } from './dashboard-extension';
+export {
+    CliDashboardModulePage,
+    CliDashboardModuleInfo,
+    DASHBOARD_MODULES_PREFIX,
+    dashboardModulePage,
+    findDashboardModule,
+    resolveDashboardModulePage,
+} from './dashboard-module';
 export * from './table-names';

@@ -1,5 +1,5 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
-import type { ICliEventBus } from '@qodalis/cli-server-abstractions';
+import type { CliDashboardModulePage, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { AuthAdapter, TokenUsageProvider, User, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
@@ -32,6 +32,7 @@ import { DEFAULT_LINK_APPROVAL_URL, LinkService } from './services/link-service'
 import { errorHandler, HttpError } from './errors';
 import { ADMIN_GROUP, USERS_GROUP, USERS_PERMISSION_ENTRIES } from './permissions';
 import { CliInstalledPlugin, usersInstalledPlugin } from './package-info';
+import { tokensDashboardPage } from './dashboard-page';
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -56,6 +57,11 @@ export interface UsersPluginResult {
     auditPlugin: CliAuditPluginResult;
     /** Packages listed among the server's installed plugins with this one (the audit plugin). */
     installedPlugins: CliInstalledPlugin[];
+    /**
+     * The admin dashboard's API tokens page (`/qcli/modules/tokens`) and the Audit page of the audit plugin this
+     * plugin serves, when the packages carry their builds; none in guard-only mode.
+     */
+    dashboardPages: CliDashboardModulePage[];
     apiTokenStore: ICliApiTokenStore;
     /**
      * API tokens the host creates, lists and revokes for its users (same rules as the
@@ -112,6 +118,7 @@ export interface UsersPluginResult {
  */
 export class CliUsersBuilder {
     private options: UsersModuleOptions = {};
+    private dashboardDir?: string | false;
 
     /** Merge raw options (`UsersModuleOptions`). */
     setOptions(options: UsersModuleOptions): this {
@@ -149,6 +156,16 @@ export class CliUsersBuilder {
             throw new Error('[users] linkApprovalUrl must be an http(s) URL or a root-relative path');
         }
         this.options.linkApprovalUrl = url;
+        return this;
+    }
+
+    /**
+     * Where the dashboard's API tokens page is (`@qodalis/cli-dashboard-module-tokens`'s build); by default the copy
+     * next to the plugin, else the installed package. `false` leaves the page out. (The Audit page belongs to the
+     * audit plugin: `new CliAuditBuilder().setDashboardDir(...)` with `setAuditPlugin`.)
+     */
+    setDashboardDir(dir: string | false): this {
+        this.dashboardDir = dir;
         return this;
     }
 
@@ -421,6 +438,7 @@ export class CliUsersBuilder {
         }, guardOnly);
 
         const router = Router();
+        const tokensPage = guardOnly ? undefined : tokensDashboardPage(this.dashboardDir);
         const linkService = new LinkService(authService, options.linkApprovalUrl ?? DEFAULT_LINK_APPROVAL_URL);
         const linkLimiter = new RateLimiter(LINK_CREATE_RATE_LIMIT, 60_000);
         // Guard-only: the router serves nothing (the managing service serves these routes)
@@ -494,6 +512,7 @@ export class CliUsersBuilder {
             dispose: () => clearInterval(cleanupInterval),
             installedPlugin: usersInstalledPlugin,
             installedPlugins: [auditPlugin.installedPlugin],
+            dashboardPages: guardOnly ? [] : [...(tokensPage ? [tokensPage] : []), ...(auditPlugin.dashboardPages ?? [])],
         };
     }
 }

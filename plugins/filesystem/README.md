@@ -78,6 +78,13 @@ Implement `IFileStorageProvider` to create your own storage backend. See the com
 - `@qodalis/cli-server-plugin-filesystem-s3` -- Amazon S3 storage
 - `@qodalis/cli-server-plugin-filesystem-sqlite` -- SQLite database storage
 
+## Dashboard page
+
+The admin dashboard's Filesystem page is `@qodalis/cli-dashboard-module-filesystem`, copied into this package at build
+(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/filesystem/dist`, else the npm
+package) and served at `/qcli/modules/filesystem` (outside the API, so the dashboard loads it without a token); it shows for
+users with `files:read`. The server registers it when a file storage provider is set (it serves the filesystem API). `builder.setDashboardModuleDir('filesystem', dir)` serves another build, `false` leaves the page out.
+
 ## License
 
 MIT

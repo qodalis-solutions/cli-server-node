@@ -35,16 +35,16 @@ COPY packages/abstractions/ packages/abstractions/
 RUN cd packages/abstractions && npx tsc
 
 COPY plugins/ plugins/
-RUN cd plugins/filesystem && npx tsc \
+RUN cd plugins/filesystem && node scripts/copy-dashboard.js && npx tsc \
     && cd ../filesystem-json && npx tsc \
     && cd ../filesystem-sqlite && (npx tsc || true) \
     && cd ../filesystem-s3 && (npx tsc || true) \
     && cd ../weather && npx tsc \
-    && cd ../jobs && npx tsc \
-    && cd ../audit && npx tsc \
-    && cd ../users && npx tsc \
-    && cd ../migrations && node scripts/copy-dashboard.js && npx tsc \
-    && cd ../data-explorer && npx tsc \
+    && cd ../jobs && node scripts/copy-dashboard.js && npx tsc \
+    && cd ../audit && node scripts/copy-dashboard.js && npx tsc \
+    && cd ../users && node scripts/copy-dashboard.js && npx tsc \
+    && cd ../databases && node scripts/copy-dashboard.js && npx tsc \
+    && cd ../data-explorer && node scripts/copy-dashboard.js && npx tsc \
     && cd ../data-explorer-sql && npx tsc \
     && cd ../data-explorer-mongo && npx tsc \
     && cd ../data-explorer-postgres && npx tsc \

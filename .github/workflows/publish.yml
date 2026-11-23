@@ -105,9 +105,13 @@ jobs:
             echo "::endgroup::"
           }
 
-          # The databases plugin embeds the dashboard's Databases page (prepublishOnly copies it)
-          npm install --no-save --no-package-lock --ignore-scripts --prefix plugins/databases @qodalis/cli-dashboard-module-databases
-          (cd plugins/databases && npm run copy-dashboard && test -f dashboard/extension.js)
+          # Plugins embed their dashboard pages (prepublishOnly copies them): plugin dir and module package
+          for page in databases:databases jobs:jobs audit:audit users:tokens filesystem:filesystem data-explorer:data-explorer; do
+            dir="plugins/${page%%:*}"
+            module="@qodalis/cli-dashboard-module-${page##*:}"
+            npm install --no-save --no-package-lock --ignore-scripts --prefix "$dir" "$module"
+            (cd "$dir" && npm run copy-dashboard && test -f dashboard/extension.js)
+          done
 
           publish_pkg packages/abstractions
           publish_pkg plugins/filesystem

@@ -80,6 +80,13 @@ class MyAuditStore implements ICliAuditStore {
 
 There is no database store in this server: implement `ICliAuditStore` over your own storage to keep the log across restarts.
 
+## Dashboard page
+
+The admin dashboard's Audit page is `@qodalis/cli-dashboard-module-audit`, copied into this package at build
+(`dashboard/`, `npm run copy-dashboard`: the sibling `cli-server-dashboard/modules/audit/dist`, else the npm
+package) and served at `/qcli/modules/audit` (outside the API, so the dashboard loads it without a token); it shows for
+users with `audit:read`. The users plugin serves it with the audit plugin it adds (`setAuditPlugin(new CliAuditBuilder().setDashboardDir(...).build())` to change it). `new CliAuditBuilder().setDashboardDir(dir)` serves another build, `setDashboardDir(false)` leaves the page out.
+
 ## License
 
 MIT

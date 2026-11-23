@@ -208,7 +208,7 @@ describe('databases plugin', () => {
         cli.mountPlugin(plugin);
 
         const [extension] = cli.builder.dashboardExtensions;
-        expect(extension).toMatchObject({ id: 'databases', group: 'data', permission: 'databases:read', icon: '🗄️' });
+        expect(extension).toMatchObject({ id: 'databases', group: 'data', order: 20, permission: 'databases:read', icon: '🗄️', widgets: ['overview'] });
         expect(extension.titles?.ro).toBe('Baze de date');
         expect(extension.entry).toMatch(/^\/qcli\/databases\/extension\.js\?v=[0-9a-f]{12}$/);
         const js = await request(cli.app).get('/qcli/databases/extension.js');
@@ -216,6 +216,6 @@ describe('databases plugin', () => {
         expect(js.text).toBe('export default {};');
         expect((await request(cli.app).get(API)).status).toBe(401);
 
-        expect(new CliDatabasesBuilder().setDashboardDir(false).build()).toMatchObject({ dashboardExtensions: [] });
+        expect(new CliDatabasesBuilder().setDashboardDir(false).build()).toMatchObject({ dashboardPages: [] });
     });
 });

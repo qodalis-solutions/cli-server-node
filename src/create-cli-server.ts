@@ -6,8 +6,8 @@ import { CliBuilder } from './extensions';
 import { createCliController } from './controllers/cli-controller';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
-import { OsFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
-import { DataExplorerExecutor, createDataExplorerController } from '@qodalis/cli-server-plugin-data-explorer';
+import { OsFileStorageProvider, filesystemDashboardPage } from '@qodalis/cli-server-plugin-filesystem';
+import { DataExplorerExecutor, createDataExplorerController, dataExplorerDashboardPage } from '@qodalis/cli-server-plugin-data-explorer';
 import { createLogger } from './utils/logger';
 import {
     CliServerAuthContext,
@@ -37,7 +37,7 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
-import { CliDashboardExtension, CliInstalledPlugin, ICliEventBus, ICliModule, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import { CliDashboardExtension, CliDashboardModulePage, CliInstalledPlugin, ICliEventBus, ICliModule, installedPluginOf } from '@qodalis/cli-server-abstractions';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 
 /**
@@ -84,6 +84,11 @@ export interface MountablePlugin {
     permissions?: CliPermissionInput[];
     /** Pages the plugin adds to the admin dashboard (`builder.addDashboardExtension`), registered when mounted. */
     dashboardExtensions?: CliDashboardExtension[];
+    /**
+     * Dashboard modules the plugin serves itself (`dashboardModulePage`): each one's extension is registered and its
+     * files are served at its prefix (outside the API, so the dashboard loads them without a token).
+     */
+    dashboardPages?: CliDashboardModulePage[];
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
     setEventBus?(eventBus: ICliEventBus): void;
     /**
@@ -393,6 +398,12 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
             mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
             mcpFeatures.add('filesystem');
+            // The dashboard's Filesystem page (@qodalis/cli-dashboard-module-filesystem)
+            const page = filesystemDashboardPage(builder.dashboardModuleDir('filesystem'));
+            if (page) {
+                builder.addDashboardExtension(page.extension);
+                app.use(page.prefix, page.handler);
+            }
         }
 
         // Data Explorer API
@@ -435,6 +446,12 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
                 ),
             );
             mcpFeatures.add('data-explorer');
+            // The dashboard's Data explorer page (@qodalis/cli-dashboard-module-data-explorer)
+            const page = dataExplorerDashboardPage(builder.dashboardModuleDir('data-explorer'));
+            if (page) {
+                builder.addDashboardExtension(page.extension);
+                app.use(page.prefix, page.handler);
+            }
         }
     }
 
@@ -525,6 +542,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         for (const extension of plugin.dashboardExtensions ?? []) {
             builder.addDashboardExtension(extension);
         }
+        for (const page of plugin.dashboardPages ?? []) {
+            builder.addDashboardExtension(page.extension);
+        }
         plugin.setEventBus?.(eventBus);
         if (!cliRoutes && !hostRoutes) {
             // Installed (events, catalog, auth hooks above) but its CLI routes are not served
@@ -541,6 +561,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             app.use(plugin.prefix, plugin.router);
             if (plugin.dashboardPrefix && plugin.dashboardRouter) {
                 app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+            }
+            for (const page of plugin.dashboardPages ?? []) {
+                app.use(page.prefix, page.handler);
             }
         }
         if (isJobScheduler(plugin.scheduler)) {

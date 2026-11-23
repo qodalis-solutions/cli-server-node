@@ -25,6 +25,6 @@ export { quoteIdent, quoteTable, tableExists, columnExists, renameTable, renameC
 export { createDatabasesController, DatabasesPermissions } from './controller';
 export { CliDatabasesCommandProcessor } from './commands';
 export { DatabasesMcpToolProvider, DatabasesMcpTool } from './mcp';
-export { DATABASES_DASHBOARD_PREFIX, findDatabasesPage, databasesPage } from './dashboard-page';
+export { DATABASES_DASHBOARD_PREFIX, DATABASES_DASHBOARD_MODULE, databasesDashboardPage } from './dashboard-page';
 export { databasesInstalledPlugin, DATABASES_PLUGIN_ID } from './package-info';
 export { CliDatabaseStats, CliDatabaseTableStats, collectDatabaseStats, databaseSize } from './stats';

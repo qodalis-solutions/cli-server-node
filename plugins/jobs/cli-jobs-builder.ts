@@ -4,6 +4,7 @@ import {
     ICliJobStorageProvider,
     CliInstalledPlugin,
     CliEventBroadcastFn,
+    CliDashboardModulePage,
     ICliEventBus,
     resolveCliEventBus,
 } from '@qodalis/cli-server-abstractions';
@@ -12,6 +13,7 @@ import { CliJobScheduler, CliJobsOptions } from './cli-job-scheduler';
 import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
 import { createCliJobsController } from './cli-jobs-controller';
 import { jobsInstalledPlugin } from './package-info';
+import { jobsDashboardPage } from './dashboard-page';
 
 export interface CliJobsPluginResult {
     /** Default mount prefix for this plugin. */
@@ -22,6 +24,8 @@ export interface CliJobsPluginResult {
     scheduler: CliJobScheduler;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
     installedPlugin: CliInstalledPlugin;
+    /** The admin dashboard's Jobs page and Overview cards (`/qcli/modules/jobs`), when the package carries its build. */
+    dashboardPages: CliDashboardModulePage[];
     /**
      * Publishes the job events on `eventBus` unless `build()` was given a bus or a
      * broadcast function. `mountPlugin` calls it with the server's bus.
@@ -48,6 +52,7 @@ export class CliJobsBuilder {
     private readonly _jobs: Array<{ job: ICliJob; options: CliJobOptions }> = [];
     private _storageProvider?: ICliJobStorageProvider;
     private readonly _options: CliJobsOptions;
+    private _dashboardDir?: string | false;
 
     /**
      * @param options The plugin's options, e.g. the history retention:
@@ -85,6 +90,15 @@ export class CliJobsBuilder {
     }
 
     /**
+     * Where the dashboard's Jobs page is (`@qodalis/cli-dashboard-module-jobs`'s build); by default the copy next to
+     * the plugin, else the installed package. `false` leaves the page out.
+     */
+    setDashboardDir(dir: string | false): CliJobsBuilder {
+        this._dashboardDir = dir;
+        return this;
+    }
+
+    /**
      * Build the plugin, returning the Express router and scheduler.
      *
      * @param events The server's event bus (`createCliServer().eventBus`), or a function
@@ -104,12 +118,14 @@ export class CliJobsBuilder {
         scheduler.setEventBus(explicitBus);
 
         const router = createCliJobsController(scheduler, storage);
+        const page = jobsDashboardPage(this._dashboardDir);
 
         return {
             prefix: '/api/v1/qcli/jobs',
             router,
             scheduler,
             installedPlugin: jobsInstalledPlugin,
+            dashboardPages: page ? [page] : [],
             setEventBus: (eventBus) => {
                 if (!explicitBus) scheduler.setEventBus(eventBus);
             },
