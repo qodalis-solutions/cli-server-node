@@ -33,37 +33,36 @@ existing accounts. `stores.close()` ends the pool when the stores created it (no
 
 ## Tables
 
-With the default prefix `qcli_` (`createPostgresUsersStores(url, { tablePrefix: 'auth_' })` changes it):
+Named `Qcli` + PascalCase with PascalCase columns, like every plugin's tables (`tablePrefix` changes the prefix,
+`tables: { Users: 'AppUsers' }` names one table, `schema` puts them in another schema):
 
 | Table | Holds |
 |---|---|
-| `qcli_users` | Users; names and emails unique ignoring case; groups and `data` as JSONB |
-| `qcli_groups` | Groups and their permissions; names unique ignoring case |
-| `qcli_credentials` | Password hash and salt per user |
-| `qcli_sessions` | Sessions by token hash (SHA-256; raw tokens are never stored) |
-| `qcli_api_tokens` | API tokens by hash, with audience and permissions |
-| `qcli_audit` | The audit log, newest first by insertion order |
-| `qcli_schema_migrations` | The migrations applied (id, name, time) |
+| `QcliUsers` | Users; names and emails unique ignoring case; groups and `Data` as JSONB |
+| `QcliGroups` | Groups and their permissions; names unique ignoring case |
+| `QcliCredentials` | Password hash and salt per user |
+| `QcliSessions` | Sessions by token hash (SHA-256; raw tokens are never stored) |
+| `QcliApiTokens` | API tokens by hash, with audience and permissions |
+| `QcliAuditEntries` | The audit log, newest first by insertion order |
 
 Times are epoch milliseconds (`bigint`), as in the users plugin's models.
 
 ## Migrations
 
-`init()` applies the migrations the database does not have yet, in order, each in its own transaction, under a
-PostgreSQL advisory lock so servers starting together never apply one twice (the counterpart of EF Core's
-`__EFMigrationsHistory`). A database migrated by a newer package version is refused with
-`the database has migrations this version does not know`, rather than used with a schema this version does not
-know. New versions of this package only append migrations; released ones never change.
+The schema is the migration source `qcli-users` of the [migrations plugin](../migrations/README.md): `init()` applies
+what the database does not have yet, under the plugin's lock, recording it in `QcliMigrations` /
+`QcliMigrationRuns`. A database with tables of the first preview (`qcli_users`, ...) is adopted by the first
+migration: tables, columns and indexes are renamed and the data kept.
 
-Your own tables can use the same runner:
+To see and run the users schema from the dashboard and the terminal, register its database with the migrations
+plugin:
 
 ```ts
-import { runPostgresMigrations } from '@qodalis/cli-server-plugin-users-postgres';
-
-await runPostgresMigrations(pool, 'myapp_schema_migrations', [
-    { id: 1, name: 'create orders', up: 'CREATE TABLE orders (id text PRIMARY KEY, total numeric NOT NULL)' },
-    { id: 2, name: 'orders.created_at', up: 'ALTER TABLE orders ADD COLUMN created_at timestamptz NOT NULL DEFAULT now()' },
-]);
+const migrations = new CliMigrationsBuilder()
+    .addDatabase('users', { connection: stores.connection })
+    .addSource('users', stores.migrationSource)
+    .build();
+cli.mountPlugin(migrations);
 ```
 
 ## Audit log

@@ -7,7 +7,7 @@ import { InMemoryGroupStore } from '../../plugins/users/stores/in-memory-group-s
 import { User } from '../../plugins/users/models';
 import type { ICliAuditStore, ICliCredentialStore, ICliGroupStore, ICliSessionStore, ICliUserStore } from '../../plugins/users/stores/interfaces';
 import { Pool } from 'pg';
-import { createPostgresUsersStores } from '../../plugins/users-postgres';
+import { createPostgresUsersStores } from '../../plugins/users-postgres/index';
 
 /** A store of each kind, empty for each test. */
 interface StoreFactories {
@@ -426,18 +426,18 @@ storeContract('in-memory', {
 const postgresUrl = process.env.QCLI_TEST_POSTGRES;
 describe.skipIf(!postgresUrl)('PostgreSQL users stores', () => {
     const pool = new Pool({ connectionString: postgresUrl });
-    const stores = createPostgresUsersStores(pool, { tablePrefix: 'qcli_test_' });
+    const stores = createPostgresUsersStores(pool, { tablePrefix: 'QcliTest' });
     let ready: Promise<void> | undefined;
     const fresh = async () => {
         await (ready ??= (async () => {
-            await pool.query('DROP TABLE IF EXISTS qcli_test_users, qcli_test_groups, qcli_test_credentials, qcli_test_sessions, qcli_test_api_tokens, qcli_test_audit, qcli_test_schema_migrations');
+            await pool.query('DROP TABLE IF EXISTS "QcliTestUsers", "QcliTestGroups", "QcliTestCredentials", "QcliTestSessions", "QcliTestApiTokens", "QcliTestAuditEntries", "QcliTestMigrations", "QcliTestMigrationRuns"');
             await stores.init();
         })());
-        await pool.query('TRUNCATE qcli_test_users, qcli_test_groups, qcli_test_credentials, qcli_test_sessions, qcli_test_api_tokens, qcli_test_audit');
+        await pool.query('TRUNCATE "QcliTestUsers", "QcliTestGroups", "QcliTestCredentials", "QcliTestSessions", "QcliTestApiTokens", "QcliTestAuditEntries"');
         return stores;
     };
     afterAll(async () => {
-        await pool.query('DROP TABLE IF EXISTS qcli_test_users, qcli_test_groups, qcli_test_credentials, qcli_test_sessions, qcli_test_api_tokens, qcli_test_audit, qcli_test_schema_migrations');
+        await pool.query('DROP TABLE IF EXISTS "QcliTestUsers", "QcliTestGroups", "QcliTestCredentials", "QcliTestSessions", "QcliTestApiTokens", "QcliTestAuditEntries", "QcliTestMigrations", "QcliTestMigrationRuns"');
         await pool.end();
     });
 

@@ -23,6 +23,9 @@
             ],
             "@qodalis/cli-server-abstractions": [
                 "../../packages/abstractions/dist"
+            ],
+            "@qodalis/cli-server-plugin-migrations": [
+                "../migrations/dist"
             ]
         }
     },
