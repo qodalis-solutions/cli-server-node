@@ -22,7 +22,7 @@
                 "../filesystem/dist"
             ],
             "@qodalis/cli-server-plugin-databases": [
-                "../migrations/dist"
+                "../databases/dist"
             ],
             "@qodalis/cli-server-abstractions": [
                 "../../packages/abstractions/dist"

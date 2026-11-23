@@ -25,7 +25,7 @@
                 "../../packages/abstractions/dist"
             ],
             "@qodalis/cli-server-plugin-databases": [
-                "../migrations/dist"
+                "../databases/dist"
             ]
         }
     },
