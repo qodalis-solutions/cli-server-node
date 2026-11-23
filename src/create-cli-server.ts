@@ -518,7 +518,12 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             return { path, read: r.read, ...(r.write !== undefined ? { write: r.write } : {}) };
         });
         routePermissions.push(...declared);
-        if (plugin.permissions?.length) builder.addPermissions(plugin.permissions, 'cli');
+        if (plugin.permissions?.length) {
+            // A name already in the catalog (the host's, or a plugin mounted twice) stays as registered, as on Python
+            const known = new Set(builder.permissions.all().map((p) => p.name.toLowerCase()));
+            const fresh = plugin.permissions.filter((p) => typeof p?.name !== 'string' || !known.has(p.name.toLowerCase()));
+            if (fresh.length) builder.addPermissions(fresh, 'cli');
+        }
         if (plugin.module) builder.addModule(plugin.module);
         if (hostRoutes) {
             if (exact.length > 0 || prefixes.length > 0) {
@@ -542,9 +547,10 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         for (const extension of plugin.dashboardExtensions ?? []) {
             builder.addDashboardExtension(extension);
         }
-        for (const page of plugin.dashboardPages ?? []) {
-            builder.addDashboardExtension(page.extension);
-        }
+        // A module page once per id: a plugin mounted again, or one page two plugins serve (audit: the users plugin's
+        // and the host's own audit plugin), keeps the first registration and its handler
+        const pages = (plugin.dashboardPages ?? []).filter((page) => !builder.dashboardExtensions.some((e) => e.id === page.extension.id));
+        for (const page of pages) builder.addDashboardExtension(page.extension);
         plugin.setEventBus?.(eventBus);
         if (!cliRoutes && !hostRoutes) {
             // Installed (events, catalog, auth hooks above) but its CLI routes are not served
@@ -562,7 +568,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             if (plugin.dashboardPrefix && plugin.dashboardRouter) {
                 app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
             }
-            for (const page of plugin.dashboardPages ?? []) {
+            for (const page of pages) {
                 app.use(page.prefix, page.handler);
             }
         }

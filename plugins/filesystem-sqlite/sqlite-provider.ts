@@ -139,6 +139,8 @@ export class SqliteFileStorageProvider implements IFileStorageProvider {
             if ('status' in run && run.status === 'failed') throw new Error(`filesystem-sqlite schema: ${run.error}`);
             this.ensureRoot();
         });
+        // A failed migration rejects every operation that awaits `ready`; until one does, it must not crash the process
+        this.ready.catch(() => undefined);
     }
 
     private ensureRoot(): void {

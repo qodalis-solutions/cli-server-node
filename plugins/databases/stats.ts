@@ -282,9 +282,26 @@ const sqlite: Record<string, Collector> = {
         } catch {
             // No dbstat: rows only
         }
-        const ranked = topTables(tables.map((t) => ({ name: t.name, bytes: bytes.get(t.name) }))).slice(0, bytes.size ? TOP_TABLES : 20);
+        const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+        // Without sizes, every table is ranked by its highest rowid (an index lookup, not a scan) before the counts
+        const estimate = new Map<string, number>();
+        if (!bytes.size) {
+            for (const t of tables) {
+                try {
+                    estimate.set(t.name, num((await first(db, `SELECT MAX(rowid) AS n FROM ${quote(t.name)}`)).n) ?? 0);
+                } catch {
+                    estimate.set(t.name, 0); // a WITHOUT ROWID table
+                }
+            }
+        }
+        const ranked = bytes.size
+            ? topTables(tables.map((t) => ({ name: t.name, bytes: bytes.get(t.name) }))).slice(0, TOP_TABLES)
+            : tables
+                  .map((t): CliDatabaseTableStats => ({ name: t.name }))
+                  .sort((a, b) => (estimate.get(b.name) ?? 0) - (estimate.get(a.name) ?? 0))
+                  .slice(0, TOP_TABLES);
         for (const table of ranked) {
-            table.rows = num((await first(db, `SELECT COUNT(*) AS n FROM "${table.name.replace(/"/g, '""')}"`)).n);
+            table.rows = num((await first(db, `SELECT COUNT(*) AS n FROM ${quote(table.name)}`)).n);
         }
         s.tables = topTables(ranked);
     },
@@ -310,9 +327,18 @@ export async function collectDatabaseStats(name: string, connection: CliSqlConne
 
 /** Only the size in bytes (the databases list); undefined when it cannot be read. */
 export async function databaseSize(connection: CliSqlConnection): Promise<number | undefined> {
+    try {
+        return await connection.session((db) => databaseSizeOn(db));
+    } catch {
+        return undefined;
+    }
+}
+
+/** {@link databaseSize} in an open session; undefined when the database refuses it. */
+export async function databaseSizeOn(db: CliSqlSession): Promise<number | undefined> {
     const stats: Stats = {};
     try {
-        await connection.session((db) => COLLECTORS[connection.dialect].size(db, stats));
+        await COLLECTORS[db.dialect].size(db, stats);
     } catch {
         return undefined;
     }

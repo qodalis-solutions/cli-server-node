@@ -2,6 +2,7 @@ import {
     CliCommandParameterDescriptor,
     CliCommandProcessor,
     CliProcessCommand,
+    getCliCaller,
     getPositionalText,
     ICliCommandProcessor,
 } from '@qodalis/cli-server-abstractions';
@@ -168,7 +169,9 @@ class MigrationsRunProcessor extends CliCommandProcessor {
                 const result = (this.direction === 'up' ? await db.up({ to, dryRun: true }) : await db.down({ to: to!, dryRun: true })) as { sql: string };
                 return result.sql || 'Nothing to run.';
             }
-            const run = await this.databases.run(name, this.direction, { to, force: command.args?.force === true, trigger: 'terminal' });
+            // The signed-in user (protected servers): the run history and the audit say who ran it
+            const actor = getCliCaller()?.userName;
+            const run = await this.databases.run(name, this.direction, { to, force: command.args?.force === true, trigger: 'terminal', ...(actor ? { actor } : {}) });
             return describeRun(run);
         } catch (err) {
             return errorText(err);

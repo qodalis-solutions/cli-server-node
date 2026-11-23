@@ -334,7 +334,14 @@ export class PostgresUserStore implements ICliUserStore {
         if (data.data !== undefined) set('"Data"', JSON.stringify(data.data));
         if (data.lastLoginAt !== undefined) set('"LastLoginAt"', data.lastLoginAt);
         set('"UpdatedAt"', Date.now());
-        const { rows } = await this.pool.query(`UPDATE ${this.t.users} SET ${sets.join(', ')} WHERE "Id" = $1 RETURNING "Id" AS id, "Name" AS name, "Email" AS email, "Groups" AS groups, "Disabled" AS disabled, "MustChangePassword" AS must_change_password, "HomeDir" AS home_dir, "Data" AS data, "LastLoginAt" AS last_login_at, "CreatedAt" AS created_at, "UpdatedAt" AS updated_at`, values);
+        let rows: Record<string, unknown>[];
+        try {
+            ({ rows } = await this.pool.query(`UPDATE ${this.t.users} SET ${sets.join(', ')} WHERE "Id" = $1 RETURNING "Id" AS id, "Name" AS name, "Email" AS email, "Groups" AS groups, "Disabled" AS disabled, "MustChangePassword" AS must_change_password, "HomeDir" AS home_dir, "Data" AS data, "LastLoginAt" AS last_login_at, "CreatedAt" AS created_at, "UpdatedAt" AS updated_at`, values));
+        } catch (err) {
+            // a concurrent rename or create took the name or email: the same error as the check above
+            if (isUniqueViolation(err)) await this.assertUnique(data.name, data.email, id);
+            throw err;
+        }
         if (!rows[0]) throw new Error(`User with id '${id}' not found`);
         return toUser(rows[0]);
     }
@@ -605,7 +612,7 @@ export class PostgresAuditStore implements ICliAuditStore {
     ) {}
 
     async log(entry: AuditEntry): Promise<void> {
-        const stored: AuditEntry = { id: entry.id ?? randomUUID(), ...entry, timestamp: entry.timestamp ?? Date.now() };
+        const stored: AuditEntry = { ...entry, id: entry.id ?? randomUUID(), timestamp: entry.timestamp ?? Date.now() };
         await this.pool.query(`INSERT INTO ${this.t.audit} ("Id", "Timestamp", "Event", "Username", "Actor", "Entry") VALUES ($1, $2, $3, $4, $5, $6)`, [
             stored.id,
             stored.timestamp,
