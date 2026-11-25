@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
-import type { CliInstalledPlugin } from '@qodalis/cli-server-abstractions';
+import type { CliInstalledPlugin, ICliModule } from '@qodalis/cli-server-abstractions';
+import { CliApiCommandProcessor } from './api-command';
 import { IPublicApiUsageStore, InMemoryPublicApiUsageStore } from './usage-store';
 import {
     PublicApiQuotaResolver,
@@ -69,6 +70,8 @@ export interface PublicApiUsers {
     /** The users plugin's permission matching (wildcards), for stacked guards. */
     serverAuth: { hasPermission(ctx: { permissions: string[] }, permission: string): boolean };
     authService?: { getEffectivePermissions(user: { id: string; name: string }): Promise<string[]> };
+    /** Finds a user by id or name: `api usage --user <name>` (without it, ids only). */
+    userStore?: { getUser(idOrName: string): Promise<{ id: string; name: string } | undefined> };
 }
 
 /** Where the portal finds this plugin's section (`new CliPortalBuilder().addSection(publicApi)`). */
@@ -100,6 +103,8 @@ export interface PublicApiPluginResult {
     /** Read by the portal plugin. */
     portalSection: PublicApiPortalSection;
     installedPlugin: CliInstalledPlugin;
+    /** The `api usage` terminal command, registered by `mountPlugin`. */
+    module: ICliModule;
 }
 
 /** True for `/segment[/segment...]`: starts with `/`, no trailing `/`, not `/` itself. */
@@ -445,6 +450,14 @@ export class CliPublicApiBuilder {
             store,
             portalSection: { kind: 'api', title: this.title, basePath },
             installedPlugin: publicApiInstalledPlugin,
+            module: {
+                name: 'public-api',
+                version: publicApiInstalledPlugin.version ?? '1.0.0',
+                description: 'Public API usage per token and day, and the quota',
+                author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
+                icon: '🔌',
+                processors: [new CliApiCommandProcessor(usage, users)],
+            },
         };
     }
 }

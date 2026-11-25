@@ -25,3 +25,4 @@ export {
 export { publicApiInstalledPlugin, PUBLIC_API_PLUGIN_ID } from './package-info';
 export { OpenApiDocument, QCLI_TOKEN_SCHEME } from './openapi';
 export { SWAGGER_ASSETS } from './swagger';
+export { CliApiCommandProcessor, ApiCommandUsers, TOKENS_READ_PERMISSION, formatAccountUsage, formatQuota } from './api-command';
