@@ -56,9 +56,10 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliConfigSection`, `CliConfigEntry`, `CliConfigValidation` | A section (`id`, `title?`, `entries`, `version?`, `allowCustomKeys?`) and a setting (`key`, `type`, `value`, `default`, `source`, `mutable`, `requiresRestart`, `sensitive`, `isSet`, `validation`, `editor`) |
 | `CliConfigEntryType`, `CliConfigSource`, `CliConfigValue` | `string`, `number`, `boolean`, `string[]`, `enum`, `secret`, `json`, `duration`, `url`; `default`, `file`, `environment`, `database`, `runtime`; a JSON value |
 | `CliConfigContext` | Who reads or changes: `caller?`, `hasPermission(permission)`, `via?` (`api`, `terminal`, `mcp`) |
-| `ICliConfigStore`, `CliConfigStoredSection` | Where writable settings are kept: `source`, `read(provider, section)`, `write(provider, section, changes, expectedVersion?)`; `{ values, version }` |
-| `ICliConfigService` | The server's config service (`list`, `get`, `update`), served by the admin plugin |
-| `CliConfigProviderView`, `CliConfigSectionView`, `CliConfigEntryView`, `CliConfigUpdateRequest`, `CliConfigUpdateResponse` | The JSON of `GET /api/v1/qcli/config` and `PATCH /api/v1/qcli/config/{provider}/{section}` |
+| `ICliConfigStore`, `CliConfigStoredSection` | Where writable settings are kept: `source`, `read(provider, section)`, `write(provider, section, changes, expectedVersion?)`, optional `describe()` and `ready` (a promise or a function the server's `config.ready()` waits for); `{ values, version }`. Each provider may have its own; one store may serve several providers (keyed by provider and section) |
+| `CliConfigStoreDescription`, `CliConfigStoreKind` | What a store says about itself: `{ kind, title, detail, persistent }`, `kind` `memory`, `file`, `database`, `redis` or `custom`; never credentials |
+| `ICliConfigService` | The server's config service (`list`, `get`, `update`, `describeDefaultStore()`), served by the admin plugin |
+| `CliConfigProviderView`, `CliConfigSectionView`, `CliConfigEntryView`, `CliConfigListView`, `CliConfigUpdateRequest`, `CliConfigUpdateResponse` | The JSON of `GET /api/v1/qcli/config` (`{ defaultStore, providers }`, each stored provider with its `store`) and `PATCH /api/v1/qcli/config/{provider}/{section}` |
 | `ICliModule.configProviders` | Config providers a module brings, registered with it |
 
 ### Classes
@@ -69,9 +70,9 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliCommandAuthor` | Simple implementation of `ICliCommandAuthor` |
 | `CliCommandParameterDescriptor` | Simple implementation of `ICliCommandParameterDescriptor` |
 | `CliPaging` | `--skip` / `--take` convention: `CliPaging.parameters()` and `CliPaging.from(command)` |
-| `CliStoredConfigProvider` | A provider of settings described in code (`sections[].settings[]` with `default`, `validation`, `validate`, `apply`, `value`), changes kept in the server's store; `value(section, key)` for the host's code |
-| `InMemoryConfigStore`, `JsonFileConfigStore` | Config stores in memory (source `runtime`) and in a JSON file (source `file`, mode 0600); `describe()` says where they keep the settings |
-| `describeCliConfigStore`, `describeCliConfigStoreLine` | A store's description (`custom` for a store without `describe()`) and its `config list` line |
+| `CliStoredConfigProvider` | A provider of settings described in code (`sections[].settings[]` with `default`, `validation`, `validate`, `apply`, `value`); `value(section, key)` for the host's code. Changes are kept in its store: the host's store for its id, else its own (option `store`, `setStore(store)`; `ownStore`), else the server's default store, else memory; `store` is the one in use |
+| `InMemoryConfigStore`, `JsonFileConfigStore`, `JsonFileConfigStoreOptions` | Config stores in memory (source `runtime`) and in a JSON file (source `file`, mode 0600), or with `{ section: 'qcli' }` in a section of the app's own JSON settings file (nested `app.qcli` or `app:qcli`; the rest of the file kept as it is); `describe()` says where they keep the settings (`config/app.json, section qcli`) |
+| `describeCliConfigStore`, `describeCliConfigStoreLine`, `describeCliConfigStoreName` | A store's description (`custom` for a store without `describe()`), its `Default store:` line and its name in `config list` (`Redis (cache:6379/0, prefix qcli:config)`) |
 | `CliConfigError` | A refused read or change: `status` (400, 403, 404, 409), `toJSON()` → `{ error, errors?, version? }` |
 | `CliConfigConflictError`, `CliConfigValidationError` | Thrown by writers and stores: a stale version (`currentVersion`), late per-key errors |
 
@@ -96,7 +97,7 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `validateCliConfigValue(entry, value)` | The error message of a new value (type and `validation` rules), or undefined; the same rules on every server |
 | `parseCliConfigInput(type, text)` | A value typed in the terminal as the entry's type (numbers, booleans, `a,b` lists, JSON) |
 | `parseCliConfigDuration(text)`, `formatCliConfigDuration(ms)` | `30m` ↔ 1800000 (`ms`, `s`, `m`, `h`, `d`) |
-| `createCustomConfigProvider(options?)` | The `custom` provider: one free key/value section |
+| `createCustomConfigProvider(options?)` | The `custom` provider: one free key/value section (`store` option: its own store) |
 | `cliConfigContext(caller?, via?)`, `hasCliPermission(granted, required)` | A context from a caller's permissions (no caller: everything allowed); wildcard permission matching |
 
 ### `CliCommandProcessor` Members

@@ -103,12 +103,12 @@ server's built-in ones, the plugins' and the host's. The former hardcoded sectio
 (core), `auth` and `custom` (core, on the server's config store). The plugin adds two providers when built:
 
 - `auth` (read-only): `admin.mode` (`password`, `users`, `external`), `username`, `defaultCredentials`, `jwtSecretConfigured`, `signInUrl` (never a password or the secret);
-- `logs`: `buffer.capacity` (entries kept, 100-100000) and `buffer.minLevel` (`DEBUG`, `INFO`, `WARN`, `ERROR`), changed at runtime.
+- `logs`: `buffer.capacity` (entries kept, 100-100000) and `buffer.minLevel` (`DEBUG`, `INFO`, `WARN`, `ERROR`), changed at runtime; kept in the server's default config store, or in its own with `new CliAdminBuilder().setConfigStore(store)`.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/config` | `{ store, providers: [...] }`: where changes are saved (`{ kind, title, detail, persistent }`) and the providers the caller may see (`config:read`), each with its `storage`, secrets masked |
-| GET | `/config/{provider}` | One provider (404 unknown, 403 without its `requiredPermission`) |
+| GET | `/config` | `{ defaultStore, providers: [...] }`: the store providers use unless they have their own (`{ kind, title, detail, persistent }`) and the providers the caller may see (`config:read`), each with its `storage` and, when it saves to a store, its `store`, secrets masked |
+| GET | `/config/{provider}` | One provider with its `store` (404 unknown, 403 without its `requiredPermission`) |
 | PATCH | `/config/{provider}/{section}` | `{ changes, version? }` (`config:write`): 200 with the section, 400 `{ error, errors }` per key, 409 `{ error, version }` for a stale version |
 
 The former `PUT /config` is gone. With the static credentials the admin holds every permission; with the users

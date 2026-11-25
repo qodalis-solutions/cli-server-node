@@ -109,7 +109,8 @@ registered by `mountPlugin`):
 | `access` | `protectServer`, `signIn` (`users`, `external`, `guard-only`), `allowNonExpiringTokens`, `apiTokensWithExternalAuth`, `usersReadOnly`, `groupsReadOnly` | no (set in code) |
 
 Changes apply at once (the auth service reads them on every sign-in, request and password change) and are kept in the
-server's config store. Config changes are audited as `config.update` in the plugin's audit log (`target`
+server's config store, or in the provider's own with `new CliUsersBuilder().setConfigStore(store)` (the host's
+`config.stores.users` still wins). Config changes are audited as `config.update` in the plugin's audit log (`target`
 `config:<provider>.<section>`, `properties.changes` with old and new values, secrets as `***`); grant `config:read`
 and `config:write` through groups (`admin` has them through `*`).
 

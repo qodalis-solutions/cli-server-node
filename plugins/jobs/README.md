@@ -134,8 +134,9 @@ The plugin result carries the `jobs` [config provider](../../README.md#config-pr
 by `mountPlugin`): section `history` with `maxAge`, `maxRunsPerJob`, `failedMaxAge`, `failedMaxRunsPerJob`
 (durations such as `30d`, counts >= 1; empty keeps every run) and `pruneInterval` (read-only). A change applies to the
 next prune (`scheduler.setHistoryDefaults(limits)`, which also registers and starts `jobs:prune-history` when no
-retention was set before) and is kept in the server's config store, so it survives a restart with a file or database
-store. Jobs with their own `history` options keep them.
+retention was set before) and is kept in the server's config store, so it survives a restart with a file, database or
+Redis store. Jobs with their own `history` options keep them. `new CliJobsBuilder().setConfigStore(store)` gives the
+provider a store of its own instead of the server's default one (the host's `config.stores.jobs` still wins).
 
 ```text
 config set jobs.history.maxAge 30d
