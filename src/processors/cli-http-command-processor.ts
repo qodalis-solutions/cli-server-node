@@ -186,6 +186,8 @@ export class CliHttpCommandProcessor extends CliCommandProcessor {
     description = 'Makes HTTP requests from the server';
     /** Listed under the server's built-in commands. */
     module = 'core';
+    /** Requests leave from the server (its network, no CORS): `http:request` on the command and every sub-command. */
+    requiredPermissions = ['http:request'];
     examples = [
         { command: 'http get https://example.com', description: 'Fetches a page from the server' },
         { command: 'http post https://httpbin.org/post --body \'{"a":1}\'', description: 'Posts JSON from the server' },

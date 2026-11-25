@@ -27,6 +27,7 @@ const MAX_GROUP_LENGTH = 64;
 export const CORE_PERMISSIONS: readonly CliPermissionInput[] = [
     { name: 'commands:execute', description: 'Run commands on the server', group: 'Commands' },
     { name: 'shell:execute', description: 'Open an interactive shell on the server', group: 'Commands' },
+    { name: 'http:request', description: 'Make HTTP requests from the server', group: 'Commands' },
     { name: 'files:read', description: 'List, read and download files', group: 'Files' },
     { name: 'files:write', description: 'Upload, create and delete files', group: 'Files' },
     { name: 'data:query', description: "Query the data explorer's sources", group: 'Data' },

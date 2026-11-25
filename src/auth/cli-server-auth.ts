@@ -152,6 +152,7 @@ export const CliServerPermissions = {
     AuditRead: 'audit:read',
     AuditClear: 'audit:clear',
     ShellExecute: 'shell:execute',
+    HttpRequest: 'http:request',
     AdminAccess: 'admin:access',
 } as const;
 
