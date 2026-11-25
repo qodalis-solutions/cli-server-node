@@ -54,6 +54,16 @@ Weather for Paris, France
   Pressure:    1015 hPa
 ```
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install weather`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) returns the weather module; the place used when a command names none is a setting, read on every command (no restart).
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `defaultLocation` | string | `London` | The place when a command names none |
+
 ## License
 
 MIT

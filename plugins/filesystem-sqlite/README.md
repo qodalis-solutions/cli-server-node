@@ -70,6 +70,12 @@ the dashboard, register the store's database with the databases plugin:
 None of its own: the storage is reached through the [filesystem plugin](../filesystem/README.md#terminal-commands)
 (`scp` in the web CLI).
 
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (a storage in the host's SQLite database, through the databases plugin), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install filesystem-sqlite` refuses it. Set it up in code as shown
+above.
+
 ## License
 
 MIT

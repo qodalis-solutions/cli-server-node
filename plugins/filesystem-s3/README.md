@@ -54,6 +54,25 @@ const { app } = createCliServer({
 None of its own: the storage is reached through the [filesystem plugin](../filesystem/README.md#terminal-commands)
 (`scp` in the web CLI).
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install filesystem-s3`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) sets the filesystem API's storage to an S3 (or S3-compatible) bucket, read-only unless `readOnly` is off.
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `bucket` | string | empty | Nothing is served until it is set |
+| `region` | string | `us-east-1` |  |
+| `prefix` | string | empty | Prepended to every path |
+| `endpoint` | string | empty | An S3-compatible service (MinIO) |
+| `accessKeyId` | secret | — | Empty: the AWS default credential chain |
+| `secretAccessKey` | secret | — |  |
+| `readOnly` | boolean | `true` | Writes refused (403) |
+
+The keys are `secret` settings: kept server-side, never returned. Every setting needs a restart. Refused when the
+storage is already set.
+
 ## License
 
 MIT

@@ -153,3 +153,9 @@ table QcliConfig", "persistent": true }`. The name comes from the driver (`pg`'s
 
 `tableExists`, `columnExists`, `renameTable`, `renameColumn` and `adoptLegacyTable(db, legacy, table, columns)` (renames a
 previous release's table and its columns to the new names, keeping the data) work on every dialect.
+
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (it registers the host's databases (their connection pools) and the host's migrations), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install databases` refuses it. Set it up in code as shown
+above.

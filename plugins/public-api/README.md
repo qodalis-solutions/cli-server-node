@@ -150,3 +150,9 @@ A window is a UTC day (`2026-11-19`) or minute (`2026-11-19T23:59`). The guard i
 ## Tokens from one service
 
 The users plugin checks token names and the 20-token limit in the process that creates the token. Several services may validate tokens over shared stores (a second service with `createCliServer({ cliRoutes: false })` and the users plugin's `setGuardOnly()`), but create and revoke tokens from one service only.
+
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (it publishes the host's own API routes with tokens and quotas, and needs the users plugin), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install public-api` refuses it. Set it up in code as shown
+above.

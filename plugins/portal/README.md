@@ -149,3 +149,9 @@ $ config reset portal.branding.logoUrl
 
 The theme's colour tokens (`setTheme({ dark, light })`) stay in code: 21 tokens per scheme would make a long settings
 page, and a wrong colour is easier to catch in review.
+
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (a developer portal whose sections come from the host's public API and docs plugins), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install portal` refuses it. Set it up in code as shown
+above.

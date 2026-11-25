@@ -81,3 +81,9 @@ when `QCLI_TEST_POSTGRES` holds a connection string to an empty database the tes
 None of its own: it stores the [users plugin](../users/README.md#terminal-commands)'s data, managed with that plugin's
 commands (`adduser`, `token`, `audit`, ...). Its migrations show in `databases runs` when the
 [databases plugin](../databases/README.md#terminal-commands) runs them.
+
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (the users plugin's stores in PostgreSQL, passed to `CliUsersBuilder` with the host's pool), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install users-postgres` refuses it. Set it up in code as shown
+above.

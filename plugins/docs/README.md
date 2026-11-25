@@ -87,3 +87,19 @@ Send `Authorization: Bearer <token>` with every request.
 | `build()` | | `{ prefix, router, cliRoutes: false, publicRoutes, pages, portalSection, installedPlugin }` |
 
 `build()` throws on: `invalid docs base path: <path>`, `invalid docs page name: <file>`, `invalid docs page slug: <slug>`, `duplicate docs page: <slug>`, `docs folder not found: <path>`, `invalid order in docs page: <slug>`, `invalid docs variable: <key>`, `docs variable is built in: <key>`.
+
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install docs`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) builds the docs plugin from its settings and mounts it (the pages, `docs` command).
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `folder` | string | `pages` | The Markdown files; relative to `<dataDir>/plugin-data/docs` (created) |
+| `basePath` | string | `/qcli/docs` | Where the guides are served |
+| `title` | string | `Guides` |  |
+| `name` | string | `Documentation` |  |
+
+Put `.md` files in the folder. Every setting needs a restart. Pages added in code (`addPage`) and variables need the
+builder in code.

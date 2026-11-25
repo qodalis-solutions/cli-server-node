@@ -249,6 +249,16 @@ changes.
 
 History retention is also a setting: `config get jobs` / `config set jobs.history.<key> <value>` (core `config` command).
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install jobs`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) builds the scheduler with the server's event bus and mounts it (API, MCP tools, dashboard page). Its settings are its own `jobs` config provider (run history retention).
+
+
+The jobs themselves come from code (other plugins, the host): installed alone it runs the history prune job. Runs are
+kept in memory; a storage provider needs the builder in code.
+
 ## License
 
 MIT

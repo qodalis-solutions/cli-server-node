@@ -166,6 +166,21 @@ This plugin uses AWS SDK v3 for JavaScript:
 - `@aws-sdk/client-dynamodb`, `@aws-sdk/client-ecs`, `@aws-sdk/client-sts`
 - `@aws-sdk/credential-providers`, `@aws-sdk/s3-request-presigner`
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install aws`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) returns the AWS module and applies its settings at start (`aws configure set` still changes them until the next restart).
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `region` | string | empty | e.g. `eu-north-1`; empty: the default chain |
+| `profile` | string | empty | A profile of the shared AWS config |
+| `accessKeyId` | secret | — | Empty: the AWS default credential chain |
+| `secretAccessKey` | secret | — |  |
+
+The keys are `secret` settings: kept server-side, never returned. Every setting needs a restart.
+
 ## License
 
 MIT

@@ -44,6 +44,19 @@ The provider stores the complete directory tree as a nested JSON structure in a 
 None of its own: the storage is reached through the [filesystem plugin](../filesystem/README.md#terminal-commands)
 (`scp` in the web CLI).
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install filesystem-json`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) sets the filesystem API's storage to a virtual tree kept in one JSON file, read-only unless `readOnly` is off.
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `file` | string | `files.json` | Relative to `<dataDir>/plugin-data/filesystem-json` |
+| `readOnly` | boolean | `true` | Writes refused (403) |
+
+Every setting needs a restart. Refused when the storage is already set.
+
 ## License
 
 MIT

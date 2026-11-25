@@ -73,6 +73,25 @@ _cat/indices
 None of its own: the provider is queried through the [data explorer plugin](../data-explorer/README.md#terminal-commands)
 (`data-explorer` in the web CLI).
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install data-explorer-elasticsearch`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) adds one Elasticsearch source to the data explorer from its settings.
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `name` | string | `elasticsearch` | The source name in the data explorer |
+| `description` | string | the engine name |  |
+| `node` | secret | — | `https://user:password@host:9200` (a secret: it may hold credentials) |
+| `readOnly` | boolean | `true` | Queries may only read |
+| `timeoutMs` | number | `30000` | 1000-600000 |
+| `maxRows` | number | `1000` | 1-100000 |
+
+Every setting needs a restart. Set them with `config set data-explorer-elasticsearch.settings.<key> <value>` or the Config page, then restart: until
+the connection is set, no source is added (a warning is logged). The connection is a `secret` setting: kept by the
+server's config store, never returned by the API (`isSet` only). The database driver comes with the package.
+
 ## License
 
 MIT

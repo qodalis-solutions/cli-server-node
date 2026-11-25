@@ -143,6 +143,12 @@ opens a console on a source (`data-explorer [--server <name>]`, `data:query` on 
 `\templates`, `\use`, `\schema`, `\history`, `\help` and `\quit`. With the MCP endpoint on, AI clients get the `data_*`
 tools.
 
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (it is part of the server), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install data-explorer` refuses it. Set it up in code as shown
+above. Install a source instead (`data-explorer-postgres`, `-mysql`, `-mssql`, `-mongo`, `-redis`, `-elasticsearch`, `-sql`): each adds itself to the server's data explorer.
+
 ## License
 
 MIT

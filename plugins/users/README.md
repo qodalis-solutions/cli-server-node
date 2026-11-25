@@ -449,6 +449,12 @@ command (`config get users`).
 | `link approve <code> [--yes]`, `link deny <code>` | signed in | Approves or denies another terminal's link request (as the dashboard does) |
 | `last [user]`, `audit`, `audit clear` | `audit:read`, `audit:clear` | Sign-in history and the audit log (the [audit plugin](../audit/README.md)) |
 
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (it replaces the server's sign-in: an auth provider for every route and socket, its stores and the default admin password), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install users` refuses it. Set it up in code as shown
+above.
+
 ## License
 
 MIT

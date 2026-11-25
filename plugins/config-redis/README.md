@@ -83,6 +83,12 @@ removed afterwards.
 None of its own: the settings are read and changed with the server's [`config` command](../../README.md#terminal-commands)
 (`config list`, `config get`, `config set`, `config reset`).
 
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (a config store, not a plugin: pass it to `createCliServer({ config: { store } })` or `stores`), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install config-redis` refuses it. Set it up in code as shown
+above.
+
 ## License
 
 MIT

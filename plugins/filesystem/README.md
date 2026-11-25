@@ -100,6 +100,21 @@ protected server) through [`@qodalis/cli-scp`](https://www.npmjs.com/package/@qo
 The `ls`, `cat`, `cd`, ... commands of `@qodalis/cli-files` work on the browser's own file system, not the server's.
 Allowed paths are a setting too: `config get filesystem` (core `config` command).
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install filesystem`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) sets the filesystem API's storage to folders of the server's disk (an `OsFileStorageProvider`), wrapped read-only unless `readOnly` is off.
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `roots` | string[] | `[]` | Absolute folders served; none: nothing is served |
+| `readOnly` | boolean | `true` | Uploads, new folders and deletes are refused (403) |
+
+The settings are the provider `filesystem-os` (`config set filesystem-os.settings.roots '["/srv/files"]'`), not
+`filesystem`: that one is the server's own description of the storage in use. Every setting needs a restart. Refused
+when the host (or another plugin) already set the storage. `readOnlyFileStorage(provider)` wraps any storage in code too.
+
 ## License
 
 MIT

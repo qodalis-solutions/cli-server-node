@@ -98,6 +98,19 @@ reads the log through `GET/DELETE /api/v1/qcli/audit`.
 | `last [user]` | `audit:read` | Sign-in history (logins, logouts, failures) |
 | `audit clear` | `audit:clear` | Clears the audit log (asks first) |
 
+## Install from the dashboard
+
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install audit`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into `<dataDir>/server-plugins` and loads it at the next
+start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). Its entry (`qodalis.entry`, `dist/plugin.js`) mounts the audit log with an in-memory store of the size set.
+
+| Setting | Type | Default | |
+|---|---|---|---|
+| `maxEntries` | number | `1000` | 100-1000000; the oldest are dropped |
+
+On a server whose users plugin is mounted in code, the audit plugin is already there (the users plugin brings it): the
+installed copy is skipped (`skipped: already installed by the host`). Every setting needs a restart.
+
 ## License
 
 MIT
