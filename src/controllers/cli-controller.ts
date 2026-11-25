@@ -193,6 +193,8 @@ function mapToDescriptor(processor: ICliCommandProcessor): CliServerCommandDescr
     if (processor.documentation) descriptor.documentation = processor.documentation;
     if (processor.module) descriptor.module = processor.module;
     if (processor.icon) descriptor.icon = processor.icon;
+    // Only the command's own permissions (left out when it has none): the parents' and commands:execute are not repeated
+    if (processor.requiredPermissions?.length) descriptor.requiredPermissions = [...processor.requiredPermissions];
 
     if (processor.parameters?.length) {
         descriptor.parameters = processor.parameters.map(

@@ -33,6 +33,11 @@ export interface CliServerCommandDescriptor {
     module?: string;
     /** One emoji for help. */
     icon?: string;
+    /**
+     * Permissions the command itself declares (left out when it has none). Running it also needs those of the
+     * commands above it and, on a protected server, `commands:execute`; neither is repeated here.
+     */
+    requiredPermissions?: string[];
     parameters?: CliServerCommandParameterDescriptorDto[];
     processors?: CliServerCommandDescriptor[];
 }
