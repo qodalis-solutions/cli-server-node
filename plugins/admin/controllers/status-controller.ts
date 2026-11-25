@@ -12,9 +12,43 @@ export interface StatusDeps {
 
 const startedAt = new Date().toISOString();
 
-/** Default and allowed minutes of `GET /status/history`. */
-const DEFAULT_HISTORY_MINUTES = 60;
-const MAX_HISTORY_MINUTES = 1440;
+/** Default and allowed minutes of `GET /status/history` and `admin status --history`. */
+export const DEFAULT_HISTORY_MINUTES = 60;
+export const MAX_HISTORY_MINUTES = 1440;
+
+/** The server status (`GET /status` and `admin status`). */
+export interface StatusSnapshot {
+    uptimeSeconds: number;
+    startedAt: string;
+    memoryUsageMb: number;
+    cpuUsagePercent: number | null;
+    platform: 'node';
+    platformVersion: string;
+    activeWsConnections: number;
+    activeShellSessions: number;
+    registeredCommands: number;
+    registeredJobs: number;
+    os: string;
+    enabledFeatures: string[];
+}
+
+/** Reads the server status now: process metrics, the latest CPU sample and the counts of `deps`. */
+export function statusSnapshot(deps: StatusDeps, sampler?: StatusSampler): StatusSnapshot {
+    return {
+        uptimeSeconds: Math.floor(process.uptime()),
+        startedAt,
+        memoryUsageMb: processMemoryMb(),
+        cpuUsagePercent: sampler?.latest?.cpuPercent ?? null,
+        platform: 'node',
+        platformVersion: process.version,
+        activeWsConnections: deps.getActiveWsConnections(),
+        activeShellSessions: deps.getActiveShellSessions(),
+        registeredCommands: deps.getRegisteredCommands(),
+        registeredJobs: deps.getRegisteredJobs(),
+        os: process.platform,
+        enabledFeatures: deps.getEnabledFeatures(),
+    };
+}
 
 /**
  * Creates the status controller router.
@@ -38,20 +72,7 @@ export function createStatusController(deps: StatusDeps, sampler?: StatusSampler
     });
 
     router.get('/', (_req: Request, res: Response): void => {
-        res.json({
-            uptimeSeconds: Math.floor(process.uptime()),
-            startedAt,
-            memoryUsageMb: processMemoryMb(),
-            cpuUsagePercent: sampler?.latest?.cpuPercent ?? null,
-            platform: 'node',
-            platformVersion: process.version,
-            activeWsConnections: deps.getActiveWsConnections(),
-            activeShellSessions: deps.getActiveShellSessions(),
-            registeredCommands: deps.getRegisteredCommands(),
-            registeredJobs: deps.getRegisteredJobs(),
-            os: process.platform,
-            enabledFeatures: deps.getEnabledFeatures(),
-        });
+        res.json(statusSnapshot(deps, sampler));
     });
 
     return router;

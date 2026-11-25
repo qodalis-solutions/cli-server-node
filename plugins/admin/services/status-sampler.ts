@@ -123,3 +123,44 @@ export class StatusSampler {
         return Math.round((cpuMicros / wallMicros) * 100 * 10) / 10;
     }
 }
+
+/** Smallest, average and largest of a series (average rounded to 0.1). */
+export interface StatusRange {
+    min: number;
+    avg: number;
+    max: number;
+}
+
+/** A summary of status samples (`admin status --history`). */
+export interface StatusHistorySummary {
+    count: number;
+    /** First and last sample time; absent without samples. */
+    from?: string;
+    to?: string;
+    memoryMb?: StatusRange;
+    /** Over the samples that have a CPU value; absent when none has. */
+    cpuPercent?: StatusRange;
+    /** Largest number of WebSocket connections and shell sessions seen. */
+    maxWsConnections: number;
+    maxShellSessions: number;
+}
+
+function range(values: number[]): StatusRange | undefined {
+    if (values.length === 0) return undefined;
+    const sum = values.reduce((a, b) => a + b, 0);
+    return { min: Math.min(...values), avg: Math.round((sum / values.length) * 10) / 10, max: Math.max(...values) };
+}
+
+/** Count, time span, min/avg/max memory and CPU, and the peak connections of the samples. */
+export function summarizeStatusHistory(samples: readonly StatusSample[]): StatusHistorySummary {
+    const memory = range(samples.map((s) => s.memoryMb));
+    const cpu = range(samples.map((s) => s.cpuPercent).filter((c): c is number => typeof c === 'number'));
+    return {
+        count: samples.length,
+        ...(samples.length ? { from: samples[0].timestamp, to: samples[samples.length - 1].timestamp } : {}),
+        ...(memory ? { memoryMb: memory } : {}),
+        ...(cpu ? { cpuPercent: cpu } : {}),
+        maxWsConnections: samples.reduce((m, s) => Math.max(m, s.activeWsConnections), 0),
+        maxShellSessions: samples.reduce((m, s) => Math.max(m, s.activeShellSessions), 0),
+    };
+}

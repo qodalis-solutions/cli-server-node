@@ -39,3 +39,28 @@ export function resolveRange(fromValue: unknown, toValue: unknown, fromName: str
     if (from.getTime() >= to.getTime()) throw new QueryError(`${fromName} must be before ${toName}`);
     return { from, to };
 }
+
+const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: DAY_MS };
+
+/**
+ * A start time given as a duration back from now (`30s`, `5m`, `1h`, `7d`) or an ISO 8601 date (UTC when it names
+ * no offset). Throws {@link QueryError} for anything else, a zero duration or a time in the future.
+ */
+export function parseSince(value: string, name: string, now = new Date()): Date {
+    const text = value.trim();
+    const relative = /^(\d+)\s*([smhd])$/i.exec(text);
+    if (relative) {
+        const amount = Number(relative[1]);
+        if (amount <= 0) throw new QueryError(`${name} must be more than 0`);
+        return new Date(now.getTime() - amount * UNIT_MS[relative[2].toLowerCase()]);
+    }
+    let date: Date | undefined;
+    try {
+        date = parseQueryTime(text, name);
+    } catch {
+        date = undefined;
+    }
+    if (!date) throw new QueryError(`${name} must be a duration (30s, 5m, 1h, 7d) or an ISO 8601 date`);
+    if (date.getTime() > now.getTime()) throw new QueryError(`${name} is in the future`);
+    return date;
+}

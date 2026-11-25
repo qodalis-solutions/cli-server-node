@@ -163,9 +163,22 @@ export class ModuleRegistry implements ICliProcessorFilter {
      */
     toggle(id: string): ModuleInfo | undefined {
         const entry = this.find(id);
-        if (!entry) return undefined;
+        return entry ? this.apply(entry, this._disabled.has(entry.id)) : undefined;
+    }
 
-        if (this._disabled.has(entry.id)) {
+    /**
+     * Enables or disables a module (idempotent, unlike {@link toggle}): `changed` is false when it already was.
+     * Undefined for an unknown id.
+     */
+    setEnabled(id: string, enabled: boolean): { module: ModuleInfo; changed: boolean } | undefined {
+        const entry = this.find(id);
+        if (!entry) return undefined;
+        const changed = this._disabled.has(entry.id) === enabled;
+        return { module: changed ? this.apply(entry, enabled) : this.toInfo(entry), changed };
+    }
+
+    private apply(entry: ModuleEntry, enabled: boolean): ModuleInfo {
+        if (enabled) {
             this._disabled.delete(entry.id);
             // Re-register processors in case they were removed
             for (const processor of entry.processors) {
@@ -174,7 +187,6 @@ export class ModuleRegistry implements ICliProcessorFilter {
         } else {
             this._disabled.add(entry.id);
         }
-
         return this.toInfo(entry);
     }
 
