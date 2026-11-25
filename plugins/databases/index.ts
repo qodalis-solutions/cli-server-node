@@ -20,6 +20,7 @@ export {
     mysqlConnection,
     mssqlConnection,
     sqliteConnection,
+    cliDatabaseName,
 } from './connection';
 export { quoteIdent, quoteTable, tableExists, columnExists, renameTable, renameColumn, adoptLegacyTable } from './dialects';
 export { createDatabasesController, DatabasesPermissions } from './controller';
@@ -28,4 +29,4 @@ export { DatabasesMcpToolProvider, DatabasesMcpTool } from './mcp';
 export { DATABASES_DASHBOARD_PREFIX, DATABASES_DASHBOARD_MODULE, databasesDashboardPage } from './dashboard-page';
 export { databasesInstalledPlugin, DATABASES_PLUGIN_ID } from './package-info';
 export { CliDatabaseStats, CliDatabaseTableStats, collectDatabaseStats, databaseSize } from './stats';
-export { CliDatabaseConfigStore, CliDatabaseConfigStoreOptions, configStoreMigrations } from './config-store';
+export { CliDatabaseConfigStore, CliDatabaseConfigStoreOptions, configStoreMigrations, SQL_DIALECT_TITLES } from './config-store';

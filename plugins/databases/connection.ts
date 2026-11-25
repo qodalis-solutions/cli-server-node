@@ -15,6 +15,11 @@ export interface CliSqlSession {
 /** A database the plugin migrates: sessions on demand. Adapters below wrap the usual drivers. */
 export interface CliSqlConnection {
     readonly dialect: CliSqlDialect;
+    /**
+     * The database's name when the driver exposes it (a SQLite database: its file name), for
+     * descriptions; never a connection string or credentials.
+     */
+    readonly database?: string;
     /** Runs `fn` on a dedicated connection, released (or closed) afterwards. */
     session<T>(fn: (session: CliSqlSession) => Promise<T>): Promise<T>;
 }
@@ -40,6 +45,28 @@ export function numberPlaceholders(sql: string, style: (n: number) => string): s
     return out;
 }
 
+/**
+ * A database's name for descriptions: the name itself, the last path segment of a connection URL
+ * (`postgres://user:pass@host/db` gives `db`), or a SQLite file's name. Undefined when there is none.
+ */
+export function cliDatabaseName(value: unknown, file = false): string | undefined {
+    if (typeof value !== 'string' || !value.trim()) return undefined;
+    let name = value.trim();
+    if (/^[a-z][a-z0-9+.-]*:/i.test(name) && name.includes('/')) {
+        try {
+            name = decodeURIComponent(new URL(name).pathname);
+        } catch {
+            return undefined;
+        }
+        file = true;
+    } else if (name.includes('://') || name.includes('@') || name.includes(';') || name.includes('=')) {
+        // A connection string, not a name: never shown
+        return undefined;
+    }
+    if (file) name = name.split(/[\\/]/).filter(Boolean).pop() ?? '';
+    return name || undefined;
+}
+
 // Structural types of the drivers, so the plugin needs none of them installed
 interface PgClient {
     query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
@@ -47,6 +74,7 @@ interface PgClient {
 }
 interface PgPool {
     connect(): Promise<PgClient>;
+    options?: { database?: string; connectionString?: string };
 }
 interface MysqlConnection {
     query(sql: string, values?: unknown[]): Promise<[unknown, unknown]>;
@@ -54,6 +82,7 @@ interface MysqlConnection {
 }
 interface MysqlPool {
     getConnection(): Promise<MysqlConnection>;
+    pool?: { config?: { connectionConfig?: { database?: string } } };
 }
 interface MssqlRequest {
     input(name: string, value: unknown): MssqlRequest;
@@ -74,12 +103,14 @@ interface SqliteStatement {
 interface SqliteDatabase {
     prepare(sql: string): SqliteStatement;
     exec(sql: string): unknown;
+    name?: string;
 }
 
 /** A PostgreSQL database from a `pg` Pool. */
 export function postgresConnection(pool: PgPool): CliSqlConnection {
     return {
         dialect: 'postgres',
+        database: cliDatabaseName(pool.options?.database) ?? cliDatabaseName(pool.options?.connectionString),
         async session(fn) {
             const client = await pool.connect();
             try {
@@ -106,6 +137,7 @@ export function postgresConnection(pool: PgPool): CliSqlConnection {
 export function mysqlConnection(pool: MysqlPool): CliSqlConnection {
     return {
         dialect: 'mysql',
+        database: cliDatabaseName(pool.pool?.config?.connectionConfig?.database),
         async session(fn) {
             const conn = await pool.getConnection();
             try {
@@ -133,6 +165,7 @@ export function mysqlConnection(pool: MysqlPool): CliSqlConnection {
 export function mssqlConnection(pool: MssqlPool): CliSqlConnection {
     return {
         dialect: 'mssql',
+        database: cliDatabaseName(pool.config?.database),
         async session(fn) {
             const Pool = pool.constructor as new (config: Record<string, unknown>) => MssqlPool;
             const single = await new Pool({ ...pool.config, pool: { min: 1, max: 1 } }).connect();
@@ -177,6 +210,7 @@ export function sqliteConnection(db: SqliteDatabase): CliSqlConnection {
     };
     return {
         dialect: 'sqlite',
+        database: db.name === ':memory:' || db.name === '' ? undefined : cliDatabaseName(db.name, true),
         session(fn) {
             const run = queue.then(() => fn(session));
             queue = run.catch(() => undefined);

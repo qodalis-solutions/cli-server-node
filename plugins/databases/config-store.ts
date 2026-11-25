@@ -3,12 +3,13 @@ import {
     applyCliConfigChanges,
     qcliTableName,
     type CliConfigSource,
+    type CliConfigStoreDescription,
     type CliConfigStoredSection,
     type CliConfigValue,
     type CliTableNameOptions,
     type ICliConfigStore,
 } from '@qodalis/cli-server-abstractions';
-import type { CliSqlConnection, CliSqlDialect, CliSqlSession } from './connection';
+import { cliDatabaseName, type CliSqlConnection, type CliSqlDialect, type CliSqlSession } from './connection';
 import { quoteIdent, quoteTable, tableExists, TRANSACTION } from './dialects';
 import { CliMigrationRunner } from './runner';
 import { codeSource, type CliMigrationSource } from './sources';
@@ -17,9 +18,14 @@ import { codeSource, type CliMigrationSource } from './sources';
 export interface CliDatabaseConfigStoreOptions extends Pick<CliTableNameOptions, 'tablePrefix' | 'schema'> {
     /** The database (`postgresConnection(pool)`, `mysqlConnection`, `mssqlConnection`, `sqliteConnection`). */
     connection: CliSqlConnection;
+    /** The database's name in the store's description, when the connection does not expose it (a name only: a connection string is not shown). */
+    database?: string;
     /** The table's name (default `QcliConfig`: the prefix and per-table override follow the plugin table names). */
     tables?: { Config?: string };
 }
+
+/** Dialects as people name them. */
+export const SQL_DIALECT_TITLES: Record<CliSqlDialect, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mssql: 'SQL Server', sqlite: 'SQLite' };
 
 const COLUMN_TYPES: Record<CliSqlDialect, { key: string; long: string; time: string; int: string }> = {
     postgres: { key: 'varchar(150)', long: 'text', time: 'timestamptz', int: 'integer' },
@@ -77,10 +83,12 @@ export class CliDatabaseConfigStore implements ICliConfigStore {
     readonly connection: CliSqlConnection;
     private readonly table: string;
     private readonly schema?: string;
+    private readonly database?: string;
 
     constructor(options: CliDatabaseConfigStoreOptions) {
         this.connection = options.connection;
         this.schema = options.schema;
+        this.database = cliDatabaseName(options.database, options.connection.dialect === 'sqlite') ?? options.connection.database;
         const name = qcliTableName('Config', { tablePrefix: options.tablePrefix, tables: options.tables, schema: options.schema });
         this.table = name;
         this.migrationSource = configStoreMigrations(name, options.schema);
@@ -91,6 +99,18 @@ export class CliDatabaseConfigStore implements ICliConfigStore {
             if ('status' in run && run.status === 'failed') throw new Error(`config store schema: ${run.error}`);
         });
         this.ready.catch(() => undefined);
+    }
+
+    /** `PostgreSQL database qcli, table QcliConfig`: the dialect, the database's name when known and the table; never credentials. */
+    describe(): CliConfigStoreDescription {
+        const dialect = SQL_DIALECT_TITLES[this.connection.dialect] ?? this.connection.dialect;
+        const table = this.schema ? `${this.schema}.${this.table}` : this.table;
+        return {
+            kind: 'database',
+            title: 'Database',
+            detail: `${dialect}${this.database ? ` database ${this.database}` : ''}, table ${table}`,
+            persistent: true,
+        };
     }
 
     private sql(dialect: CliSqlDialect) {
