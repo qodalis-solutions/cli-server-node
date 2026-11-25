@@ -6,6 +6,8 @@ export default defineConfig({
         // One copy of each driver, the root's, even when a plugin has its own (after building it): the tests mock them
         dedupe: ['@elastic/elasticsearch', 'ioredis', 'mssql', 'mysql2', 'pg', 'mongodb', 'better-sqlite3'],
         alias: {
+            // The demo's sources (demo/src) import the server package: the sources, not dist
+            '@qodalis/cli-server-node': path.resolve(__dirname, 'src/index.ts'),
             '@qodalis/cli-server-abstractions': path.resolve(
                 __dirname,
                 'packages/abstractions/src/index.ts',
