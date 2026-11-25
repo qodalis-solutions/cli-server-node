@@ -1,5 +1,15 @@
 export { CliAdminBuilder, CliAdminBuildDeps, CliAdminPluginResult, IExecutorLike } from './cli-admin-builder';
 export {
+    CliAdminCommandProcessor,
+    AdminCommandDeps,
+    ADMIN_MODULE_NAME,
+    LOGS_READ_PERMISSION,
+    formatLogLine,
+    formatDuration,
+    formatTable,
+} from './commands/admin-command';
+export { statusSnapshot, StatusSnapshot } from './controllers/status-controller';
+export {
     LogRingBuffer,
     LogEntry,
     LogQueryParams,
@@ -18,6 +28,9 @@ export {
     StatusSampleSource,
     STATUS_SAMPLE_INTERVAL_SECONDS,
     STATUS_HISTORY_CAPACITY,
+    summarizeStatusHistory,
+    StatusHistorySummary,
+    StatusRange,
 } from './services/status-sampler';
 export { ModuleRegistry, ModuleInfo, IRegistryLike, IBuilderLike } from './services/module-registry';
 export { AdminConfig, AdminCredentials } from './services/admin-config';

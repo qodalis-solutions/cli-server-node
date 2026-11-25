@@ -17,6 +17,7 @@ import { resolveDashboardDir } from './services/dashboard-dir';
 import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
 import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './services/admin-branding';
 import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-info';
+import { ADMIN_MODULE_NAME, CliAdminCommandProcessor } from './commands/admin-command';
 import { join } from 'path';
 import * as crypto from 'crypto';
 
@@ -73,6 +74,11 @@ export interface CliAdminPluginResult {
     routePermissions: Array<{ path: string; read: string; write: string }>;
     /** The `auth` (read-only) and `logs` config providers, registered with the server's (also by `build`). */
     configProviders: ICliConfigProvider[];
+    /**
+     * The `admin` terminal command (`status`, `plugins`, `clients`, `logs`), registered by `mountPlugin`; needs
+     * `admin:access` on a protected server (`admin logs` also `logs:read`).
+     */
+    module: ICliModule;
 }
 
 /**
@@ -341,6 +347,15 @@ export class CliAdminBuilder {
             logBuffer.restoreConsole();
         };
 
+        const adminCommand = new CliAdminCommandProcessor({
+            statusDeps,
+            sampler: statusSampler,
+            moduleRegistry,
+            logBuffer,
+            clients: eventSocketManager,
+            installedPlugins: () => builder.installedPlugins ?? [],
+        });
+
         return {
             prefix: '/api/v1/qcli',
             dashboardPrefix: '/qcli/admin',
@@ -354,6 +369,14 @@ export class CliAdminBuilder {
             installedPlugin: adminInstalledPlugin,
             routePermissions: [{ path: '/api/v1/qcli/config', read: CliConfigPermissions.Read, write: CliConfigPermissions.Write }],
             configProviders,
+            module: {
+                name: ADMIN_MODULE_NAME,
+                version: adminInstalledPlugin.version ?? '1.0.0',
+                description: 'Server administration from the terminal: status, command modules, WebSocket clients, logs',
+                author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
+                icon: '🛠️',
+                processors: [adminCommand],
+            },
         };
     }
 
