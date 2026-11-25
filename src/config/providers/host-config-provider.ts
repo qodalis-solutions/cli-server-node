@@ -1,4 +1,4 @@
-import type { CliConfigEntry, CliConfigSection, CliConfigValue, ICliConfigProvider } from '@qodalis/cli-server-abstractions';
+import type { CliConfigEntry, CliConfigProviderStorage, CliConfigSection, CliConfigValue, ICliConfigProvider } from '@qodalis/cli-server-abstractions';
 
 /**
  * The environment variables the `host` provider shows by default: the server's own (`QCLI_*`) and a few harmless
@@ -62,6 +62,11 @@ export class CliHostConfigProvider implements ICliConfigProvider {
     readonly title = 'Host';
     readonly description = 'Server options and environment variables (read-only, secrets masked)';
     readonly order = 20;
+    readonly storage: CliConfigProviderStorage = {
+        kind: 'options',
+        description: 'Server options and environment variables',
+        sources: ['Server options', 'Environment variables'],
+    };
     private readonly include: RegExp[];
     private readonly exclude: RegExp[];
     private readonly secrets: string[];

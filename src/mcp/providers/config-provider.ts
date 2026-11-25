@@ -48,7 +48,7 @@ export class ConfigMcpToolProvider implements McpToolProvider {
         return [
             {
                 name: 'config_list',
-                description: "The server's config providers and their sections (ids, titles, whether writable, versions); read a section with config_get",
+                description: "Where config changes are saved (store), the server's config providers (where each reads its settings from) and their sections (ids, titles, whether writable, versions); read a section with config_get",
                 inputSchema: mcpObjectSchema(),
                 requiredPermissions: [CliConfigPermissions.Read],
                 annotations: { readOnlyHint: true },
@@ -56,11 +56,13 @@ export class ConfigMcpToolProvider implements McpToolProvider {
                     this.run(async () => {
                         const providers = await this.service.list(this.context(ctx.auth));
                         return mcpJson({
+                            store: this.service.describeStore(),
                             providers: providers.map((p) => ({
                                 id: p.id,
                                 title: p.title,
                                 description: p.description,
                                 writable: p.writable,
+                                storage: p.storage,
                                 sections: p.sections.map((s) => ({ id: s.id, title: s.title, mutable: s.mutable, version: s.version, keys: s.entries.length })),
                             })),
                         });

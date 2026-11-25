@@ -1,5 +1,5 @@
 import * as os from 'os';
-import { formatCliConfigDuration, type CliConfigSection, type ICliConfigProvider } from '@qodalis/cli-server-abstractions';
+import { formatCliConfigDuration, type CliConfigProviderStorage, type CliConfigSection, type ICliConfigProvider } from '@qodalis/cli-server-abstractions';
 
 /**
  * `server` (read-only): the server process (today's admin `server` section): platform, Node.js
@@ -10,6 +10,7 @@ export class CliServerConfigProvider implements ICliConfigProvider {
     readonly title = 'Server';
     readonly description = 'The server process (read-only)';
     readonly order = 0;
+    readonly storage: CliConfigProviderStorage = { kind: 'runtime', description: 'Read from the running server process', sources: [] };
     private readonly startedAt = new Date();
 
     constructor(private readonly version: string) {}

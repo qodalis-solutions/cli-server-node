@@ -4,6 +4,7 @@ import {
     CliConfigPermissions,
     CliProcessCommand,
     cliConfigContext,
+    describeCliConfigStoreLine,
     getCliCaller,
     getPositionals,
     isCliConfigError,
@@ -112,7 +113,7 @@ function describeEntry(provider: string, section: CliConfigSectionView, e: CliCo
 
 class ConfigListProcessor extends CliCommandProcessor {
     command = 'list';
-    description = 'Lists the config providers and their sections';
+    description = 'Lists where changes are saved, the config providers and their sections';
     requiredPermissions = [CliConfigPermissions.Read];
 
     constructor(private readonly service: ICliConfigService) {
@@ -122,10 +123,12 @@ class ConfigListProcessor extends CliCommandProcessor {
     async handleAsync(): Promise<string> {
         try {
             const providers = await this.service.list(contextOf());
-            if (providers.length === 0) return 'No config providers.';
-            const lines: string[] = [];
+            const lines: string[] = [`Store: ${describeCliConfigStoreLine(this.service.describeStore())}`];
+            if (providers.length === 0) return [...lines, 'No config providers.'].join('\n');
             for (const p of providers) {
-                lines.push(`${p.id}  ${p.title}${p.writable ? '' : '  (read-only)'}`);
+                const from = p.storage?.sources?.length ? `from ${p.storage.sources.join(', ')}` : '';
+                const notes = [p.writable ? '' : 'read-only', from].filter(Boolean).join('; ');
+                lines.push(`${p.id}  ${p.title}${notes ? `  (${notes})` : ''}`);
                 for (const s of p.sections) {
                     lines.push(`  ${s.id.padEnd(16)} ${String(s.entries.length).padStart(3)} setting(s)${s.version !== null ? `  version ${s.version}` : ''}`);
                 }

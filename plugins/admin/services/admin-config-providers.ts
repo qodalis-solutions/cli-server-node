@@ -16,6 +16,7 @@ export function createAdminAuthConfigProvider(config: AdminConfig, mode: () => A
         title: 'Authentication',
         description: 'How the admin dashboard signs users in (read-only)',
         order: 10,
+        storage: { kind: 'options', description: "Read from the admin plugin's options", sources: [] },
         getSections(): CliConfigSection[] {
             const current = mode();
             return [

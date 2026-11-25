@@ -8,6 +8,7 @@ import {
     CliConfigPermissions,
     CliConfigValidationError,
     cloneCliConfigValue,
+    describeCliConfigStore,
     isCliConfigWriter,
     validateCliConfigValue,
     type AuditEntry,
@@ -15,9 +16,11 @@ import {
     type CliConfigEntry,
     type CliConfigEntryView,
     type CliConfigErrors,
+    type CliConfigProviderStorage,
     type CliConfigProviderView,
     type CliConfigSection,
     type CliConfigSectionView,
+    type CliConfigStoreDescription,
     type CliConfigUpdateRequest,
     type CliConfigUpdateResponse,
     type CliConfigValue,
@@ -88,6 +91,19 @@ export function toCliConfigSectionView(section: CliConfigSection, writable: bool
     };
 }
 
+/** A provider's `storage` as the API returns it: its own, else `custom` (saved / read by the provider). */
+export function cliConfigProviderStorageOf(provider: ICliConfigProvider): Required<CliConfigProviderStorage> {
+    const own = provider.storage;
+    if (own && typeof own.kind === 'string') {
+        return {
+            kind: own.kind,
+            description: own.description ?? '',
+            sources: Array.isArray(own.sources) ? own.sources.filter((s) => typeof s === 'string') : [],
+        };
+    }
+    return { kind: 'custom', description: isCliConfigWriter(provider) ? 'Saved by the provider' : 'Read by the provider', sources: [] };
+}
+
 /** How a value appears in the audit log: a secret as `***`, or null when cleared/unset. */
 function auditValue(view: CliConfigEntryView | undefined, raw: CliConfigValue | undefined, side: 'old' | 'new'): CliConfigValue {
     if (view?.sensitive) {
@@ -141,8 +157,14 @@ export class CliConfigService implements ICliConfigService {
             description: provider.description ?? '',
             order: provider.order ?? DEFAULT_CONFIG_PROVIDER_ORDER,
             writable: writer && context.hasPermission(CliConfigPermissions.Write),
+            storage: cliConfigProviderStorageOf(provider),
             sections: (sections ?? []).map((s) => toCliConfigSectionView(s, writer)),
         };
+    }
+
+    /** Where writable settings are saved: the store's own description (`custom` when it has none). */
+    describeStore(): CliConfigStoreDescription {
+        return describeCliConfigStore(this.registry.store);
     }
 
     async list(context: CliConfigContext): Promise<CliConfigProviderView[]> {

@@ -6,6 +6,7 @@ export {
     CliConfigAuditChange,
     toCliConfigEntryView,
     toCliConfigSectionView,
+    cliConfigProviderStorageOf,
 } from './cli-config-service';
 export { CliConfigCommandProcessor, formatConfigValue } from './config-command';
 export { CliServerConfigProvider } from './providers/server-config-provider';
