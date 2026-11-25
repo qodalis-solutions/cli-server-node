@@ -19,6 +19,8 @@ import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './s
 import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-info';
 import { ADMIN_MODULE_NAME, CliAdminCommandProcessor } from './commands/admin-command';
 import { createDashboardMarketplaceController } from './controllers/dashboard-marketplace-controller';
+import { createServerMarketplaceController } from './controllers/server-marketplace-controller';
+import { PLUGINS_INSTALL_PERMISSION, ServerPluginMarketplace } from './services/server-plugin-marketplace';
 import {
     DASHBOARD_INSTALL_PERMISSION,
     DashboardMarketplace,
@@ -91,6 +93,11 @@ export interface CliAdminPluginResult {
      * undefined when turned off (`setMarketplace(false)`) or the builder cannot add pages at runtime.
      */
     marketplace?: DashboardMarketplace;
+    /**
+     * Server plugins from the marketplace (`setMarketplace`, the package of this server's platform), served at
+     * `/api/v1/qcli/server/marketplace`; undefined when the marketplace is off or the builder has no runtime plugins.
+     */
+    serverMarketplace?: ServerPluginMarketplace;
     /** Serves the marketplace plugins' files at `/qcli/modules/<id>/` (mounted by `mountPlugin`). */
     assetRoutes: Array<{ prefix: string; handler: DashboardMarketplace['handler'] }>;
     /** Receives the server's event bus from `mountPlugin` (`dashboard:extensions-changed`), unless `deps.eventBus` was given. */
@@ -124,11 +131,11 @@ export class CliAdminBuilder {
     private _marketplace: DashboardMarketplaceOptions | false = {};
 
     /**
-     * Dashboard plugins from the marketplace: `url` (default `https://plugins.qodalis.com`), `install`
+     * Dashboard and server plugins from the marketplace: `url` (default `https://plugins.qodalis.com`), `install`
      * (`verified`, the default: listed versions of verified publishers only; `listed`: any listed version; `off`:
-     * browse only), `dir` (default `./qcli-data/dashboard-plugins`), and `fetch` / `cdns` / `timeoutMs` for the
-     * HTTP client. `false` turns the marketplace off (no routes, installed plugins not loaded). Throws for an
-     * invalid url or policy when built.
+     * browse only), `dir` (dashboard plugins, default `./qcli-data/dashboard-plugins`), `fetch` / `cdns` /
+     * `timeoutMs` for the HTTP client, and for server plugins `npmRegistry` and `npm` (the runner). `false` turns the
+     * marketplace off (no routes, installed dashboard plugins not loaded). Throws for an invalid url or policy when built.
      */
     setMarketplace(options: DashboardMarketplaceOptions | false): CliAdminBuilder {
         this._marketplace = options === false ? false : { ...options };
@@ -353,11 +360,32 @@ export class CliAdminBuilder {
             router.use('/dashboard/marketplace', authMiddleware, createDashboardMarketplaceController(marketplace));
         }
 
+        // Server plugins from the marketplace: installed with npm into <dataDir>/server-plugins, loaded at the next start
+        let serverMarketplace: ServerPluginMarketplace | undefined;
+        if (this._marketplace !== false && builder.serverPlugins) {
+            serverMarketplace = new ServerPluginMarketplace(this._marketplace, {
+                plugins: builder.serverPlugins,
+                installedPlugins: () => builder.installedPlugins ?? [],
+                restart: builder.restart,
+                audit: () => builder.auditSink,
+                publish: (type, data) => {
+                    if (bus) void bus.publish(type, data, { permission: 'admin:access' });
+                    else eventSocketManager.broadcastMessage({ type, ...data });
+                },
+            });
+            router.use('/server/marketplace', authMiddleware, createServerMarketplaceController(serverMarketplace));
+        }
+
         router.get('/dashboard/extensions', authMiddleware, (_req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
             const extensions = (builder.dashboardExtensions ?? []) as ReadonlyArray<{ id: string }>;
             res.json({
-                extensions: marketplace ? extensions.map((e) => (marketplace!.hasExtension(e.id) ? { ...e, source: 'marketplace' } : e)) : extensions,
+                extensions: marketplace
+                    ? extensions.map((e) => {
+                          const pkg = marketplace!.packageOf(e.id);
+                          return pkg ? { ...e, source: 'marketplace', package: pkg } : e;
+                      })
+                    : extensions,
             });
         });
 
@@ -426,6 +454,7 @@ export class CliAdminBuilder {
             clients: eventSocketManager,
             installedPlugins: () => builder.installedPlugins ?? [],
             marketplace,
+            serverMarketplace,
             restart: builder.restart,
         });
 
@@ -443,6 +472,7 @@ export class CliAdminBuilder {
             routePermissions: [
                 { path: '/api/v1/qcli/config', read: CliConfigPermissions.Read, write: CliConfigPermissions.Write },
                 { path: '/api/v1/qcli/dashboard/marketplace', read: 'admin:access', write: DASHBOARD_INSTALL_PERMISSION },
+                { path: '/api/v1/qcli/server/marketplace', read: 'admin:access', write: PLUGINS_INSTALL_PERMISSION },
             ],
             configProviders,
             module: {
@@ -454,6 +484,7 @@ export class CliAdminBuilder {
                 processors: [adminCommand],
             },
             marketplace,
+            serverMarketplace,
             assetRoutes: marketplace ? [{ prefix: DASHBOARD_MODULES_PREFIX, handler: marketplace.handler }] : [],
             setEventBus: (eventBus: ICliEventBus) => {
                 bus ??= eventBus;

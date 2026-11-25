@@ -71,7 +71,8 @@ describe('admin command: registration', () => {
         expect(subPermissions(cli, 'admin')).toEqual({ status: undefined, plugins: undefined, clients: undefined, logs: ['logs:read'] });
         expect(cli.builder.modules.some((m) => m.name === 'admin')).toBe(true);
         const plugins = root.processors!.find((p) => p.command === 'plugins')!;
-        expect(plugins.processors!.map((p) => p.command)).toEqual(['list', 'enable', 'disable']);
+        // Modules, then server plugins from the marketplace
+        expect(plugins.processors!.map((p) => p.command)).toEqual(['list', 'enable', 'disable', 'search', 'installed', 'install', 'update', 'remove']);
     });
 });
 

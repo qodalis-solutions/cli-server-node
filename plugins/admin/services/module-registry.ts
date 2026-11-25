@@ -72,6 +72,8 @@ export interface IBuilderLike {
     readonly configProviders?: ReadonlyArray<{ readonly id: string }>;
     /** Registers a config provider (`CliBuilder.addConfigProvider`): the admin plugin adds `auth` and `logs`. */
     addConfigProvider?(provider: ICliConfigProvider): unknown;
+    /** The server's plugins installed at runtime (`CliBuilder.serverPlugins`): the server marketplace. */
+    readonly serverPlugins?: import('@qodalis/cli-server-abstractions').ICliServerPlugins;
     /** The server's restart service (`CliBuilder.restart`): `admin restart`. */
     readonly restart?: import('@qodalis/cli-server-abstractions').ICliServerRestart;
 }

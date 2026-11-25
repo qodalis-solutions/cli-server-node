@@ -90,7 +90,7 @@ describe('dashboard marketplace: browsing', () => {
 
     it('GET /plugins proxies kind=dashboard and annotates each item', async () => {
         const net = new FakeNet();
-        net.publish(JOBS, { icon: '⏱️', title: 'Jobs', serverPackages: { node: '@qodalis/cli-server-plugin-jobs' }, versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
+        net.publish(JOBS, { icon: '⏱️', title: 'Jobs', serverPackages: [{ ecosystem: 'npm', name: '@qodalis/cli-server-plugin-jobs', install: 'npm install @qodalis/cli-server-plugin-jobs' }, { ecosystem: 'pypi', name: 'qodalis-cli-server-plugin-jobs', install: 'pip install qodalis-cli-server-plugin-jobs' }], versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
         net.publish(TICKETS, { verified: false, versions: [{ version: '2.0.0' }] });
         net.publish('@acme/cli-dashboard-next', { versions: [{ version: '3.0.0', dashboardApi: 2 }] });
         net.publish('@acme/web-thing', { kind: 'web', versions: [{ version: '1.0.0' }] });
@@ -238,7 +238,7 @@ describe('dashboard marketplace: install, update, remove', () => {
             `${JSDELIVR}/${JOBS}@1.1.0/dist/extension.css`,
         ]);
 
-        // live in the extensions list, marked as from the marketplace
+        // live in the extensions list, marked as from the marketplace with its package (the dashboard needs no lookup)
         const after = await request(h.cli.app).get(`${V1}/dashboard/extensions`).set(auth(h.token));
         const page = after.body.extensions.find((e: { id: string }) => e.id === 'jobs');
         expect(page).toEqual({
@@ -249,7 +249,10 @@ describe('dashboard marketplace: install, update, remove', () => {
             entry: expect.stringMatching(/^\/qcli\/modules\/jobs\/extension\.js\?v=[0-9a-f]{12}$/),
             styles: [expect.stringMatching(/^\/qcli\/modules\/jobs\/extension\.css\?v=[0-9a-f]{12}$/)],
             source: 'marketplace',
+            package: JOBS,
         });
+        // a built-in page has neither
+        expect(Object.keys(after.body.extensions.find((e: { id: string }) => e.id !== 'jobs') ?? {})).not.toContain('package');
 
         // served from this server's origin, no sign-in, with an ETag
         const js = await request(h.cli.app).get(page.entry);
@@ -623,7 +626,7 @@ describe('dashboard marketplace: permissions on a protected server', () => {
 describe('dashboard marketplace: admin dashboard command', () => {
     it('list, search, install name@version, update, remove', async () => {
         const net = new FakeNet();
-        net.publish(TICKETS, { title: 'Tickets', serverPackages: { node: '@acme/cli-server-plugin-tickets' }, versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
+        net.publish(TICKETS, { title: 'Tickets', serverPackages: [{ ecosystem: 'npm', name: '@acme/cli-server-plugin-tickets', install: 'npm install @acme/cli-server-plugin-tickets' }], versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
         net.publish('@other/cli-dashboard-crm', { verified: false, versions: [{ version: '0.1.0' }] });
         const h = await start({ net });
         const run = (line: string) => runCommand(h.cli, line).then((r) => r.text);

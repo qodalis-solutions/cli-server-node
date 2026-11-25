@@ -21,6 +21,8 @@ import type { CliInstalledPlugin } from '../services/package-info';
 import { QueryError, parseSince } from '../services/query-time';
 import { StatusSampler, summarizeStatusHistory } from '../services/status-sampler';
 import { AdminRestartProcessor } from './admin-restart-command';
+import { serverPluginProcessors } from './admin-server-plugins-command';
+import type { ServerPluginMarketplace } from '../services/server-plugin-marketplace';
 import type { ICliServerRestart } from '@qodalis/cli-server-abstractions';
 
 /** The permission `admin logs` needs besides `admin:access` (as the log socket and event audience do). */
@@ -39,6 +41,8 @@ export interface AdminCommandDeps {
     installedPlugins: () => ReadonlyArray<CliInstalledPlugin>;
     /** Dashboard plugins from the marketplace (`admin dashboard`); absent when the marketplace is off. */
     marketplace?: DashboardMarketplace;
+    /** Server plugins from the marketplace (`admin plugins search|installed|install|update|remove`). */
+    serverMarketplace?: ServerPluginMarketplace;
     /** The server's restart service (`admin restart`); absent on a server without one. */
     restart?: ICliServerRestart;
 }
@@ -216,15 +220,16 @@ class AdminPluginsSwitchProcessor extends CliCommandProcessor {
 class AdminPluginsProcessor extends CliCommandProcessor {
     command = 'plugins';
     aliases = ['modules'];
-    description = 'Command modules: list them, enable or disable one';
+    description = 'Command modules: list them, enable or disable one; server plugins from the marketplace: search, installed, install, update, remove';
     processors: ICliCommandProcessor[];
     parameters = [jsonParam];
     private readonly list: AdminPluginsListProcessor;
 
-    constructor(registry: ModuleRegistry) {
+    constructor(registry: ModuleRegistry, serverMarketplace?: ServerPluginMarketplace) {
         super();
         this.list = new AdminPluginsListProcessor(registry);
         this.processors = [this.list, new AdminPluginsSwitchProcessor(registry, true), new AdminPluginsSwitchProcessor(registry, false)];
+        if (serverMarketplace) this.processors.push(...serverPluginProcessors(serverMarketplace));
     }
 
     handleAsync(command: CliProcessCommand): Promise<string> {
@@ -607,7 +612,7 @@ export class CliAdminCommandProcessor extends CliCommandProcessor {
     constructor(deps: AdminCommandDeps) {
         super();
         this.status = new AdminStatusProcessor(deps);
-        this.processors = [this.status, new AdminPluginsProcessor(deps.moduleRegistry), new AdminClientsProcessor(deps.clients), new AdminLogsProcessor(deps.logBuffer)];
+        this.processors = [this.status, new AdminPluginsProcessor(deps.moduleRegistry, deps.serverMarketplace), new AdminClientsProcessor(deps.clients), new AdminLogsProcessor(deps.logBuffer)];
         if (deps.marketplace) this.processors.push(new AdminDashboardProcessor(deps.marketplace));
         if (deps.restart) this.processors.push(new AdminRestartProcessor(deps.restart));
     }

@@ -16,7 +16,7 @@ interface GateCaller {
 }
 
 /** Who is asking and what they may do: the server's caller, else the dashboard session (the static admin may do everything). */
-function callerOf(req: Request): DashboardMarketplaceActor & { permissions: string[] } {
+export function callerOf(req: Request): DashboardMarketplaceActor & { permissions: string[] } {
     const gate = (req as Request & { qcliServerAuth?: GateCaller }).qcliServerAuth;
     if (gate) return { userId: gate.userId, userName: gate.userName, permissions: gate.permissions ?? [] };
     const user = (req as AuthenticatedRequest).user;
@@ -24,7 +24,7 @@ function callerOf(req: Request): DashboardMarketplaceActor & { permissions: stri
     return { userName: user?.username ?? 'admin', permissions };
 }
 
-function sendError(res: Response, err: unknown): void {
+export function sendError(res: Response, err: unknown): void {
     if (err instanceof DashboardMarketplaceError) {
         res.status(err.status).json({ error: err.message, ...(err.errors ? { errors: err.errors } : {}) });
         return;
@@ -34,7 +34,7 @@ function sendError(res: Response, err: unknown): void {
 }
 
 /** A whole number query parameter in a range; undefined when absent, 400 when invalid. */
-function intParam(value: unknown, name: string, max: number): number | undefined {
+export function intParam(value: unknown, name: string, max: number): number | undefined {
     if (value === undefined || value === '') return undefined;
     const n = Number(value);
     if (typeof value !== 'string' || !Number.isInteger(n) || n < 1 || n > max) throw new DashboardMarketplaceError(400, `invalid ${name}`);
@@ -42,7 +42,7 @@ function intParam(value: unknown, name: string, max: number): number | undefined
 }
 
 /** The package name below `prefix` (`/installed/@acme/tickets` or `/installed/%40acme%2Ftickets`). */
-function nameBelow(req: Request, prefix: string): string {
+export function nameBelow(req: Request, prefix: string): string {
     try {
         return decodeURIComponent(req.path.slice(prefix.length));
     } catch {

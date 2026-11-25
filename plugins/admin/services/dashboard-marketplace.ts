@@ -64,6 +64,10 @@ export interface DashboardMarketplaceOptions {
     cdns?: string[];
     /** Timeout of each request in milliseconds (default 15000). */
     timeoutMs?: number;
+    /** Server plugins: the npm registry their tarballs and integrity come from (default `https://registry.npmjs.org`). */
+    npmRegistry?: string;
+    /** Server plugins: runs npm (default: the `npm` on the PATH; tests pass a fake). */
+    npm?: import('./server-plugin-marketplace').NpmRunner;
 }
 
 /** A refused or failed marketplace operation: the HTTP status and the `{ error }` text (`errors`: per-key messages of settings). */
@@ -414,6 +418,11 @@ export class DashboardMarketplace {
     /** True when `id` is the page of an installed marketplace plugin. */
     hasExtension(id: string): boolean {
         return this.plugins.has(id);
+    }
+
+    /** The npm package of the marketplace plugin whose page is `id`; undefined for any other page. */
+    packageOf(id: string): string | undefined {
+        return this.plugins.get(id)?.record.name;
     }
 
     // ---------------------------------------------------------------- browsing
