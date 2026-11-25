@@ -68,6 +68,29 @@ function intArg(command: CliProcessCommand, names: string[], fallback: number, m
 const pct = (n: number) => `${n}%`;
 const mb = (n: number) => `${n} MB`;
 
+/** 512 -> `512 MB`; from 1024 MB in GB with one decimal: 16384 -> `16 GB`, 10035 -> `9.8 GB`. */
+export function formatMemorySize(megabytes: number): string {
+    if (megabytes < 1024) return `${Math.round(megabytes)} MB`;
+    return `${Math.round((megabytes / 1024) * 10) / 10} GB`;
+}
+
+/**
+ * The Memory line of `admin status`: the process, then the machine's (or the container's) use of the RAM the server
+ * can use: `146 MB (process) · machine 9.8 GB of 16 GB used (61%)`, `... · container 300 MB of 512 MB used (59%)`.
+ * Only the process memory when the total is unknown; the total alone when the use is.
+ */
+export function formatMemoryLine(status: { memoryUsageMb: number; systemMemoryTotalMb: number | null; systemMemoryUsedMb: number | null; memoryLimited: boolean | null }): string {
+    const total = status.systemMemoryTotalMb;
+    if (total === null || total <= 0) return mb(status.memoryUsageMb);
+    const scope = status.memoryLimited ? 'container' : 'machine';
+    const used = status.systemMemoryUsedMb;
+    const system =
+        used === null
+            ? `${scope}${status.memoryLimited ? ' limit' : ''} ${formatMemorySize(total)}`
+            : `${scope} ${formatMemorySize(used)} of ${formatMemorySize(total)} used (${Math.round((used / total) * 100)}%)`;
+    return `${mb(status.memoryUsageMb)} (process) · ${system}`;
+}
+
 class AdminStatusProcessor extends CliCommandProcessor {
     command = 'status';
     description = 'Shows the server status: version, uptime, platform, memory, CPU, connections; --history summarizes the recent samples';
@@ -95,7 +118,7 @@ class AdminStatusProcessor extends CliCommandProcessor {
             ['Server', server ? `${server.id}${server.version ? ` ${server.version}` : ''}` : 'unknown'],
             ['Platform', `${status.platform} ${status.platformVersion} (${status.os})`],
             ['Uptime', `${formatDuration(status.uptimeSeconds)} (since ${shortTime(status.startedAt)})`],
-            ['Memory', mb(status.memoryUsageMb)],
+            ['Memory', formatMemoryLine(status)],
             ['CPU', status.cpuUsagePercent === null ? 'n/a' : pct(status.cpuUsagePercent)],
             ['Connections', `${status.activeWsConnections} WebSocket, ${status.activeShellSessions} shell`],
             ['Commands', String(status.registeredCommands)],

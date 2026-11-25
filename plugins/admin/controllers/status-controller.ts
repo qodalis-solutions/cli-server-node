@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { processMemoryMb, StatusSampler } from '../services/status-sampler';
+import { readSystemMemory, SystemMemory } from '../services/system-memory';
 
 /** Dependencies injected into the status controller for runtime metrics. */
 export interface StatusDeps {
@@ -17,9 +18,10 @@ export const DEFAULT_HISTORY_MINUTES = 60;
 export const MAX_HISTORY_MINUTES = 1440;
 
 /** The server status (`GET /status` and `admin status`). */
-export interface StatusSnapshot {
+export interface StatusSnapshot extends SystemMemory {
     uptimeSeconds: number;
     startedAt: string;
+    /** Resident memory of the process in MB. */
     memoryUsageMb: number;
     cpuUsagePercent: number | null;
     platform: 'node';
@@ -32,12 +34,16 @@ export interface StatusSnapshot {
     enabledFeatures: string[];
 }
 
-/** Reads the server status now: process metrics, the latest CPU sample and the counts of `deps`. */
+/**
+ * Reads the server status now: process metrics, the machine's (or container's) memory, the latest CPU sample
+ * and the counts of `deps`.
+ */
 export function statusSnapshot(deps: StatusDeps, sampler?: StatusSampler): StatusSnapshot {
     return {
         uptimeSeconds: Math.floor(process.uptime()),
         startedAt,
         memoryUsageMb: processMemoryMb(),
+        ...readSystemMemory(),
         cpuUsagePercent: sampler?.latest?.cpuPercent ?? null,
         platform: 'node',
         platformVersion: process.version,

@@ -1,9 +1,15 @@
+import { readSystemMemory } from './system-memory';
+
 /** One sample of the server status (`GET /api/v1/qcli/status/history`). */
 export interface StatusSample {
     /** ISO 8601 UTC time of the sample. */
     timestamp: string;
     /** Resident memory of the process in MB. */
     memoryMb: number;
+    /** Memory in use on the machine (or in the container when limited) in MB; null when unknown. */
+    systemMemoryUsedMb?: number | null;
+    /** The RAM the server can use in MB (the container limit when one applies); null when unknown. */
+    systemMemoryTotalMb?: number | null;
     /**
      * Process CPU over the last interval as a percentage of one core; null for the
      * first sample or when the platform cannot tell.
@@ -67,9 +73,12 @@ export class StatusSampler {
 
     /** Takes one sample now and adds it to the history. */
     sample(now = new Date()): StatusSample {
+        const system = readSystemMemory();
         const sample: StatusSample = {
             timestamp: now.toISOString(),
             memoryMb: processMemoryMb(),
+            systemMemoryUsedMb: system.systemMemoryUsedMb,
+            systemMemoryTotalMb: system.systemMemoryTotalMb,
             cpuPercent: this.cpuPercent(),
             activeWsConnections: this._source.getActiveWsConnections(),
             activeShellSessions: this._source.getActiveShellSessions(),
