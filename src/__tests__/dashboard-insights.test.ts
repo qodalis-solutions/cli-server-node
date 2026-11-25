@@ -448,6 +448,8 @@ describe('status history', () => {
         expect(res.body.samples[0]).toEqual({
             timestamp: expect.any(String),
             memoryMb: expect.any(Number),
+            systemMemoryUsedMb: expect.anything(),
+            systemMemoryTotalMb: expect.any(Number),
             cpuPercent: null,
             activeWsConnections: 0,
             activeShellSessions: 0,

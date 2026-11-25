@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliAdminBuilder, CliAdminPluginResult, formatDuration, formatLogLine, formatTable, summarizeStatusHistory } from '../../plugins/admin/index';
+import { CliAdminBuilder, CliAdminPluginResult, defaultSystemMemoryReaders, formatDuration, formatLogLine, formatTable, summarizeStatusHistory } from '../../plugins/admin/index';
 import { parseSince, QueryError } from '../../plugins/admin/services/query-time';
 import { CliUsersBuilder } from '../../plugins/users/index';
 import { protect, runCommand, subPermissions, ROOT_PASS } from './command-test-helpers';
@@ -84,7 +84,7 @@ describe('admin status', () => {
         expect(lines[0]).toMatch(/^Server {6}@qodalis\/cli-server-node \S+/);
         expect(lines[1]).toBe(`Platform    node ${process.version} (${process.platform})`);
         expect(lines[2]).toMatch(/^Uptime {6}\d+ (s|min|h \d+ min|d \d+ h) \(since \d{4}-\d\d-\d\d \d\d:\d\d:\d\d\)$/);
-        expect(lines[3]).toMatch(/^Memory {6}[\d.]+ MB$/);
+        expect(lines[3]).toMatch(/^Memory {6}[\d.]+ MB( \(process\) · (machine|container) .+)?$/);
         expect(lines[4]).toBe('CPU         n/a');
         expect(lines[5]).toBe('Connections 0 WebSocket, 0 shell');
         expect(lines[6]).toMatch(/^Commands {4}\d+$/);
@@ -99,6 +99,31 @@ describe('admin status', () => {
         const body = JSON.parse((await run(cli, 'admin status --json')).text);
         expect(body).toMatchObject({ platform: 'node', os: process.platform, server: { id: '@qodalis/cli-server-node' }, cpuUsagePercent: null });
         expect(typeof body.memoryUsageMb).toBe('number');
+        expect(body).toHaveProperty('systemMemoryTotalMb');
+        expect(body).toHaveProperty('systemMemoryUsedMb');
+        expect(body).toHaveProperty('memoryLimited');
+    });
+
+    it('Memory: the process, then the machine use, or the container limit and its usage', async () => {
+        const { cli } = start();
+        const GB = 1024 ** 3;
+        vi.spyOn(defaultSystemMemoryReaders, 'totalBytes').mockReturnValue(16 * GB);
+        vi.spyOn(defaultSystemMemoryReaders, 'availableBytes').mockReturnValue(6 * GB);
+        vi.spyOn(defaultSystemMemoryReaders, 'limitBytes').mockReturnValue(0);
+        expect((await run(cli, 'admin status')).text).toMatch(/^Memory {6}[\d.]+ MB \(process\) · machine 10 GB of 16 GB used \(63%\)$/m);
+        expect(JSON.parse((await run(cli, 'admin status --json')).text)).toMatchObject({ systemMemoryTotalMb: 16384, systemMemoryUsedMb: 10240, memoryLimited: false });
+
+        vi.spyOn(defaultSystemMemoryReaders, 'limitBytes').mockReturnValue(512 * 1024 ** 2);
+        vi.spyOn(defaultSystemMemoryReaders, 'cgroupUsageBytes').mockReturnValue(300 * 1024 ** 2);
+        expect((await run(cli, 'admin status')).text).toMatch(/^Memory {6}[\d.]+ MB \(process\) · container 300 MB of 512 MB used \(59%\)$/m);
+        expect(JSON.parse((await run(cli, 'admin status --json')).text)).toMatchObject({ systemMemoryTotalMb: 512, systemMemoryUsedMb: 300, memoryLimited: true });
+
+        vi.spyOn(defaultSystemMemoryReaders, 'totalBytes').mockImplementation(() => {
+            throw new Error('unreadable');
+        });
+        vi.spyOn(defaultSystemMemoryReaders, 'limitBytes').mockReturnValue(0);
+        expect((await run(cli, 'admin status')).text).toMatch(/^Memory {6}[\d.]+ MB$/m);
+        expect(JSON.parse((await run(cli, 'admin status --json')).text)).toMatchObject({ systemMemoryTotalMb: null, systemMemoryUsedMb: null, memoryLimited: null });
     });
 
     it('shows the latest CPU sample when there is one', async () => {

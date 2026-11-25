@@ -181,6 +181,9 @@ describe('Admin Status', () => {
         expect(res.body).toHaveProperty('uptimeSeconds');
         expect(res.body).toHaveProperty('startedAt');
         expect(res.body).toHaveProperty('memoryUsageMb');
+        expect(res.body.systemMemoryTotalMb).toBeGreaterThan(0);
+        expect(res.body).toHaveProperty('systemMemoryUsedMb');
+        expect(typeof res.body.memoryLimited).toBe('boolean');
         expect(res.body.platform).toBe('node');
         expect(res.body.platformVersion).toBe(process.version);
         expect(typeof res.body.activeWsConnections).toBe('number');
