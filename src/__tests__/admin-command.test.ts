@@ -327,6 +327,11 @@ describe('admin command helpers', () => {
         expect(summarizeStatusHistory([])).toEqual({ count: 0, maxWsConnections: 0, maxShellSessions: 0 });
     });
 
+    it('summarizeStatusHistory keeps two decimals in the average', () => {
+        const sample = (memoryMb: number) => ({ timestamp: '2026-11-25T10:00:00.000Z', memoryMb, cpuPercent: null, activeWsConnections: 0, activeShellSessions: 0 });
+        expect(summarizeStatusHistory([sample(213.95), sample(213.95), sample(214)]).memoryMb).toEqual({ min: 213.95, avg: 213.97, max: 214 });
+    });
+
     it('parseSince', () => {
         const now = new Date('2026-11-25T12:00:00Z');
         expect(parseSince('30s', 's', now).toISOString()).toBe('2026-11-25T11:59:30.000Z');

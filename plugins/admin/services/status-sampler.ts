@@ -124,7 +124,7 @@ export class StatusSampler {
     }
 }
 
-/** Smallest, average and largest of a series (average rounded to 0.1). */
+/** Smallest, average and largest of a series (average rounded to 0.01, as memory is). */
 export interface StatusRange {
     min: number;
     avg: number;
@@ -148,7 +148,7 @@ export interface StatusHistorySummary {
 function range(values: number[]): StatusRange | undefined {
     if (values.length === 0) return undefined;
     const sum = values.reduce((a, b) => a + b, 0);
-    return { min: Math.min(...values), avg: Math.round((sum / values.length) * 10) / 10, max: Math.max(...values) };
+    return { min: Math.min(...values), avg: Math.round((sum / values.length) * 100) / 100, max: Math.max(...values) };
 }
 
 /** Count, time span, min/avg/max memory and CPU, and the peak connections of the samples. */
