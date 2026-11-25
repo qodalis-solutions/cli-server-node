@@ -71,6 +71,24 @@ describe('dashboard extensions: registration', () => {
         expect(() => b.addDashboardExtension({ ...marketplace, title: 'Again' })).toThrow('dashboard extension already registered: marketplace');
     });
 
+    it('removes an extension at runtime; its id can be registered again', () => {
+        const b = builder().addDashboardExtension(marketplace).addDashboardExtension({ id: 'billing', title: 'Billing', entry: '/b.js' });
+        expect(b.removeDashboardExtension('marketplace')).toBe(true);
+        expect(b.removeDashboardExtension('marketplace')).toBe(false);
+        expect(b.dashboardExtensions.map((e) => e.id)).toEqual(['billing']);
+        b.addDashboardExtension({ ...marketplace, title: 'Again' });
+        expect(b.dashboardExtensions.map((e) => e.title)).toEqual(['Billing', 'Again']);
+    });
+
+    it('auditSink: the config audit store, else none', async () => {
+        const b = builder();
+        expect(b.auditSink).toBeUndefined();
+        const logged: unknown[] = [];
+        b.setConfigAuditStore({ log: async (e) => void logged.push(e), getEntries: async () => [], clear: async () => {} });
+        await b.auditSink!({ timestamp: 1, event: 'x.y', username: 'u' });
+        expect(logged).toEqual([{ timestamp: 1, event: 'x.y', username: 'u' }]);
+    });
+
     it('turns an unknown group into system', () => {
         expect(validateDashboardExtension({ id: 'x', title: 'X', entry: '/x.js', group: 'elsewhere' }).group).toBe('system');
     });
@@ -173,5 +191,28 @@ describe('GET /api/v1/qcli/dashboard/extensions', () => {
         expect(res.status).toBe(200);
         // Besides the users plugin's own pages (tokens, audit) when their builds are present
         expect(res.body.extensions.map((e: CliDashboardExtension) => e.id)).toContain('marketplace');
+    });
+});
+
+describe('a mounted plugin: assetRoutes', () => {
+    it('serves each handler at its prefix outside the API, without sign-in; unhandled paths fall through', async () => {
+        const cli = createCliServer();
+        cli.mountPlugin({
+            prefix: '/api/v1/qcli/x',
+            router: Router(),
+            assetRoutes: [
+                {
+                    prefix: '/qcli/assets-test',
+                    handler: (req, res, next) => (req.url === '/hello.js' ? void res.type('text/javascript').send('ok') : next()),
+                },
+            ],
+        });
+        try {
+            expect((await request(cli.app).get('/qcli/assets-test/hello.js')).text).toBe('ok');
+            expect((await request(cli.app).get('/qcli/assets-test/other.js')).status).toBe(404);
+        } finally {
+            cli.eventSocketManager.dispose();
+            cli.logSocketManager.dispose();
+        }
     });
 });
