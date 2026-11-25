@@ -107,7 +107,7 @@ server's built-in ones, the plugins' and the host's. The former hardcoded sectio
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/config` | `{ providers: [...] }`: the providers the caller may see (`config:read`), secrets masked |
+| GET | `/config` | `{ store, providers: [...] }`: where changes are saved (`{ kind, title, detail, persistent }`) and the providers the caller may see (`config:read`), each with its `storage`, secrets masked |
 | GET | `/config/{provider}` | One provider (404 unknown, 403 without its `requiredPermission`) |
 | PATCH | `/config/{provider}/{section}` | `{ changes, version? }` (`config:write`): 200 with the section, 400 `{ error, errors }` per key, 409 `{ error, version }` for a stale version |
 

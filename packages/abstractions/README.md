@@ -70,7 +70,8 @@ Then register the processor with the server package. See [`@qodalis/cli-server-n
 | `CliCommandParameterDescriptor` | Simple implementation of `ICliCommandParameterDescriptor` |
 | `CliPaging` | `--skip` / `--take` convention: `CliPaging.parameters()` and `CliPaging.from(command)` |
 | `CliStoredConfigProvider` | A provider of settings described in code (`sections[].settings[]` with `default`, `validation`, `validate`, `apply`, `value`), changes kept in the server's store; `value(section, key)` for the host's code |
-| `InMemoryConfigStore`, `JsonFileConfigStore` | Config stores in memory (source `runtime`) and in a JSON file (source `file`, mode 0600) |
+| `InMemoryConfigStore`, `JsonFileConfigStore` | Config stores in memory (source `runtime`) and in a JSON file (source `file`, mode 0600); `describe()` says where they keep the settings |
+| `describeCliConfigStore`, `describeCliConfigStoreLine` | A store's description (`custom` for a store without `describe()`) and its `config list` line |
 | `CliConfigError` | A refused read or change: `status` (400, 403, 404, 409), `toJSON()` → `{ error, errors?, version? }` |
 | `CliConfigConflictError`, `CliConfigValidationError` | Thrown by writers and stores: a stale version (`currentVersion`), late per-key errors |
 

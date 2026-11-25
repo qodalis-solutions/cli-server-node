@@ -140,7 +140,14 @@ await server.config.ready();   // stored settings applied
 new CliDatabasesBuilder().addDatabase('main', { connection: configStore.connection }).addSource('main', configStore.migrationSource);
 ```
 
-Options: `connection`, `tablePrefix`, `schema`, `tables: { Config }`.
+Options: `connection`, `tablePrefix`, `schema`, `tables: { Config }`, `database` (its name in the description, when
+the connection does not expose it).
+
+`describe()` (the `store` of `GET /api/v1/qcli/config`, the dashboard's Config page and `config list`) names the
+dialect, the database and the table: `{ "kind": "database", "title": "Database", "detail": "PostgreSQL database qcli,
+table QcliConfig", "persistent": true }`. The name comes from the driver (`pg`'s `database` or the last segment of its
+`connectionString`, `mysql2`'s and `mssql`'s `database`, a SQLite file's name; `connection.database`,
+`cliDatabaseName(value)`), never the user, password, host or a connection string: a name that looks like one is left out.
 
 ## Helpers for store authors
 

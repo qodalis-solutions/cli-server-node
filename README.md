@@ -795,6 +795,19 @@ asynchronously). Implement `ICliConfigStore` (`read(provider, section)`, `write(
 expectedVersion?)`) to keep them elsewhere. Secrets are stored as given: keep the file or table readable by the
 server only.
 
+Every store says where it keeps the settings with `describe()`: `{ kind, title, detail, persistent }`, shown as
+`store` by `GET /api/v1/qcli/config`, on the dashboard's Config page and on the first line of `config list`. `detail`
+names the file (relative to the working directory, or its name only outside it) or the dialect, database name and
+table (`PostgreSQL database qcli, table QcliConfig`), never credentials or a connection string. A custom store without
+`describe()` is shown as `{ "kind": "custom", "title": "Custom store", "detail": "<class name>" }`, persistent unless
+its `source` is `runtime`.
+
+| Store | `describe()` | `config list` |
+|---|---|---|
+| `InMemoryConfigStore` | `{ "kind": "memory", "title": "In memory", "detail": "", "persistent": false }` | `Store: In memory, changes are lost on restart` |
+| `JsonFileConfigStore` | `{ "kind": "file", "title": "JSON file", "detail": "qcli-demo-config.json", "persistent": true }` | `Store: JSON file (qcli-demo-config.json), kept across restarts` |
+| `CliDatabaseConfigStore` | `{ "kind": "database", "title": "Database", "detail": "PostgreSQL database qcli, table QcliConfig", "persistent": true }` | `Store: Database (PostgreSQL database qcli, table QcliConfig), kept across restarts` |
+
 ### Built-in providers
 
 | Provider | Order | Sections and settings | Writable |
@@ -820,6 +833,17 @@ case, when it matches a `secrets` pattern (`secrets: ['MY_*']`), or when its val
 (`scheme://user:password@host`).
 The filesystem roots stay read-only on purpose: widening what the server may read is a deployment decision.
 
+Each provider says where its settings come from (`storage`: `{ kind, description, sources }`; a provider sets it with
+its optional `storage` property):
+
+| `kind` | Providers | Meaning |
+|---|---|---|
+| `store` | `cors`, `mcp`, `filesystem`, `jobs`, `users`, `logs`, `custom` (every `CliStoredConfigProvider`) | changes are saved to the config store |
+| `runtime` | `server` | read from the running server process |
+| `options` | `host` (sources `Server options`, `Environment variables`), `auth` | the options the server or plugin was created with |
+| `environment`, `configuration` | (the .NET server's `host` lists its IConfiguration sources) | environment variables; the host's configuration |
+| `custom` | a provider without `storage` | `Saved by the provider` (a writer) or `Read by the provider` |
+
 ### API
 
 Served by the admin plugin (`/api/v1/qcli/config`, behind the dashboard's sign-in; on a protected server the route
@@ -827,12 +851,13 @@ also needs `config:read` for GET and `config:write` for PATCH). It replaces the 
 
 | Method | Path | Answer |
 |---|---|---|
-| GET | `/api/v1/qcli/config` | `{ "providers": [provider, ...] }`: the providers the caller may see, by `order` then id |
+| GET | `/api/v1/qcli/config` | `{ "store": {...}, "providers": [provider, ...] }`: where changes are saved, and the providers the caller may see, by `order` then id |
 | GET | `/api/v1/qcli/config/{provider}` | one provider |
 | PATCH | `/api/v1/qcli/config/{provider}/{section}` | body `{ "changes": { "key": value }, "version": "3" }` (`version` optional) |
 
 ```json
 {
+  "store": { "kind": "database", "title": "Database", "detail": "PostgreSQL database qcli, table QcliConfig", "persistent": true },
   "providers": [
     {
       "id": "cors",
@@ -840,6 +865,7 @@ also needs `config:read` for GET and `config:write` for PATCH). It replaces the 
       "description": "Origins allowed to call the server from a browser and to open its WebSockets",
       "order": 30,
       "writable": true,
+      "storage": { "kind": "store", "description": "Changes are saved to the config store", "sources": [] },
       "sections": [
         {
           "id": "cors",
@@ -869,7 +895,8 @@ also needs `config:read` for GET and `config:write` for PATCH). It replaces the 
 Every entry has all of `key`, `label`, `description`, `type`, `value`, `default`, `source`, `mutable`,
 `requiresRestart` and `sensitive`; `validation` and `editor` when set; `isSet` for sensitive entries, whose `value`
 and `default` are always `null`. A section's `version` is `null` when it is read-only. A provider's `writable` is
-true when it implements the writer and the caller holds `config:write`.
+true when it implements the writer and the caller holds `config:write`; its `storage` says where its settings come
+from (`sources` always present, `[]` when none). `store` is in the list only, not in `GET /config/{provider}`.
 
 | PATCH answer | Body |
 |---|---|
@@ -893,7 +920,7 @@ validation messages (`must be a number`, `must be at least 1`, `must be one of: 
   `{ provider, section, version, via, changes: [{ key, old, new }] }` with secrets as `***` (`null` when unset).
 - **Event**: `config:changed` `{ provider, section, keys, version, requiresRestart, user }`, audience `config:read`,
   never values: open dashboards reload the provider.
-- **MCP** (when `mcp` is on): `config_list` (providers and section summaries) and `config_get` (`provider`,
+- **MCP** (when `mcp` is on): `config_list` (the store, providers with their `storage`, and section summaries) and `config_get` (`provider`,
   `section?`, `key?`), read-only, need `config:read`; `config_set` (`provider`, `section`, `changes`, `version?`)
   needs `config:write` and is not read-only, so the MCP client's `QCLI_READ_ONLY` and the endpoint's own
   `mcp: { readOnly: true }` hide and refuse it. Errors come back as `isError` with `{ error, errors?, version? }`.
