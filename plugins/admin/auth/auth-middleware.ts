@@ -61,7 +61,7 @@ function createHostSessionMiddleware(provider: AdminAuthProvider): RequestHandle
                     res.status(403).json({ error: `forbidden: missing permission ${ADMIN_ACCESS_PERMISSION}` });
                     return;
                 }
-                (req as AuthenticatedRequest).user = { username: ctx.userName, authenticatedAt: new Date().toISOString() };
+                (req as AuthenticatedRequest).user = { username: ctx.userName, authenticatedAt: new Date().toISOString(), permissions: ctx.permissions };
                 next();
             },
             (err) => {
@@ -102,6 +102,8 @@ function createProviderAuthMiddleware(provider: AdminAuthProvider): RequestHandl
                 (req as AuthenticatedRequest).user = {
                     username: ctx.userName,
                     authenticatedAt: new Date(ctx.loginTime ?? Date.now()).toISOString(),
+                    // The config API checks config:read / config:write against them
+                    permissions: ctx.permissions,
                 };
                 next();
             },

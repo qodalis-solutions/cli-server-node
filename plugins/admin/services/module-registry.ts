@@ -1,4 +1,5 @@
 import type { CliInstalledPlugin } from './package-info';
+import type { ICliConfigProvider, ICliConfigService } from '@qodalis/cli-server-abstractions';
 import { ICliModule, ICliCommandProcessor, ICliProcessorFilter } from '@qodalis/cli-server-abstractions';
 
 /**
@@ -59,6 +60,12 @@ export interface IBuilderLike {
      * `@qodalis/cli-server-node`), listed by `GET /dashboard/extensions`.
      */
     readonly dashboardExtensions?: ReadonlyArray<object>;
+    /** The server's configuration service (`CliBuilder.config`), served at `/config`. */
+    readonly config?: ICliConfigService;
+    /** The registered config providers (`CliBuilder.configProviders`). */
+    readonly configProviders?: ReadonlyArray<{ readonly id: string }>;
+    /** Registers a config provider (`CliBuilder.addConfigProvider`): the admin plugin adds `auth` and `logs`. */
+    addConfigProvider?(provider: ICliConfigProvider): unknown;
 }
 
 /** The id of a module or command group: its name in lower case, spaces as dashes. */

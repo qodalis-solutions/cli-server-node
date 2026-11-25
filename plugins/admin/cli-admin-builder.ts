@@ -1,5 +1,5 @@
 import { Router, RequestHandler, static as expressStatic } from 'express';
-import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus, ICliConfigProvider, CliConfigPermissions } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
 import { AdminAuthProvider } from './auth/auth-provider';
@@ -12,6 +12,7 @@ import { ModuleRegistry, IRegistryLike, IBuilderLike } from './services/module-r
 import { LogRingBuffer } from './services/log-ring-buffer';
 import { StatusSampler } from './services/status-sampler';
 import { AdminConfig } from './services/admin-config';
+import { createAdminAuthConfigProvider, createLogsConfigProvider } from './services/admin-config-providers';
 import { resolveDashboardDir } from './services/dashboard-dir';
 import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/admin-theme';
 import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './services/admin-branding';
@@ -68,6 +69,10 @@ export interface CliAdminPluginResult {
     dispose: () => void;
     /** This package, listed among the server's installed plugins by `mountPlugin`. */
     installedPlugin: CliInstalledPlugin;
+    /** `config:read` for `GET /config`, `config:write` for `PATCH` (enforced on a protected server). */
+    routePermissions: Array<{ path: string; read: string; write: string }>;
+    /** The `auth` (read-only) and `logs` config providers, registered with the server's (also by `build`). */
+    configProviders: ICliConfigProvider[];
 }
 
 /**
@@ -284,8 +289,18 @@ export class CliAdminBuilder {
         // Plugins
         router.use('/plugins', authMiddleware, createPluginsController(moduleRegistry, () => builder.installedPlugins ?? []));
 
-        // Config
-        router.use('/config', authMiddleware, createConfigController(this._config));
+        // Config: the server's config providers (builder.config), with the plugin's own
+        const authMode = () => (this._authProvider ? (isExternal() ? 'external' : 'users') : 'password') as 'password' | 'users' | 'external';
+        const configProviders: ICliConfigProvider[] = [
+            createAdminAuthConfigProvider(this._config, authMode, () => !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET),
+            createLogsConfigProvider(logBuffer),
+        ];
+        for (const provider of configProviders) {
+            if (builder.addConfigProvider && !builder.configProviders?.some((p) => p.id === provider.id)) {
+                builder.addConfigProvider(provider);
+            }
+        }
+        router.use('/config', authMiddleware, createConfigController(() => builder.config));
 
         // Logs
         router.use('/logs', authMiddleware, createLogsController(logBuffer));
@@ -337,6 +352,8 @@ export class CliAdminBuilder {
             publicRoutes: ['POST /api/v1/qcli/auth/login', 'GET /api/v1/qcli/auth/mode'],
             dispose,
             installedPlugin: adminInstalledPlugin,
+            routePermissions: [{ path: '/api/v1/qcli/config', read: CliConfigPermissions.Read, write: CliConfigPermissions.Write }],
+            configProviders,
         };
     }
 

@@ -240,53 +240,48 @@ describe('Admin Plugins', () => {
 // ---------------------------------------------------------------------------
 
 describe('Admin Config', () => {
-    it('GET /config — returns config sections', async () => {
-        const res = await authed(
-            request(app).get('/api/v1/qcli/config'),
-        ).expect(200);
+    it('GET /config — returns the providers: the plugin brings auth and logs', async () => {
+        const res = await authed(request(app).get('/api/v1/qcli/config')).expect(200);
 
-        expect(res.body).toHaveProperty('sections');
-        expect(Array.isArray(res.body.sections)).toBe(true);
+        expect(Array.isArray(res.body.providers)).toBe(true);
+        const ids = res.body.providers.map((p: any) => p.id);
+        expect(ids).toEqual(['auth', 'logs']);
 
-        const names = res.body.sections.map((s: any) => s.name);
-        expect(names).toContain('server');
-        expect(names).toContain('auth');
-        expect(names).toContain('custom');
-
-        const serverSection = res.body.sections.find((s: any) => s.name === 'server');
-        expect(serverSection.mutable).toBe(false);
-        const platformEntry = serverSection.settings.find((e: any) => e.key === 'platform');
-        expect(platformEntry.value).toBe('node');
+        const auth = res.body.providers[0];
+        expect(auth.writable).toBe(false);
+        const admin = auth.sections.find((s: any) => s.id === 'admin');
+        expect(admin.mutable).toBe(false);
+        expect(admin.version).toBeNull();
+        expect(admin.entries.find((e: any) => e.key === 'mode').value).toBe('password');
+        expect(admin.entries.find((e: any) => e.key === 'username').value).toBe(ADMIN_USER);
+        expect(JSON.stringify(res.body)).not.toContain(ADMIN_PASS);
     });
 
-    it('PUT /config — updates mutable settings', async () => {
+    it('PATCH /config/logs/buffer — changes the log buffer at runtime', async () => {
+        const before = await authed(request(app).get('/api/v1/qcli/config/logs')).expect(200);
+        const version = before.body.sections[0].version;
         const res = await authed(
-            request(app)
-                .put('/api/v1/qcli/config')
-                .send({ theme: 'dark', maxLogSize: 500 }),
+            request(app).patch('/api/v1/qcli/config/logs/buffer').send({ changes: { capacity: 500 }, version }),
         ).expect(200);
-
-        expect(res.body.message).toBe('Settings updated');
-        expect(res.body.settings.theme).toBe('dark');
-        expect(res.body.settings.maxLogSize).toBe(500);
-
-        // Verify custom settings appear in GET
-        const getRes = await authed(
-            request(app).get('/api/v1/qcli/config'),
-        ).expect(200);
-
-        const customSection = getRes.body.sections.find((s: any) => s.name === 'custom');
-        const themeEntry = customSection.settings.find((e: any) => e.key === 'theme');
-        expect(themeEntry.value).toBe('dark');
+        expect(res.body.applied).toEqual(['capacity']);
+        expect(res.body.section.entries.find((e: any) => e.key === 'capacity').value).toBe(500);
+        expect(adminPlugin.logBuffer.capacity).toBe(500);
+        await authed(request(app).patch('/api/v1/qcli/config/logs/buffer').send({ changes: { capacity: null } })).expect(200);
+        expect(adminPlugin.logBuffer.capacity).toBe(1000);
     });
 
-    it('PUT /config — null body returns 400', async () => {
+    it('PUT /config — gone (replaced by PATCH /config/{provider}/{section})', async () => {
+        await authed(request(app).put('/api/v1/qcli/config').send({ theme: 'dark' })).expect(404);
+    });
+
+    it('PATCH /config/... — null body returns 400', async () => {
         await authed(
-            request(app)
-                .put('/api/v1/qcli/config')
-                .set('Content-Type', 'application/json')
-                .send('null'),
+            request(app).patch('/api/v1/qcli/config/logs/buffer').set('Content-Type', 'application/json').send('null'),
         ).expect(400);
+    });
+
+    it('GET /config — requires the admin session', async () => {
+        await request(app).get('/api/v1/qcli/config').expect(401);
     });
 });
 

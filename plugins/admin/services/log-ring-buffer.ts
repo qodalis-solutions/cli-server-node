@@ -96,9 +96,14 @@ export function logEntryFilter(params: Pick<LogQueryParams, 'level' | 'search' |
     };
 }
 
+/** The smallest and largest buffer sizes {@link LogRingBuffer.resize} accepts. */
+export const LOG_BUFFER_MIN_CAPACITY = 100;
+export const LOG_BUFFER_MAX_CAPACITY = 100_000;
+
 export class LogRingBuffer {
-    private readonly _buffer: LogEntry[];
-    private readonly _capacity: number;
+    private _buffer: LogEntry[];
+    private _capacity: number;
+    private _minLevel: LogEntry['level'] = 'DEBUG';
     private _head = 0;
     private _count = 0;
     private _broadcastFn?: (message: Record<string, unknown>) => void;
@@ -110,6 +115,34 @@ export class LogRingBuffer {
     constructor(capacity = 1000) {
         this._capacity = capacity;
         this._buffer = new Array(capacity);
+    }
+
+    /** How many entries the buffer keeps. */
+    get capacity(): number {
+        return this._capacity;
+    }
+
+    /** Keeps up to `capacity` entries from now on (the newest ones stay). Changed at runtime by the `logs` config provider. */
+    resize(capacity: number): void {
+        if (!Number.isInteger(capacity) || capacity < 1) throw new Error(`invalid log buffer capacity: ${capacity}`);
+        if (capacity === this._capacity) return;
+        const kept = this.getAll().slice(-capacity);
+        this._buffer = new Array(capacity);
+        kept.forEach((entry, i) => (this._buffer[i] = entry));
+        this._capacity = capacity;
+        this._count = kept.length;
+        this._head = kept.length % capacity;
+    }
+
+    /** The lowest level kept (default `DEBUG`: everything); lower entries are neither kept nor broadcast. */
+    get minLevel(): LogEntry['level'] {
+        return this._minLevel;
+    }
+
+    set minLevel(level: LogEntry['level']) {
+        const upper = String(level).toUpperCase() as LogEntry['level'];
+        if (!(LOG_LEVELS as readonly string[]).includes(upper)) throw new Error(`invalid log level: ${level}`);
+        this._minLevel = upper;
     }
 
     /** Set the function used to broadcast new log entries (e.g. via WebSocket). */
@@ -124,6 +157,8 @@ export class LogRingBuffer {
         // Safety net: entries are served to the dashboard and broadcast to sockets
         entry.message = redactSecrets(entry.message);
         entry.level = entry.level.toUpperCase() as LogEntry['level'];
+        const rank = LOG_LEVELS.indexOf(entry.level);
+        if (rank >= 0 && rank < LOG_LEVELS.indexOf(this._minLevel)) return;
         this._buffer[this._head] = entry;
         this._head = (this._head + 1) % this._capacity;
         if (this._count < this._capacity) {

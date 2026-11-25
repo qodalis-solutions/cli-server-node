@@ -16,32 +16,16 @@ export interface AdminCredentials {
     password: string;
 }
 
-/** A single configuration setting exposed by the admin dashboard. */
-export interface ConfigEntry {
-    key: string;
-    value: string | number | boolean | string[];
-    type: 'string' | 'number' | 'boolean' | 'string[]';
-    description: string;
-    mutable: boolean;
-}
-
-/** A named group of configuration entries (e.g. "server", "auth", "custom"). */
-export interface ConfigSection {
-    name: string;
-    mutable: boolean;
-    settings: ConfigEntry[];
-}
-
 /**
- * Manages admin credentials and mutable runtime settings.
- * Reads defaults from environment variables on construction.
+ * Manages the admin credentials, JWT secret and sign-in URL; reads the defaults from
+ * environment variables on construction. The dashboard's settings are served by the config
+ * providers (`auth` here, the server's built-in ones, and the plugins').
  */
 export class AdminConfig {
     private _username: string;
     private _password: string;
     private _jwtSecret: string | undefined;
     private _signInUrl: string | undefined;
-    private readonly _mutableSettings: Record<string, unknown> = {};
 
     /**
      * Where the host application signs users in, shown by the dashboard in external
@@ -124,60 +108,8 @@ export class AdminConfig {
         return usernameMatch && passwordMatch;
     }
 
-    /** Return all configuration sections (server, auth, custom) for the dashboard. */
-    getConfigSections(): ConfigSection[] {
-        const customEntries: ConfigEntry[] = Object.entries(this._mutableSettings).map(
-            ([key, val]) => ({
-                key,
-                value: val as string | number | boolean | string[],
-                type: inferType(val),
-                description: '',
-                mutable: true,
-            }),
-        );
-
-        return [
-            {
-                name: 'server',
-                mutable: false,
-                settings: [
-                    { key: 'platform', value: 'node', type: 'string', description: 'Server platform', mutable: false },
-                    { key: 'platformVersion', value: process.version, type: 'string', description: 'Node.js version', mutable: false },
-                    { key: 'nodeEnv', value: process.env.NODE_ENV ?? 'development', type: 'string', description: 'NODE_ENV', mutable: false },
-                    { key: 'pid', value: process.pid, type: 'number', description: 'Process ID', mutable: false },
-                ],
-            },
-            {
-                name: 'auth',
-                mutable: false,
-                settings: [
-                    { key: 'username', value: this._username, type: 'string', description: 'Admin username', mutable: false },
-                    { key: 'jwtSecretConfigured', value: !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET, type: 'boolean', description: 'Whether JWT secret is explicitly set', mutable: false },
-                ],
-            },
-            {
-                name: 'custom',
-                mutable: true,
-                settings: customEntries,
-            },
-        ];
+    /** The admin username (shown by the `auth` config provider). */
+    get username(): string {
+        return this._username;
     }
-
-    /** Return a shallow copy of all mutable (custom) settings. */
-    getMutableSettings(): Record<string, unknown> {
-        return { ...this._mutableSettings };
-    }
-
-    /** Merge the provided key-value pairs into mutable settings. */
-    updateMutableSettings(values: Record<string, unknown>): void {
-        Object.assign(this._mutableSettings, values);
-    }
-}
-
-/** Infer the ConfigEntry type string from a runtime value. */
-function inferType(val: unknown): 'string' | 'number' | 'boolean' | 'string[]' {
-    if (typeof val === 'boolean') return 'boolean';
-    if (typeof val === 'number') return 'number';
-    if (Array.isArray(val)) return 'string[]';
-    return 'string';
 }

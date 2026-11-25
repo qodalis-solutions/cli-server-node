@@ -8,6 +8,8 @@ export {
     LogHistogramResult,
     LogLevelCounts,
     LOG_LEVELS,
+    LOG_BUFFER_MIN_CAPACITY,
+    LOG_BUFFER_MAX_CAPACITY,
     logEntryFilter,
 } from './services/log-ring-buffer';
 export {
@@ -18,7 +20,9 @@ export {
     STATUS_HISTORY_CAPACITY,
 } from './services/status-sampler';
 export { ModuleRegistry, ModuleInfo, IRegistryLike, IBuilderLike } from './services/module-registry';
-export { AdminConfig, AdminCredentials, ConfigSection } from './services/admin-config';
+export { AdminConfig, AdminCredentials } from './services/admin-config';
+export { createAdminAuthConfigProvider, createLogsConfigProvider, AdminSignInMode } from './services/admin-config-providers';
+export { createConfigController, configContextOf } from './controllers/config-controller';
 export { signToken, verifyToken, JwtPayload } from './auth/jwt-service';
 export { AuthControllerResult, ADMIN_AUTH_MODE_PASSWORD, ADMIN_AUTH_MODE_EXTERNAL } from './auth/auth-controller';
 export { createAuthMiddleware, AuthenticatedRequest } from './auth/auth-middleware';
