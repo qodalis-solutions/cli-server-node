@@ -63,7 +63,8 @@ type ResolveFilename = (request: string, parent: { filename?: string | null } | 
 
 /** Makes `require` of a shared package from a file below `root` resolve to the server's copy. */
 function shareHostPackages(root: string): void {
-    pluginRoots.add(root.endsWith(sep) ? root : root + sep);
+    // Node names modules by their real path (`/private/var/...` for `/var/...` on macOS): both are kept
+    for (const path of [root, existsSync(root) ? realpathSync(root) : root]) pluginRoots.add(path.endsWith(sep) ? path : path + sep);
     if (hookInstalled) return;
     hookInstalled = true;
     const M = Module as unknown as { _resolveFilename: ResolveFilename };
