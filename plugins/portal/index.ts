@@ -19,5 +19,7 @@ export {
     isPortalColor,
     isValidPortalPath,
 } from './portal-options';
-export { resolvePortalSiteDir } from './site-dir';
+export { resolvePortalSiteDir, resolvePortalSite, PortalSiteSource, PORTAL_SITE_SOURCES } from './site-dir';
+export { createPortalConfigProvider, PortalBranding, PortalSiteFacts } from './portal-config-provider';
+export { CliPortalCommandProcessor, PortalStatus, formatPortalStatus, PORTAL_BRANDING_HINT } from './portal-command';
 export { portalInstalledPlugin, PORTAL_PLUGIN_ID } from './package-info';

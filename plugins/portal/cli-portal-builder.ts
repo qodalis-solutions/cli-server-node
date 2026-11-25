@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
-import type { CliInstalledPlugin } from '@qodalis/cli-server-abstractions';
+import type { CliInstalledPlugin, ICliConfigProvider, ICliModule } from '@qodalis/cli-server-abstractions';
 import {
     PortalLink,
     PortalSection,
@@ -12,8 +12,10 @@ import {
     validateName,
     validateTheme,
 } from './portal-options';
-import { resolvePortalSiteDir } from './site-dir';
+import { resolvePortalSite } from './site-dir';
 import { portalInstalledPlugin } from './package-info';
+import { cloneBranding, createPortalConfigProvider, type PortalBranding } from './portal-config-provider';
+import { CliPortalCommandProcessor, type PortalStatus } from './portal-command';
 
 export const DEFAULT_PORTAL_PATH = '/qcli/portal';
 export const DEFAULT_PORTAL_NAME = 'Documentation';
@@ -58,6 +60,12 @@ export interface PortalPluginResult {
     /** The portal's fixed paths stay public on a protected server (`mountPlugin` reads them). */
     publicRoutes: string[];
     installedPlugin: CliInstalledPlugin;
+    /** The `portal` config provider: branding changeable at runtime (`config set portal.branding.<key>`), the site read-only. */
+    configProviders: ICliConfigProvider[];
+    /** The `portal` terminal command (`portal [status] [--json]`, `config:read`), registered by `mountPlugin`. */
+    module: ICliModule;
+    /** What `portal --json` prints: the current `portal.json` (docs with its page count) and where the site is. */
+    status(): PortalStatus;
 }
 
 /**
@@ -81,7 +89,7 @@ export class CliPortalBuilder {
     private logo?: string;
     private theme?: PortalTheme;
     private readonly footerLinks: PortalLink[] = [];
-    private readonly sections: PortalSection[] = [];
+    private readonly sections: Array<PortalSection & { pageCount?: number }> = [];
     private siteDir?: string;
 
     /** The mount (default `/qcli/portal`); `/` mounts the portal at the root, next to the host's routes. */
@@ -115,8 +123,9 @@ export class CliPortalBuilder {
     }
 
     /** The section of the docs or public-api plugin (its `portalSection`); one of each kind. */
-    addSection(plugin: { portalSection: PortalSection }): this {
-        this.sections.push(plugin.portalSection);
+    addSection(plugin: { portalSection: PortalSection; pages?: readonly unknown[] }): this {
+        // the docs plugin's page count, shown by the `portal` command
+        this.sections.push({ ...plugin.portalSection, ...(Array.isArray(plugin.pages) ? { pageCount: plugin.pages.length } : {}) });
         return this;
     }
 
@@ -132,20 +141,27 @@ export class CliPortalBuilder {
             throw new Error(`invalid portal path: ${this.path}`);
         }
         const mount = this.path;
-        const document = {
+        const theme = validateTheme(this.theme);
+        // The builder's branding is the default; the `portal` config provider's stored values override it (live)
+        const defaults: PortalBranding = {
             name: validateName(this.name),
             logo: validateLogo(this.logo),
-            theme: validateTheme(this.theme),
+            themeMode: theme.mode,
             footerLinks: validateFooterLinks(this.footerLinks),
+        };
+        const branding = cloneBranding(defaults);
+        const document = {
             docs: null as { title: string; pages: string } | null,
             api: null as { title: string; openapi: string; swagger: string } | null,
         };
+        let pageCount: number | null = null;
         const seen = new Set<string>();
         for (const section of this.sections) {
             if (seen.has(section.kind)) throw new Error(`portal section already registered: ${section.kind}`);
             seen.add(section.kind);
             if (section.kind === 'docs') {
                 document.docs = { title: section.title, pages: `${section.basePath}/pages` };
+                pageCount = section.pageCount ?? null;
             } else if (section.kind === 'api') {
                 document.api = {
                     title: section.title,
@@ -156,23 +172,30 @@ export class CliPortalBuilder {
                 throw new Error(`unknown portal section: ${String((section as { kind: unknown }).kind)}`);
             }
         }
-        // `portal.json` per path prefix (the app mounted under a parent path); usually only ''
-        const portalJson = new Map<string, string>();
-        const portalJsonFor = (prefix: string) => {
-            let json = portalJson.get(prefix);
-            if (json === undefined) {
-                json = JSON.stringify({
-                    ...document,
-                    docs: document.docs && { ...document.docs, pages: prefix + document.docs.pages },
-                    api: document.api && {
-                        ...document.api,
-                        openapi: prefix + document.api.openapi,
-                        swagger: prefix + document.api.swagger,
-                    },
-                });
-                if (portalJson.size < 16) portalJson.set(prefix, json);
-            }
-            return json;
+        // `portal.json` for a path prefix (the app mounted under a parent path; usually ''), with the current branding
+        const portalDocument = (prefix: string) => ({
+            name: branding.name,
+            logo: branding.logo,
+            theme: { mode: branding.themeMode, dark: { ...theme.dark }, light: { ...theme.light } },
+            footerLinks: branding.footerLinks.map((l) => ({ ...l })),
+            docs: document.docs && { ...document.docs, pages: prefix + document.docs.pages },
+            api: document.api && {
+                ...document.api,
+                openapi: prefix + document.api.openapi,
+                swagger: prefix + document.api.swagger,
+            },
+        });
+        const portalJsonFor = (prefix: string) => JSON.stringify(portalDocument(prefix));
+
+        const site = resolvePortalSite(this.siteDir);
+        const siteDir = site?.dir ?? null;
+        const status = (): PortalStatus => {
+            const json = portalDocument('');
+            return {
+                ...json,
+                docs: json.docs && { ...json.docs, pageCount },
+                site: { path: mount, found: site !== null, source: site?.source ?? null, dir: siteDir },
+            };
         };
 
         // Only the portal's own paths, GET and HEAD; anything else falls through (the host's routes, a 404)
@@ -183,8 +206,23 @@ export class CliPortalBuilder {
             cliRoutes: false,
             publicRoutes: [],
             installedPlugin: portalInstalledPlugin,
+            configProviders: [
+                createPortalConfigProvider(defaults, branding, {
+                    path: mount,
+                    siteFound: site !== null,
+                    sections: this.sections.map((s) => s.kind),
+                }),
+            ],
+            module: {
+                name: 'portal',
+                version: portalInstalledPlugin.version ?? '1.0.0',
+                description: 'The documentation portal in the terminal: path, site, sections and branding',
+                author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
+                icon: '🌐',
+                processors: [new CliPortalCommandProcessor(status)],
+            },
+            status,
         };
-        const siteDir = resolvePortalSiteDir(this.siteDir);
         if (!siteDir) {
             console.warn(PORTAL_SITE_NOT_FOUND);
             return result;
