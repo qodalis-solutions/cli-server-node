@@ -249,7 +249,7 @@ The plugin is then registered as a dashboard extension at once (no restart): its
 `@qodalis/cli-dashboard-module-<id>`, else the extension's own id (the marketplace record's `extension.id`), else the
 package name without its scope and `cli-dashboard-` prefix. An id another extension already has is a 409. Its files
 are served at `/qcli/modules/<id>/extension.js|css` (no sign-in, `Cache-Control: no-cache` with an ETag, the entry
-carrying `?v=<hash>`), and `GET /dashboard/extensions` lists it with `source: "marketplace"`. An update keeps the page
+carrying `?v=<hash>`), and `GET /dashboard/extensions` lists it with `source: "marketplace"` and its npm `package`. An update keeps the page
 id and deletes the previous version's files; a removal unregisters the page and deletes the files.
 
 At startup the plugin registers what `installed.json` lists, without the marketplace; a plugin whose files are missing
@@ -405,6 +405,119 @@ it (`GET /plugins/installed`).
 
 `hasConfig`: the plugin has settings (the section `dashboard-plugins.<id>`).
 
+## Server plugins from the marketplace
+
+The marketplace's server plugins (`kind=server`) have a package per server platform (Node, Python, .NET). This server
+lists and installs only the **Node** package; the others show as `otherPlatforms`. Same `setMarketplace` options and
+trust policy as dashboard plugins (`verified` by default), plus `npmRegistry` (default `https://registry.npmjs.org`)
+and `npm` (the runner; tests pass a fake).
+
+An install:
+
+1. resolves the plugin and the version (the newest listed one whose `serverRange` this server's version satisfies, or
+   the one asked for), refusing an unverified publisher (403), a plugin without a Node package, one whose npm record or
+   package says `"autoInstall": false` (400 `needs setup in code: <reason>`), an incompatible range (400
+   `incompatible: ... needs server <range> (this server has <version>)`) and a package the host installed in code (409);
+2. reads the npm record (`<registry>/<package>/<version>`): its `dist.integrity` (sha512) must equal the marketplace's
+   `integrity` when it has one;
+3. downloads the tarball (50 MB at most) and checks its sha512 (502 `integrity mismatch: ...`, nothing stored), then its
+   `package.json`: name and version, `qodalis.kind: "server"`, an `entry`, no `autoInstall: false`, and a range on
+   `@qodalis/cli-server-node` or `-abstractions` this server satisfies;
+4. runs `npm install <dataDir>/server-plugins/tarballs/<name>-<version>.tgz --prefix <dataDir>/server-plugins
+   --no-audit --no-fund --ignore-scripts` (the verified local file; it stays, npm's `package.json` refers to it);
+5. records the plugin in `<dataDir>/server-plugins/installed.json` (written atomically) and marks a restart as required
+   (`plugin:<name>`, source `plugins`, `Install <name> <version>`); audit `server.plugin.install`, event
+   `server:plugins-changed` (audience `admin:access`).
+
+The server loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). An update
+works the same way; a removal runs `npm uninstall`. Each marks the restart, or clears it when the installed list is back
+to what the server runs (an install removed before a restart, an update back to the running version).
+
+### Server marketplace API
+
+Mounted at `/api/v1/qcli/server/marketplace`. Reading needs `admin:access`; `POST`, `PUT` and `DELETE` need
+**`plugins:install`** (core catalog, group Server; `dashboard:install` is for dashboard plugins only).
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/` | `{ "marketplaceUrl": "https://plugins.qodalis.com", "install": "verified", "platform": "node", "serverVersion": "1.0.0-beta.31", "enabled": true }` (`enabled`: false with `createCliServer({ serverPlugins: false })`) |
+| GET | `/plugins?query=&page=&pageSize=` | The marketplace's `kind=server&platform=node&serverVersion=<this>` list, annotated (below); 502 `marketplace unreachable` |
+| GET | `/plugins/{name}` | One plugin: every platform's versions (`versions`, each with `platform`), the Node ones with `allowed` and `blockedReason`; `autoInstall` from the newest Node package's npm record |
+| GET | `/installed` | The installed plugins and how they run (below) |
+| POST | `/installed` | `{ name, version? }`: **202** with the installed plugin and `restartRequired` |
+| PUT | `/installed/{name}` | `{ version? }`: 202 (`changed`, `previousVersion`), 200 with `changed: false` when it already is that version |
+| DELETE | `/installed/{name}` | 202; the plugin keeps running until the restart (`status: "removed"`) |
+
+A `GET /plugins` item is the marketplace's item plus:
+
+```json
+{
+  "name": "weather",
+  "kind": "server",
+  "title": "Weather",
+  "publisher": { "id": "@qodalis", "name": "qodalis", "verified": true },
+  "platforms": {
+    "node": { "package": "@qodalis/cli-server-plugin-weather", "registry": "npm", "latest": "1.1.0", "install": "npm install @qodalis/cli-server-plugin-weather" },
+    "python": { "package": "qodalis-cli-server-plugin-weather", "registry": "pypi", "latest": "1.0.0b31", "install": "pip install qodalis-cli-server-plugin-weather" }
+  },
+  "latest": "1.1.0",
+  "compatible": true,
+  "platform": { "package": "@qodalis/cli-server-plugin-weather", "latest": "1.1.0", "installed": null, "compatible": true },
+  "otherPlatforms": ["python", "dotnet"],
+  "autoInstall": true,
+  "updateAvailable": false,
+  "allowed": true
+}
+```
+
+`platform` is null without a Node package; `reason` (when not `compatible`) is the marketplace's, e.g. `needs server
+^99.0.0 (this server has 1.0.0-beta.31)`. `blockedReason` (only when `allowed` is false): `server plugins disabled`,
+`install disabled`, `unverified publisher`, `not available for node`, `needs setup in code` (with `autoInstallReason`),
+or the range's reason.
+
+`GET /installed` (and the body of `POST`, `PUT`, `DELETE` with `restartRequired`):
+
+```json
+[
+  {
+    "name": "weather",
+    "package": "@qodalis/cli-server-plugin-weather",
+    "version": "1.1.0",
+    "title": "Weather",
+    "icon": "🌤️",
+    "description": "The weather plugin",
+    "installedAt": "2026-11-25T10:04:05.123Z",
+    "installedBy": "admin",
+    "status": "pending",
+    "loadedVersion": "1.0.0",
+    "updateAvailable": false
+  }
+]
+```
+
+`status`: `loaded` (runs this version), `pending` (installed or updated, runs after a restart), `failed` and `skipped`
+(the last start could not load it, or the host installed the same package: `error`), `removed` (removed, running until
+a restart).
+
+`installed.json`:
+
+```json
+{
+  "plugins": [
+    {
+      "name": "weather",
+      "package": "@qodalis/cli-server-plugin-weather",
+      "version": "1.1.0",
+      "integrity": "sha512-…",
+      "title": "Weather",
+      "icon": "🌤️",
+      "installedAt": "2026-11-25T10:04:05.123Z",
+      "installedBy": "admin"
+    }
+  ]
+}
+```
+
 ## Color scheme
 
 Match the dashboard to your own design with `setTheme()`:
@@ -514,7 +627,7 @@ invalid value.
 
 The plugin brings the `admin` command (registered by `mountPlugin`). It reads the same services as the admin routes.
 On a protected server every sub-command needs `admin:access`; `admin logs` also needs `logs:read`, `admin dashboard
-install|update|remove` also `dashboard:install`, `admin restart` (but not `admin restart status`) `server:restart`. Server settings are
+install|update|remove` also `dashboard:install`, `admin plugins install|update|remove` `plugins:install`, `admin restart` (but not `admin restart status`) `server:restart`. Server settings are
 the core [`config`](../../README.md#terminal-commands) command; a dashboard plugin's settings are changed after its install with
 `config set dashboard-plugins.<id>.<key> <value>` (`config:write`). Lists take `--json` (the payload of the matching route).
 
@@ -524,6 +637,11 @@ the core [`config`](../../README.md#terminal-commands) command; a dashboard plug
 | `admin status --history [--minutes 60] [--json]` | `admin:access` | Summary of the status samples of the last minutes (1-1440): count, min/avg/max memory and CPU, peak connections (`GET /status/history`) |
 | `admin plugins`, `admin plugins list [--json]` | `admin:access` | Command modules: id, name, version, enabled or disabled, commands (`GET /plugins`) |
 | `admin plugins enable <id>`, `admin plugins disable <id>` | `admin:access` | Turns a module's commands on or off, like `POST /plugins/{id}/toggle` but idempotent (`... is already enabled.`); the `admin` module itself cannot be disabled from the terminal |
+| `admin plugins search [<query>] [--json]` | `admin:access` | The marketplace's server plugins: plugin, this server's package, version, platforms, publisher, installed / installable / blocked and why (`GET /server/marketplace/plugins`) |
+| `admin plugins installed [--json]` | `admin:access` | The server plugins installed from the marketplace: package, version (update available), status (loaded, pending restart, failed with its error, removed), when and by whom |
+| `admin plugins install <name>[@version]` | `admin:access`, `plugins:install` | Installs this server's package of a server plugin with the API's checks; it runs after a restart (`POST /server/marketplace/installed`) |
+| `admin plugins update <name>[@version]` | `admin:access`, `plugins:install` | Updates to the newest compatible version or the one given (`PUT /server/marketplace/installed/{name}`) |
+| `admin plugins remove <name>` | `admin:access`, `plugins:install` | Uninstalls it; it runs until a restart (`DELETE /server/marketplace/installed/{name}`) |
 | `admin clients [--json]` | `admin:access` | Connected WebSocket clients: id, type, connected since, address (`GET /ws/clients`) |
 | `admin logs [--level warn,error] [--search <text>] [--service <source>] [--since 5m\|1h\|7d\|<ISO date>] [-n 50] [--json]` | `admin:access`, `logs:read` | The newest matching log entries (1-1000), oldest first, from the log buffer (`GET /logs`) |
 | `admin dashboard`, `admin dashboard list [--json]` | `admin:access` | The dashboard plugins installed from the marketplace: page id, package, version (and whether an update is available), when and by whom (`GET /dashboard/marketplace/installed`) |
@@ -635,6 +753,50 @@ Running since 2026-11-25 10:06:12
 Restart mode: exit (exits for docker to start it again)
 No changes are waiting for a restart.
 ```
+
+Server plugins (the restart between the two `admin plugins installed`):
+
+```text
+$ admin plugins search
+Plugin   Package                             Version        Platforms             Publisher           Status
+weather  @qodalis/cli-server-plugin-weather  1.0.0-beta.31  node, python, dotnet  qodalis (verified)  installable
+users    @qodalis/cli-server-plugin-users    1.0.0-beta.31  node, python, dotnet  qodalis (verified)  installable
+kanban   @acme/cli-server-plugin-kanban      0.1.0          node                  qodalis             blocked: unverified publisher
+
+$ admin plugins install weather@1.0.0-beta.30
+Installed weather: @qodalis/cli-server-plugin-weather@1.0.0-beta.30.
+Restart the server to apply it: admin restart (or the dashboard).
+
+$ admin plugins install users
+Error: needs setup in code: replaces the server's sign-in
+
+$ admin plugins installed
+1 server plugin(s) from https://plugins.qodalis.com (install: verified)
+Plugin   Package                             Version                           Status           Installed            By
+weather  @qodalis/cli-server-plugin-weather  1.0.0-beta.30 (update available)  pending restart  2026-11-25 21:42:49  anonymous
+
+$ admin plugins installed
+1 server plugin(s) from https://plugins.qodalis.com (install: verified)
+Plugin   Package                             Version                           Status  Installed            By
+weather  @qodalis/cli-server-plugin-weather  1.0.0-beta.30 (update available)  loaded  2026-11-25 21:42:49  anonymous
+
+$ admin plugins update weather
+Updated weather from 1.0.0-beta.30 to 1.0.0-beta.31.
+Restart the server to apply it: admin restart (or the dashboard).
+
+$ admin plugins remove weather
+Removed weather (@qodalis/cli-server-plugin-weather@1.0.0-beta.31).
+Restart the server to apply it: admin restart (or the dashboard).
+```
+
+The list does not know yet that a plugin needs setup in code (the marketplace does not index `autoInstall`): the
+install reads it from the package's npm record before anything is downloaded, and `GET /plugins/{name}` shows it.
+
+## Install from the dashboard
+
+Not installable at runtime: its package declares `"autoInstall": false` (it hosts the dashboard and the marketplace itself: mount it in code with `CliAdminBuilder`), so the marketplace and the
+dashboard list it with "needs setup in code" and `admin plugins install admin` refuses it. Set it up in code as shown
+above.
 
 ## License
 

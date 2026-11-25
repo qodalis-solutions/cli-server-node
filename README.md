@@ -289,6 +289,99 @@ mountPlugin(new CliUsersBuilder().setDefaultAdminPassword(process.env.ADMIN_PASS
 (`build((msg) => eventSocketManager.broadcastMessage(msg))`). A plugin given a function keeps it; one given nothing
 receives the server's bus when mounted.
 
+## Server plugins installed at runtime
+
+A server plugin can be installed while the server runs, from the admin dashboard's Marketplace tab or `admin plugins
+install <name>` ([admin plugin](plugins/admin/README.md#server-plugins-from-the-marketplace)): npm installs its
+package into `<dataDir>/server-plugins` and the server loads it at the next start. No host code changes.
+
+```ts
+const server = createCliServer({
+    dataDir: './qcli-data',      // default: ./qcli-data, from the working directory
+    serverPlugins: {},           // default; { dir } keeps them elsewhere, false loads none
+});
+// ... the host's own mountPlugin calls ...
+await server.serverPlugins.ready(); // the runtime plugins are loaded after the host's mounts; await before listening
+```
+
+At startup the server reads `<dataDir>/server-plugins/installed.json` and, for each plugin, requires its package's
+entry from `<dataDir>/server-plugins/node_modules` and calls `createPlugin(context)`. A plugin that fails (missing
+package, wrong version, no entry, an exception) is logged and its error kept in `installed.json` (`error`, cleared once
+it loads); startup goes on. A package the host already installed in code is skipped. Loaded packages are listed by
+`GET /api/v1/qcli/plugins/installed` with `source: "marketplace"`; their routes are reachable even after a catch-all
+the host added; a filesystem storage or data explorer source they set is wired then.
+
+**Shared packages.** `require('@qodalis/cli-server-abstractions')`, `@qodalis/cli-server-node` and
+`@qodalis/cli-server-plugin-*` from a plugin's files resolve to the server's own copy when it has one (npm still
+installs the plugin's dependencies next to it, unused for these), so classes, symbols and the event bus are the
+server's. Every server package shares one version: a plugin's range on the core or the abstractions is its server
+range.
+
+### Making a plugin installable
+
+Declare a `qodalis` block in `package.json` and export `createPlugin` from a CommonJS entry:
+
+```json
+{
+  "name": "@acme/cli-server-plugin-tickets",
+  "version": "1.2.0",
+  "peerDependencies": { "@qodalis/cli-server-abstractions": "^1.0.0-beta.31" },
+  "qodalis": {
+    "kind": "server",
+    "plugin": "tickets",
+    "entry": "./dist/plugin.js",
+    "title": "Tickets",
+    "icon": "🎫",
+    "platforms": { "python": "acme-cli-server-plugin-tickets", "dotnet": "Acme.Cli.Plugin.Tickets" }
+  }
+}
+```
+
+```ts
+// src/plugin.ts -> dist/plugin.js
+import type { CliPluginContext, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
+import { CliTicketsBuilder } from './builder';
+
+export async function createPlugin(context: CliPluginContext): Promise<CliPluginEntryResult> {
+    // Its settings: a config provider with defaults (the dashboard's Config page, config set tickets.settings.<key>)
+    const settings = await context.settings({
+        title: 'Tickets',
+        settings: [
+            { key: 'project', type: 'string', default: 'SUP', requiresRestart: true },
+            { key: 'apiToken', type: 'secret', requiresRestart: true },
+        ],
+    });
+    if (!settings.value('settings', 'apiToken')) {
+        context.logger.warn('no API token: config set tickets.settings.apiToken <token>, then restart');
+        return; // nothing registered until configured
+    }
+    return new CliTicketsBuilder({ project: String(settings.value('settings', 'project')) }).build(context.eventBus);
+}
+```
+
+- **The entry** (`qodalis.entry`): relative to the package, inside it, a `.js` or `.cjs` CommonJS file.
+- **`createPlugin(context)`** returns a plugin result (anything with `prefix` and `router`: mounted like
+  `mountPlugin`), a module (`name` and `processors`: `addModule`), nothing (it registered everything on
+  `context.builder`), or a promise of one of them.
+- **`CliPluginContext`** (`@qodalis/cli-server-abstractions`): `pluginId`, `packageName`, `version`, `builder`
+  (`addProcessor`, `addModule`, `addConfigProvider`, `addDashboardExtension`, `setFileStorageProvider`,
+  `addDataExplorerProvider`, `installedPlugins`, ...), `config` (the server's config service), `logger` (prefixed),
+  `dataDir` (`<dataDir>/plugin-data/<id>`, created, kept across updates), `serverDataDir`, `eventBus`, `restart`, and
+  `settings(options)`: registers a `CliStoredConfigProvider` (id: the plugin's id unless `id` is given; one section
+  `settings`, or `sections`) and resolves once its stored values are loaded. Read values with `provider.value(section,
+  key)`, at start or on every use; `secret` settings are kept server-side and never returned.
+- **Host wiring needed?** A plugin that replaces a core service (sign-in, a store) or publishes the host's own code
+  declares `"autoInstall": false` and an `autoInstallReason`: it is listed, never installed at runtime; the dashboard
+  shows "needs setup in code".
+
+| Official plugin | From the marketplace | Settings / why not |
+|---|---|---|
+| weather, aws, docs, jobs, audit | yes | weather `defaultLocation`; aws `region`, `profile`, keys (secrets); docs `folder`, `basePath`, `title`, `name`; audit `maxEntries`; jobs its own `jobs` provider |
+| filesystem, filesystem-json, filesystem-s3 | yes | folders, a JSON file or an S3 bucket (keys as secrets), read-only by default |
+| data-explorer-postgres, -mysql, -mssql, -mongo, -redis, -elasticsearch, -sql | yes | one source each: name, connection (a secret), read-only (default), timeout, rows |
+| admin, users, users-postgres, filesystem-sqlite, databases, public-api, portal, config-redis | no | host wiring (sign-in, stores, the host's databases, routes or public API) |
+| data-explorer | no | part of the server: install a source |
+
 ## Dashboard extensions
 
 A plugin can add its own pages to the admin dashboard. It serves an ES module (built with
