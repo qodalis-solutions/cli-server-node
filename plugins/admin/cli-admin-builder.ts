@@ -426,6 +426,7 @@ export class CliAdminBuilder {
             clients: eventSocketManager,
             installedPlugins: () => builder.installedPlugins ?? [],
             marketplace,
+            restart: builder.restart,
         });
 
         return {

@@ -20,6 +20,8 @@ import { ModuleInfo, ModuleRegistry } from '../services/module-registry';
 import type { CliInstalledPlugin } from '../services/package-info';
 import { QueryError, parseSince } from '../services/query-time';
 import { StatusSampler, summarizeStatusHistory } from '../services/status-sampler';
+import { AdminRestartProcessor } from './admin-restart-command';
+import type { ICliServerRestart } from '@qodalis/cli-server-abstractions';
 
 /** The permission `admin logs` needs besides `admin:access` (as the log socket and event audience do). */
 export const LOGS_READ_PERMISSION = 'logs:read';
@@ -37,6 +39,8 @@ export interface AdminCommandDeps {
     installedPlugins: () => ReadonlyArray<CliInstalledPlugin>;
     /** Dashboard plugins from the marketplace (`admin dashboard`); absent when the marketplace is off. */
     marketplace?: DashboardMarketplace;
+    /** The server's restart service (`admin restart`); absent on a server without one. */
+    restart?: ICliServerRestart;
 }
 
 const jsonParam = new CliCommandParameterDescriptor('json', 'Print the result as JSON', false, 'boolean');
@@ -587,7 +591,7 @@ class AdminDashboardProcessor extends CliCommandProcessor {
 }
 
 /**
- * `admin`: `status [--history]`, `plugins [list|enable|disable <id>]`, `clients`, `logs [...]`,
+ * `admin`: `status [--history]`, `plugins [list|enable|disable <id>]`, `clients`, `logs [...]`, `restart [status]`,
  * `dashboard [list|search|info|install|update|remove]`. Needs `admin:access` on a protected server; `logs` also `logs:read`,
  * `dashboard install|update|remove` also `dashboard:install`. Server settings are the core `config` command.
  */
@@ -605,6 +609,7 @@ export class CliAdminCommandProcessor extends CliCommandProcessor {
         this.status = new AdminStatusProcessor(deps);
         this.processors = [this.status, new AdminPluginsProcessor(deps.moduleRegistry), new AdminClientsProcessor(deps.clients), new AdminLogsProcessor(deps.logBuffer)];
         if (deps.marketplace) this.processors.push(new AdminDashboardProcessor(deps.marketplace));
+        if (deps.restart) this.processors.push(new AdminRestartProcessor(deps.restart));
     }
 
     /** `admin` alone: the status. */
