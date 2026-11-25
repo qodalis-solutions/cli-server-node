@@ -377,10 +377,14 @@ export class DashboardMarketplace {
         const body = (await this.getJson(`/plugins?${qs}`)) as { items?: unknown; total?: unknown; page?: unknown; pageSize?: unknown } | undefined;
         if (!body || !Array.isArray(body.items)) throw new DashboardMarketplaceError(502, 'marketplace unreachable');
         // Only dashboard plugins, whatever an older marketplace sends
-        const items = (body.items as MarketplaceDashboardItem[]).filter((i) => i && isValidDashboardPluginName(i.name) && i.kind === 'dashboard');
+        const all = body.items as MarketplaceDashboardItem[];
+        const items = all.filter((i) => i && isValidDashboardPluginName(i.name) && i.kind === 'dashboard');
+        // A marketplace that ignored the kind filter counted its other plugins too: its total only holds when it sent
+        // nothing else
+        const filtered = items.length === all.length;
         return {
             items: items.map((item) => ({ ...item, ...this.annotate(item) })),
-            total: typeof body.total === 'number' ? body.total : items.length,
+            total: filtered && typeof body.total === 'number' ? body.total : items.length,
             page: typeof body.page === 'number' ? body.page : (params.page ?? 1),
             pageSize: typeof body.pageSize === 'number' ? body.pageSize : (params.pageSize ?? items.length),
         };

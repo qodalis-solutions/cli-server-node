@@ -65,6 +65,8 @@ class FakeNet {
     marketplaceDown = false;
     /** Answer details without `files` (an older marketplace): the version record has them. */
     filesOnlyInVersionRecord = false;
+    /** Ignore the `kind` filter (the marketplace before dashboard plugins): every plugin listed and counted. */
+    ignoresKind = false;
 
     readonly fetch: MarketplaceFetch = async (url) => {
         this.calls.push(url);
@@ -127,7 +129,7 @@ class FakeNet {
             const query = (u.searchParams.get('query') ?? '').toLowerCase();
             const kind = u.searchParams.get('kind');
             const items = [...this.plugins.values()]
-                .filter((p) => (!kind || p.kind === kind) && String(p.name).includes(query))
+                .filter((p) => (!kind || this.ignoresKind || p.kind === kind) && String(p.name).includes(query))
                 .map(({ versions: _v, extension: _e, ...summary }) => summary);
             return response(200, { items, total: items.length, page: Number(u.searchParams.get('page') ?? 1), pageSize: Number(u.searchParams.get('pageSize') ?? 24) });
         }
@@ -319,6 +321,24 @@ describe('dashboard marketplace: browsing', () => {
         expect(byName[JOBS].blockedReason).toBeUndefined();
         expect(byName[TICKETS]).toMatchObject({ allowed: false, blockedReason: 'unverified publisher', requires: null });
         expect(byName['@acme/cli-dashboard-next']).toMatchObject({ allowed: false, blockedReason: 'needs dashboard API 2' });
+    });
+
+    it('a marketplace that ignores the kind filter: only its dashboard plugins, counted on their own', async () => {
+        const net = new FakeNet();
+        net.ignoresKind = true;
+        net.publish(JOBS, { versions: [{ version: '1.0.0' }] });
+        for (const name of ['@acme/web-one', '@acme/web-two', '@acme/web-three']) net.publish(name, { kind: 'web', versions: [{ version: '1.0.0' }] });
+        const h = await start({ net });
+
+        const res = await request(h.cli.app).get(`${BASE}/plugins`).set(auth(h.token));
+        expect(res.status).toBe(200);
+        expect(res.body.items.map((i: { name: string }) => i.name)).toEqual([JOBS]);
+        expect(res.body.total).toBe(1);
+
+        // Only web plugins: an empty list with nothing counted (the live marketplace today)
+        net.plugins.delete(JOBS);
+        const none = await request(h.cli.app).get(`${BASE}/plugins`).set(auth(h.token));
+        expect(none.body).toMatchObject({ items: [], total: 0 });
     });
 
     it('requires.installed follows the server plugins the server has (GET /plugins/installed)', async () => {
