@@ -160,13 +160,18 @@ export interface InstalledServerPlugin {
     installedBy: string;
     /**
      * `loaded`: running this version; `pending`: installed or updated, running after a restart; `failed`: the last
-     * start could not load it (`error`); `skipped`: the host installed the same package; `removed`: removed, still
-     * running until a restart.
+     * start could not load it (`error`); `needs-configuration`: loaded without registering anything, its required
+     * settings (`missing`) have no value (save them, then restart); `skipped`: the host installed the same package;
+     * `removed`: removed, still running until a restart.
      */
-    status: 'loaded' | 'pending' | 'failed' | 'skipped' | 'removed';
+    status: 'loaded' | 'pending' | 'needs-configuration' | 'failed' | 'skipped' | 'removed';
     /** The version this process runs, null when none. */
     loadedVersion: string | null;
     error?: string;
+    /** `needs-configuration`: the settings it needs (`<section>.<key>`) or the reason. */
+    missing?: string[];
+    /** Its settings provider (`GET /api/v1/qcli/config/<id>`, `config get <id>`), once it registered one. */
+    settings?: string;
     updateAvailable?: boolean;
 }
 
@@ -565,20 +570,25 @@ export class ServerPluginMarketplace {
     }
 
     private loadedOf(name: string): CliServerPluginState | undefined {
-        return this.deps.plugins.states().find((s) => s.name === name && s.status === 'loaded');
+        return this.deps.plugins.states().find((s) => s.source !== 'code' && s.name === name && (s.status === 'loaded' || s.status === 'needs-configuration'));
     }
 
     /** One installed plugin with how it runs in this process. */
     view(record: CliServerPluginRecord): InstalledServerPlugin {
-        const state = this.deps.plugins.states().find((s) => s.name === record.name);
-        const loaded = state?.status === 'loaded' ? state.version : null;
+        const state = this.deps.plugins.states().find((s) => s.source !== 'code' && s.name === record.name);
+        const running = state?.status === 'loaded' || state?.status === 'needs-configuration';
+        const loaded = running ? state!.version : null;
         let status: InstalledServerPlugin['status'];
         let error = record.error;
-        if (loaded === record.version) status = 'loaded';
-        else if (state && state.version === record.version && state.status !== 'loaded') {
-            status = state.status;
+        let missing: string[] | undefined;
+        if (loaded === record.version) {
+            status = state!.status as 'loaded' | 'needs-configuration';
+            if (status === 'needs-configuration') missing = state!.missing ?? record.missing ?? [];
+        } else if (state && state.version === record.version) {
+            status = state.status as InstalledServerPlugin['status'];
             error = state.error ?? error;
         } else status = 'pending';
+        const settings = (state?.version === record.version ? state.settings : undefined) ?? record.settings;
         return {
             name: record.name,
             package: record.package,
@@ -590,7 +600,9 @@ export class ServerPluginMarketplace {
             installedBy: record.installedBy,
             status,
             loadedVersion: loaded,
-            ...(error && status !== 'loaded' && status !== 'pending' ? { error } : {}),
+            ...(error && status !== 'loaded' && status !== 'pending' && status !== 'needs-configuration' ? { error } : {}),
+            ...(missing ? { missing: [...missing] } : {}),
+            ...(settings ? { settings } : {}),
         };
     }
 
@@ -599,7 +611,7 @@ export class ServerPluginMarketplace {
         const records = this.deps.plugins.records();
         const views = records.map((r) => this.view(r));
         for (const s of this.deps.plugins.states()) {
-            if (s.status !== 'loaded' || records.some((r) => r.name === s.name)) continue;
+            if (s.source === 'code' || (s.status !== 'loaded' && s.status !== 'needs-configuration') || records.some((r) => r.name === s.name)) continue;
             views.push({ name: s.name, package: s.package, version: s.version, title: s.name, icon: null, description: null, installedAt: '', installedBy: '', status: 'removed', loadedVersion: s.version });
         }
         if (!options.checkUpdates) return views;

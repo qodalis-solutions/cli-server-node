@@ -16,6 +16,8 @@ import {
     type ICliConfigProvider,
     type ICliEventBus,
     type ICliConfigStore,
+    type ICliPluginServices,
+    type CliPluginEntry,
 } from '@qodalis/cli-server-abstractions';
 import { CliConfigRegistry } from '../config/cli-config-registry';
 import { CliConfigService } from '../config/cli-config-service';
@@ -37,6 +39,42 @@ const corePlugin: CliInstalledPlugin = {
     ...(readInstalledPlugin(__dirname, CORE_PACKAGE, 'Core') ?? { id: CORE_PACKAGE, name: 'Core' }),
     icon: '🖥️',
 };
+
+/** The service the data explorer's entry sets (phase `core`): rules every source added after it follows. */
+export const DATA_EXPLORER_POLICY_SERVICE = 'data-explorer.policy';
+
+/** The data explorer's rules for its sources (the `data-explorer` plugin's settings). */
+export interface DataExplorerSourcePolicy {
+    /** Every source read-only. */
+    forceReadOnly?: boolean;
+    /** The most rows any source returns (0 or none: each source's own). */
+    maxRows?: number;
+    /** The rate limit of sources without their own. */
+    rateLimit?: { maxQueries: number; windowSeconds: number };
+}
+
+function applyDataExplorerPolicy(options: DataExplorerProviderOptions, policy: DataExplorerSourcePolicy | undefined): DataExplorerProviderOptions {
+    if (!policy) return options;
+    const result = { ...options };
+    if (policy.forceReadOnly) result.readOnly = true;
+    if (policy.maxRows && policy.maxRows > 0) result.maxRows = Math.min(result.maxRows ?? policy.maxRows, policy.maxRows);
+    if (policy.rateLimit && !result.rateLimit && policy.rateLimit.maxQueries > 0) result.rateLimit = { ...policy.rateLimit };
+    return result;
+}
+
+/** A plain map of what plugins share. */
+class CliPluginServices implements ICliPluginServices {
+    private readonly map = new Map<string, unknown>();
+    get<T = unknown>(name: string): T | undefined {
+        return this.map.get(name) as T | undefined;
+    }
+    set(name: string, value: unknown): void {
+        this.map.set(name, value);
+    }
+    has(name: string): boolean {
+        return this.map.has(name);
+    }
+}
 
 /**
  * Fluent builder for configuring CLI server processors, modules, filesystem, and data explorer providers.
@@ -125,6 +163,37 @@ export class CliBuilder {
     addPermissions(entries: readonly CliPermissionInput[], surface: CliPermissionSurface = 'host'): CliBuilder {
         this.permissions.add(entries, surface);
         return this;
+    }
+
+    /** What plugins share with each other (`context.services` of a plugin entry): `users`, `users.stores`, ... */
+    readonly pluginServices: ICliPluginServices = new CliPluginServices();
+
+    /**
+     * Adds a plugin in code through its entry point, the same one the marketplace installs
+     * (`import * as users from '@qodalis/cli-server-plugin-users/plugin'`): `options` are the defaults of its
+     * settings (shown with origin `code` on the dashboard's Config page and by `config get`; a saved setting
+     * overrides them), and values that are not settings (a pool, a store) are read by the entry. Loaded with the
+     * plugins installed at runtime, in the order of their phases (`await serverPlugins.ready()` before listening).
+     *
+     * ```ts
+     * builder.addPlugin(users, { protectServer: true, defaultAdminPassword: process.env.ADMIN_PASSWORD });
+     * builder.addPlugin(usersPostgres, { connectionString: process.env.DATABASE_URL });
+     * ```
+     */
+    addPlugin(entry: CliPluginEntry, options: Record<string, unknown> = {}): CliBuilder {
+        this._serverPlugins.addCodePlugin(entry, options);
+        return this;
+    }
+
+    /** Updates a listed package's fields (the loader marks one `needs-configuration`); false when it is not listed. */
+    updateInstalledPlugin(id: string, changes: Partial<CliInstalledPlugin>): boolean {
+        const plugin = this._installedPlugins.find((p) => p.id === id);
+        if (!plugin) return false;
+        for (const [key, value] of Object.entries(changes)) {
+            if (value === undefined) delete (plugin as unknown as Record<string, unknown>)[key];
+            else (plugin as unknown as Record<string, unknown>)[key] = value;
+        }
+        return true;
     }
 
     /** Removes a package from the installed plugins (a runtime plugin that failed to load); false when it is not listed. */
@@ -302,6 +371,15 @@ export class CliBuilder {
     }
 
     /**
+     * Replaces the default config store once the server runs (what a `CONFIG_STORE` plugin entry such as config-redis
+     * does): the providers on the previous default store move to `store`. Hosts set theirs with {@link setConfigStore}.
+     */
+    replaceConfigStore(store: ICliConfigStore): CliBuilder {
+        this.configRegistry.replaceDefaultStore(store);
+        return this;
+    }
+
+    /**
      * Writes config changes (`config.update`) to this audit log. By default they go to the auth
      * provider's (the users plugin's audit log), when one is installed.
      */
@@ -380,7 +458,7 @@ export class CliBuilder {
         // A factory is called right away anyway (DataExplorerBuilder); its provider names the package
         const provider = typeof providerOrFactory === 'function' ? providerOrFactory() : providerOrFactory;
         this._addInstalledPluginOf(provider);
-        this._dataExplorerBuilder.addProvider(provider, options);
+        this._dataExplorerBuilder.addProvider(provider, applyDataExplorerPolicy(options, this.pluginServices.get<DataExplorerSourcePolicy>(DATA_EXPLORER_POLICY_SERVICE)));
         return this;
     }
 

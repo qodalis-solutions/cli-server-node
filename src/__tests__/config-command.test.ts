@@ -111,6 +111,7 @@ describe('config command (open server)', () => {
                 '  Value         5',
                 '  Default       5',
                 '  Source        default',
+                '  Origin        default',
                 '  Mutable       yes',
                 '  Validation    min 1; max 10',
                 '  Version       0',

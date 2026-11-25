@@ -1,4 +1,5 @@
 import {
+    cliConfigOriginOf,
     CLI_CONFIG_AUDIT_EVENT,
     CLI_CONFIG_CHANGED_EVENT,
     CLI_CONFIG_KEY,
@@ -69,11 +70,13 @@ export function toCliConfigEntryView(entry: CliConfigEntry, writable: boolean): 
         value: sensitive ? null : cloneCliConfigValue(value),
         default: sensitive ? null : cloneCliConfigValue(entry.default ?? null),
         source: entry.source ?? 'default',
+        origin: entry.origin ?? cliConfigOriginOf(entry.source),
         mutable: writable && entry.mutable === true,
         requiresRestart: entry.requiresRestart === true,
         sensitive,
         ...(sensitive ? { isSet: entry.isSet ?? (value !== null && value !== '' && !(Array.isArray(value) && value.length === 0)) } : {}),
         ...(entry.validation ? { validation: { ...entry.validation, ...(entry.validation.options ? { options: [...entry.validation.options] } : {}) } } : {}),
+        ...(entry.required ? { required: true } : {}),
         ...(entry.editor ? { editor: entry.editor } : {}),
     };
 }

@@ -322,6 +322,12 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const app = express();
     // In-flight requests, which a restart's graceful shutdown waits for (the builder is created below)
     app.use((req, res, next) => builder.restart.trackRequests(req, res, next));
+    // Requests wait for the sign-in plugins (users, added in code or installed at runtime) before anything answers
+    app.use((req, res, next) => {
+        const waiting = builder.serverPlugins.authReady();
+        if (!waiting) return next();
+        waiting.then(() => next(), next);
+    });
     const proxyHops = trustedProxyHops(trustProxy);
     if (proxyHops > 0) {
         app.set('trust proxy', proxyHops);
@@ -735,6 +741,15 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
         if (plugin.serverAuth && plugin.serverAuth !== serverAuth) {
             setAuth(plugin.serverAuth);
+        }
+        // The sections of the portal (docs, public-api), however they were added
+        const section = (plugin as { portalSection?: { kind?: unknown } }).portalSection;
+        if (section && typeof section.kind === 'string' && !builder.pluginServices.has(`portal.section.${section.kind}`)) {
+            builder.pluginServices.set(`portal.section.${section.kind}`, plugin);
+        }
+        // The users plugin, for the plugins that build on it (public-api), however it was added
+        if (plugin.serverAuth && typeof (plugin as { requireHostToken?: unknown }).requireHostToken === 'function' && !builder.pluginServices.has('users')) {
+            builder.pluginServices.set('users', plugin);
         }
         const installed = plugin.installedPlugin ?? installedPluginOf(plugin);
         if (installed) {

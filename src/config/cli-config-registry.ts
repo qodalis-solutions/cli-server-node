@@ -83,6 +83,25 @@ export class CliConfigRegistry {
         return this._defaultStore ?? this._memoryStore;
     }
 
+    /**
+     * Replaces the default store after the server started (a `CONFIG_STORE` plugin, e.g. config-redis): the providers
+     * on the previous default store move to this one and load their values from it; those added later start there.
+     */
+    replaceDefaultStore(store: ICliConfigStore): void {
+        if (!isConfigStore(store)) throw new Error('invalid config store: it needs read and write');
+        const previous = this.defaultStore;
+        this._defaultStore = store;
+        if (!this._started || previous === store) return;
+        for (const provider of this._providers) {
+            if (this._attached.get(provider.id) === previous && isStoreAttachable(provider) && this.resolve(provider) === store) this.attach(provider);
+        }
+    }
+
+    /** True when the host (or a `CONFIG_STORE` plugin) set the default store; false while settings stay in memory. */
+    get hasDefaultStore(): boolean {
+        return this._defaultStore !== undefined;
+    }
+
     /** The stores the host set per provider id (`setStore(store, id)`). */
     get providerStores(): ReadonlyMap<string, ICliConfigStore> {
         return this._stores;

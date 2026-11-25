@@ -4,10 +4,12 @@ import { randomBytes } from 'crypto';
 import Module, { createRequire } from 'module';
 import { isAbsolute, join, resolve, sep } from 'path';
 import {
+    CLI_PLUGIN_LOAD_ORDER,
     CLI_SERVER_PLUGIN_KIND,
     CLI_SERVER_PLUGINS_DIR,
     CLI_SERVER_PLUGINS_FILE,
     CliStoredConfigProvider,
+    JsonFileConfigStore,
     installedPluginName,
     type CliInstalledPlugin,
     type CliPluginContext,
@@ -23,6 +25,10 @@ import {
     type ICliServerPlugins,
     type ICliServerRestart,
     type CliPluginBuilder,
+    type CliPluginEntry,
+    type CliConfigSectionDefinition,
+    type CliConfigValue,
+    type ICliPluginServices,
 } from '@qodalis/cli-server-abstractions';
 import { createLogger } from '../utils/logger';
 
@@ -88,12 +94,18 @@ export interface CliServerPluginsOptions {
     dir?: string;
 }
 
+/** The settings file of the plugins while the server keeps its settings in memory (no default store set). */
+export const CLI_PLUGIN_SETTINGS_FILE = 'plugin-settings.json';
+
 /** What the loader needs from the server. */
 export interface CliServerPluginsHost {
     builder: CliPluginBuilder & {
         addInstalledPlugin(plugin: CliInstalledPlugin): unknown;
+        updateInstalledPlugin(id: string, changes: Partial<CliInstalledPlugin>): boolean;
         removeInstalledPlugin(id: string): boolean;
         addConfigProvider(provider: CliStoredConfigProvider): unknown;
+        readonly pluginServices: ICliPluginServices;
+        readonly configRegistry: { readonly hasDefaultStore: boolean; readonly providerStores: ReadonlyMap<string, unknown>; has(id: string): boolean };
     };
     config: ICliConfigService;
     eventBus: ICliEventBus;
@@ -137,11 +149,59 @@ function isModule(value: unknown): value is ICliModule {
     return !!v && typeof v.name === 'string' && Array.isArray(v.processors);
 }
 
+/** A load order: a finite number, else `DEFAULT`. */
+function orderOf(...values: unknown[]): number {
+    for (const v of values) if (typeof v === 'number' && Number.isFinite(v)) return v;
+    return CLI_PLUGIN_LOAD_ORDER.DEFAULT;
+}
+
+/** A value a setting can take from a plugin's code options (JSON data; not a pool, a store or a function). */
+function isConfigValue(value: unknown): value is CliConfigValue {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (Array.isArray(value)) return value.every(isConfigValue);
+    if (typeof value === 'object') {
+        const proto = Object.getPrototypeOf(value);
+        return (proto === Object.prototype || proto === null) && Object.values(value as object).every(isConfigValue);
+    }
+    return false;
+}
+
+/** The sections with the code's options as the defaults of the settings they name (source `code`). */
+export function withCodeDefaults(sections: CliConfigSectionDefinition[], options: Readonly<Record<string, unknown>>): CliConfigSectionDefinition[] {
+    return sections.map((section) => ({
+        ...section,
+        settings: section.settings.map((setting) => {
+            if (!Object.prototype.hasOwnProperty.call(options, setting.key)) return setting;
+            const value = options[setting.key];
+            if (value === undefined || !isConfigValue(value) || setting.mutable === false) return setting;
+            return { ...setting, default: value, source: 'code' as const };
+        }),
+    }));
+}
+
+/** A plugin about to load: added in code or installed from the marketplace. */
+interface Candidate {
+    name: string;
+    package: string;
+    version: string;
+    source: 'code' | 'marketplace';
+    order: number;
+    title?: string;
+    icon?: string;
+    description?: string;
+    options: Readonly<Record<string, unknown>>;
+    createPlugin: (c: CliPluginContext) => CliPluginEntryResult | Promise<CliPluginEntryResult>;
+    record?: CliServerPluginRecord;
+}
+
 /**
- * The server's runtime-installed plugins: `<dataDir>/server-plugins/installed.json` lists them (written by the admin
- * plugin's server marketplace), their packages are in `<dataDir>/server-plugins/node_modules`. At startup each
- * package's `qodalis.entry` is required and its `createPlugin(context)` called; what it returns is mounted (a plugin
- * result) or added (a module). A plugin that fails is logged and its error kept in `installed.json`: startup goes on.
+ * The server's plugins loaded through their entry point (`createPlugin(context)`): those the host added in code
+ * (`builder.addPlugin(entry, options)`) and those installed at runtime (`<dataDir>/server-plugins/installed.json`,
+ * written by the admin plugin's server marketplace, their packages in `<dataDir>/server-plugins/node_modules`). They
+ * load on the next turn of the event loop, sorted by their `order` ({@link CLI_PLUGIN_LOAD_ORDER}); what an entry
+ * returns is mounted (a plugin result) or added (a module). A plugin whose required settings have no value is
+ * `needs-configuration`; one that fails is logged and its error kept in `installed.json`: startup goes on.
  */
 export class CliServerPlugins implements ICliServerPlugins {
     readonly enabled: boolean;
@@ -150,6 +210,9 @@ export class CliServerPlugins implements ICliServerPlugins {
     private _states: CliServerPluginState[] = [];
     private loading?: Promise<CliServerPluginState[]>;
     private host?: CliServerPluginsHost;
+    private readonly codePlugins: Array<{ entry: CliPluginEntry; options: Record<string, unknown> }> = [];
+    private authLoaded = false;
+    private authWaiters: Array<() => void> = [];
     private readonly logger = createLogger('ServerPlugins');
 
     constructor(dataDir: string, options: CliServerPluginsOptions | false = {}) {
@@ -161,8 +224,17 @@ export class CliServerPlugins implements ICliServerPlugins {
     /** Set by the server: loading starts on the next turn of the event loop (after the host's own mounts), or on {@link ready}. */
     attach(host: CliServerPluginsHost): void {
         this.host = host;
-        if (!this.enabled) return;
         setImmediate(() => void this.ready());
+    }
+
+    /** A plugin the host adds in code (`builder.addPlugin`): loaded with the installed ones, in order. */
+    addCodePlugin(entry: CliPluginEntry, options: Record<string, unknown> = {}): void {
+        if (!entry || typeof entry.createPlugin !== 'function') throw new Error('addPlugin: the entry exports no createPlugin(context)');
+        const info = entry.plugin;
+        if (!info || typeof info.id !== 'string' || typeof info.package !== 'string') throw new Error('addPlugin: the entry exports no plugin { id, package }');
+        if (this.loading) throw new Error(`addPlugin(${info.id}): the plugins are already loading; add it in configure or right after createCliServer`);
+        if (this.codePlugins.some((p) => p.entry.plugin?.package === info.package)) throw new Error(`addPlugin: ${info.package} is added twice`);
+        this.codePlugins.push({ entry, options: { ...options } });
     }
 
     records(): CliServerPluginRecord[] {
@@ -196,11 +268,11 @@ export class CliServerPlugins implements ICliServerPlugins {
     }
 
     states(): CliServerPluginState[] {
-        return this._states.map((s) => ({ ...s }));
+        return this._states.map((s) => ({ ...s, ...(s.missing ? { missing: [...s.missing] } : {}) }));
     }
 
     ready(): Promise<CliServerPluginState[]> {
-        if (!this.enabled || !this.host) return Promise.resolve(this.states());
+        if (!this.host) return Promise.resolve(this.states());
         this.loading ??= this.loadAll(this.host).then(
             () => this.states(),
             (err) => {
@@ -208,60 +280,113 @@ export class CliServerPlugins implements ICliServerPlugins {
                 return this.states();
             },
         );
+        void this.loading.finally(() => this.releaseAuth());
         return this.loading;
     }
 
+    /**
+     * Resolves once the sign-in plugins (order up to `AUTH`) are loaded: the server holds requests until then, so a
+     * users plugin added in code or installed from the marketplace protects the very first one.
+     */
+    authReady(): Promise<void> | undefined {
+        if (this.authLoaded || !this.host) return undefined;
+        void this.ready();
+        if (this.authLoaded) return undefined;
+        return new Promise((resolve) => this.authWaiters.push(resolve));
+    }
+
+    private releaseAuth(): void {
+        if (this.authLoaded) return;
+        this.authLoaded = true;
+        for (const waiter of this.authWaiters.splice(0)) waiter();
+    }
+
     private async loadAll(host: CliServerPluginsHost): Promise<void> {
-        const records = this.records();
-        if (records.length === 0) return;
-        shareHostPackages(join(this.dir, 'node_modules'));
-        let changed = false;
+        const candidates: Candidate[] = [];
+        for (const { entry, options } of this.codePlugins) {
+            const info = entry.plugin!;
+            candidates.push({
+                name: info.id,
+                package: info.package,
+                version: info.version ?? '0.0.0',
+                source: 'code',
+                order: orderOf(entry.order),
+                ...(info.title ? { title: info.title } : {}),
+                ...(info.icon ? { icon: info.icon } : {}),
+                ...(info.description ? { description: info.description } : {}),
+                options,
+                createPlugin: entry.createPlugin.bind(entry),
+            });
+        }
+        const records = this.enabled ? this.records() : [];
+        if (records.length > 0) shareHostPackages(join(this.dir, 'node_modules'));
         for (const record of records) {
-            const state: CliServerPluginState = { name: record.name, package: record.package, version: record.version, status: 'loaded' };
             try {
-                await this.loadOne(host, record);
-                this.logger.info(`loaded ${record.name} (${record.package}@${record.version})`);
+                candidates.push(this.prepare(host, record, candidates));
             } catch (err) {
-                const message = String((err as Error)?.message ?? err).split('\n')[0].slice(0, 500);
-                state.status = err instanceof SkippedError ? 'skipped' : 'failed';
-                state.error = message;
-                if (state.status === 'failed') this.logger.error(`${record.name} (${record.package}@${record.version}) not loaded: ${message}`);
-                else this.logger.warn(`${record.name} (${record.package}@${record.version}) not loaded: ${message}`);
-            }
-            this._states.push(state);
-            if ((record.error ?? undefined) !== state.error) {
-                if (state.error) record.error = state.error;
-                else delete record.error;
-                changed = true;
+                this.fail(record.name, record.package, record.version, 'marketplace', CLI_PLUGIN_LOAD_ORDER.DEFAULT, err);
             }
         }
+        // Stable: code plugins first on a tie
+        const sorted = candidates.map((c, i) => ({ c, i })).sort((a, b) => a.c.order - b.c.order || a.i - b.i).map((x) => x.c);
+        for (const candidate of sorted) {
+            if (candidate.order > CLI_PLUGIN_LOAD_ORDER.AUTH) this.releaseAuth();
+            try {
+                await this.loadOne(host, candidate);
+            } catch (err) {
+                this.fail(candidate.name, candidate.package, candidate.version, candidate.source, candidate.order, err);
+            }
+        }
+        this.releaseAuth();
         try {
             host.afterLoad();
         } catch (err) {
             this.logger.error(`wiring the server plugins failed: ${(err as Error).message}`);
         }
-        if (changed) {
-            // The errors in the installed list, for the dashboard (and cleared once a plugin loads)
-            try {
-                const current = this.records();
-                for (const r of current) {
-                    const s = this._states.find((x) => x.name === r.name && x.version === r.version);
-                    if (!s) continue;
-                    if (s.error) r.error = s.error;
-                    else delete r.error;
-                }
-                await this.save(current);
-            } catch (err) {
-                this.logger.warn(`could not write the errors to ${CLI_SERVER_PLUGINS_FILE}: ${(err as Error).message}`);
+        await this.saveStates(records);
+    }
+
+    private fail(name: string, pkg: string, version: string, source: 'code' | 'marketplace', order: number, err: unknown): void {
+        const message = String((err as Error)?.message ?? err).split('\n')[0].slice(0, 500);
+        const skipped = err instanceof SkippedError;
+        this._states.push({ name, package: pkg, version, status: skipped ? 'skipped' : 'failed', error: message, source, order });
+        if (skipped) this.logger.warn(`${name} (${pkg}@${version}) not loaded: ${message}`);
+        else this.logger.error(`${name} (${pkg}@${version}) not loaded: ${message}`);
+    }
+
+    /** The status of the installed plugins in installed.json (error, needs-configuration and its settings), for the dashboard. */
+    private async saveStates(records: CliServerPluginRecord[]): Promise<void> {
+        const apply = (r: CliServerPluginRecord): boolean => {
+            const s = this._states.find((x) => x.source === 'marketplace' && x.name === r.name && x.version === r.version);
+            if (!s) return false;
+            const before = JSON.stringify([r.error, r.status, r.missing, r.settings]);
+            if (s.error) r.error = s.error;
+            else delete r.error;
+            if (s.status === 'needs-configuration') {
+                r.status = 'needs-configuration';
+                r.missing = [...(s.missing ?? [])];
+            } else {
+                delete r.status;
+                delete r.missing;
             }
+            if (s.settings) r.settings = s.settings;
+            return before !== JSON.stringify([r.error, r.status, r.missing, r.settings]);
+        };
+        if (!records.map(apply).some(Boolean)) return;
+        try {
+            const current = this.records();
+            current.forEach(apply);
+            await this.save(current);
+        } catch (err) {
+            this.logger.warn(`could not write the plugins' status to ${CLI_SERVER_PLUGINS_FILE}: ${(err as Error).message}`);
         }
     }
 
-    private async loadOne(host: CliServerPluginsHost, record: CliServerPluginRecord): Promise<void> {
-        if (host.builder.installedPlugins.some((p) => p.id === record.package && p.source !== 'marketplace')) {
+    /** An installed package checked and its entry required. */
+    private prepare(host: CliServerPluginsHost, record: CliServerPluginRecord, code: Candidate[]): Candidate {
+        if (code.some((c) => c.package === record.package) || host.builder.installedPlugins.some((p) => p.id === record.package && p.source !== 'marketplace')) {
             throw new SkippedError('already installed by the host');
         }
-        if (this._states.some((s) => s.package === record.package && s.status === 'loaded')) throw new SkippedError('listed twice');
         const modules = resolve(this.dir, 'node_modules');
         const packageDir = resolve(modules, record.package);
         if (!packageDir.startsWith(modules + sep)) throw new Error('invalid package name');
@@ -278,26 +403,51 @@ export class CliServerPlugins implements ICliServerPlugins {
         if (manifest.autoInstall === false) throw new Error(`needs setup in code${manifest.autoInstallReason ? `: ${manifest.autoInstallReason}` : ''}`);
         const entryPath = serverPluginEntryPath(packageDir, manifest.entry);
         if (!existsSync(entryPath)) throw new Error(`entry not found: ${manifest.entry}`);
-        const required = createRequire(packageJson)(entryPath) as { createPlugin?: unknown; default?: { createPlugin?: unknown } };
-        const createPlugin = typeof required?.createPlugin === 'function' ? required.createPlugin : required?.default?.createPlugin;
-        if (typeof createPlugin !== 'function') throw new Error('the entry exports no createPlugin(context)');
-
-        // Listed first, as installed from the marketplace (the plugin's own listing of the package is then ignored)
-        host.builder.addInstalledPlugin({
-            id: record.package,
-            name: record.title ?? installedPluginName(record.package),
+        const required = createRequire(packageJson)(entryPath) as Partial<CliPluginEntry> & { default?: Partial<CliPluginEntry> };
+        const entry = typeof required?.createPlugin === 'function' ? required : required?.default;
+        if (typeof entry?.createPlugin !== 'function') throw new Error('the entry exports no createPlugin(context)');
+        const description = record.description ?? pkg.description;
+        return {
+            name: record.name,
+            package: record.package,
             version: record.version,
-            ...(record.description ?? pkg.description ? { description: record.description ?? pkg.description } : {}),
-            ...(record.icon ? { icon: record.icon } : {}),
             source: 'marketplace',
+            order: orderOf(entry.order, manifest.order),
+            title: record.title ?? manifest.title ?? installedPluginName(record.package),
+            ...(record.icon ? { icon: record.icon } : {}),
+            ...(description ? { description } : {}),
+            options: {},
+            createPlugin: entry.createPlugin.bind(entry) as Candidate['createPlugin'],
+            record,
+        };
+    }
+
+    private async loadOne(host: CliServerPluginsHost, candidate: Candidate): Promise<void> {
+        const state: CliServerPluginState = {
+            name: candidate.name,
+            package: candidate.package,
+            version: candidate.version,
+            status: 'loaded',
+            source: candidate.source,
+            order: candidate.order,
+        };
+        // Listed first (the plugin's own listing of the package is then ignored)
+        host.builder.addInstalledPlugin({
+            id: candidate.package,
+            name: candidate.title ?? installedPluginName(candidate.package),
+            version: candidate.version,
+            ...(candidate.description ? { description: candidate.description } : {}),
+            ...(candidate.icon ? { icon: candidate.icon } : {}),
+            source: candidate.source,
         });
-        const dataDir = join(this.dataDir, 'plugin-data', record.name.replace(/[/@]/g, (c) => (c === '/' ? '+' : '')));
+        const dataDir = join(this.dataDir, 'plugin-data', candidate.name.replace(/[/@]/g, (c) => (c === '/' ? '+' : '')));
         mkdirSync(dataDir, { recursive: true });
-        const logger = createLogger(`plugin:${record.name}`) as CliPluginLogger;
+        const logger = createLogger(`plugin:${candidate.name}`) as CliPluginLogger;
+        let missing: string[] | undefined;
         const context: CliPluginContext = {
-            pluginId: record.name,
-            packageName: record.package,
-            version: record.version,
+            pluginId: candidate.name,
+            packageName: candidate.package,
+            version: candidate.version,
             builder: host.builder,
             config: host.config,
             logger,
@@ -305,29 +455,55 @@ export class CliServerPlugins implements ICliServerPlugins {
             serverDataDir: this.dataDir,
             eventBus: host.eventBus,
             restart: host.restart,
+            source: candidate.source,
+            options: Object.freeze({ ...candidate.options }),
+            services: host.builder.pluginServices,
             settings: async (options: CliPluginSettingsOptions) => {
+                const id = options.id ?? candidate.name;
+                const sections = options.sections ?? [{ id: 'settings', title: 'Settings', settings: options.settings ?? [] }];
+                // While the server keeps its settings in memory, a plugin's are kept in a file of the data directory
+                // (they must survive the restart they wait for); a store the host set wins
+                const registry = host.builder.configRegistry;
+                const store = options.store ?? (!registry.hasDefaultStore && !registry.providerStores.has(id) ? new JsonFileConfigStore(join(this.dataDir, CLI_PLUGIN_SETTINGS_FILE)) : undefined);
                 const provider = new CliStoredConfigProvider({
-                    id: options.id ?? record.name,
-                    title: options.title ?? record.title ?? installedPluginName(record.package),
+                    id,
+                    title: options.title ?? candidate.title ?? installedPluginName(candidate.package),
                     ...(options.description ? { description: options.description } : {}),
-                    ...(options.store ? { store: options.store } : {}),
-                    sections: options.sections ?? [{ id: 'settings', title: 'Settings', settings: options.settings ?? [] }],
+                    ...(store ? { store } : {}),
+                    sections: withCodeDefaults(sections, candidate.options),
                 });
                 host.builder.addConfigProvider(provider);
+                state.settings = id;
                 await provider.ready();
                 return provider;
             },
+            needsConfiguration: (reason: string | string[]) => {
+                missing = (Array.isArray(reason) ? reason : [reason]).map(String).filter(Boolean);
+                if (missing.length === 0) missing = ['settings'];
+                return undefined;
+            },
         };
         try {
-            await this.run(host, context, createPlugin as (c: CliPluginContext) => CliPluginEntryResult | Promise<CliPluginEntryResult>);
+            const result = (await candidate.createPlugin(context)) as unknown;
+            // A plugin waiting for its settings registers nothing, whatever it returned
+            if (!missing) this.register(host, result);
         } catch (err) {
-            host.builder.removeInstalledPlugin(record.package);
+            host.builder.removeInstalledPlugin(candidate.package);
             throw err;
         }
+        if (missing) {
+            state.status = 'needs-configuration';
+            state.missing = missing;
+            host.builder.updateInstalledPlugin(candidate.package, { status: 'needs-configuration', missing: [...missing] });
+            this.logger.warn(`${candidate.name} needs configuration: ${missing.join(', ')}${state.settings ? ` (config set ${state.settings}.<section>.<key> <value>, then restart)` : ''}`);
+        } else {
+            this.logger.info(`loaded ${candidate.name} (${candidate.package}@${candidate.version}, ${candidate.source})`);
+        }
+        if (state.settings) host.builder.updateInstalledPlugin(candidate.package, { settings: state.settings });
+        this._states.push(state);
     }
 
-    private async run(host: CliServerPluginsHost, context: CliPluginContext, createPlugin: (c: CliPluginContext) => CliPluginEntryResult | Promise<CliPluginEntryResult>): Promise<void> {
-        const result = (await createPlugin(context)) as unknown;
+    private register(host: CliServerPluginsHost, result: unknown): void {
         if (result === undefined || result === null) return;
         if (isMountable(result)) host.mount(result);
         else if (isModule(result)) host.builder.addModule(result);

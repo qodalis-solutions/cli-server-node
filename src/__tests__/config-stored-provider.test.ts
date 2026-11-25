@@ -65,12 +65,13 @@ describe('CliStoredConfigProvider: reading', () => {
             value: 30,
             default: 30,
             source: 'default',
+            origin: 'default',
             mutable: true,
             requiresRestart: false,
             sensitive: false,
             validation: { min: 1, max: 90 },
         });
-        expect(invoices.entries.find((e) => e.key === 'currency')!.source).toBe('environment');
+        expect(invoices.entries.find((e) => e.key === 'currency')!).toMatchObject({ source: 'environment', origin: 'code' });
         const region = invoices.entries.find((e) => e.key === 'region')!;
         expect(region).toMatchObject({ value: 'eu-1', mutable: false, requiresRestart: true });
         // A section without a mutable setting has no version

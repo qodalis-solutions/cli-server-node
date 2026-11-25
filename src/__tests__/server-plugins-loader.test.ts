@@ -111,7 +111,7 @@ describe('server plugins: loading', () => {
         await store.write('hello', 'settings', { greeting: 'Salut' });
         const cli = await start(dir, { config: { store } });
 
-        expect(cli.serverPlugins.states()).toEqual([{ name: 'hello', package: HELLO, version: '1.2.0', status: 'loaded' }]);
+        expect(cli.serverPlugins.states()).toEqual([{ name: 'hello', package: HELLO, version: '1.2.0', status: 'loaded', source: 'marketplace', order: 50, settings: 'hello' }]);
         // the stored setting over its default; the other default
         expect((await runCommand(cli, 'hello Ana')).text).toBe('Salut, Ana!');
         const res = await request(cli.app).get('/api/v1/qcli/hello');
@@ -131,6 +131,7 @@ describe('server plugins: loading', () => {
             version: '1.2.0',
             description: 'A tiny server plugin installed at runtime (loader tests)',
             source: 'marketplace',
+            settings: 'hello',
         });
         // the plugin's require of the abstractions resolved to the server's copy
         const entry = require(join(dir, 'server-plugins', 'node_modules', HELLO, 'lib', 'plugin.js'));
@@ -198,7 +199,9 @@ describe('server plugins: loading', () => {
         install(dir, HELLO, FIXTURE);
         list(dir, [record('hello', HELLO, '1.2.0')]);
         const host = await start(dir, { configure: (b) => b.addInstalledPlugin({ id: HELLO, name: 'Hello (host)' }) });
-        expect(host.serverPlugins.states()).toEqual([{ name: 'hello', package: HELLO, version: '1.2.0', status: 'skipped', error: 'already installed by the host' }]);
+        expect(host.serverPlugins.states()).toEqual([
+            { name: 'hello', package: HELLO, version: '1.2.0', status: 'skipped', error: 'already installed by the host', source: 'marketplace', order: 50 },
+        ]);
         expect(host.registry.findProcessor('hello')).toBeUndefined();
 
         const off = await start(dir, { serverPlugins: false });
@@ -237,9 +240,9 @@ describe('server plugins: official entries through the loader', () => {
         install(dir, '@qodalis/cli-server-plugin-filesystem', join(ROOT, 'plugins', 'filesystem'), ['package.json', 'dist']);
         list(dir, [record('filesystem', '@qodalis/cli-server-plugin-filesystem', require(join(ROOT, 'plugins', 'filesystem', 'package.json')).version)]);
 
-        // without folders: loaded, nothing served
+        // without folders: needs configuration, nothing served
         const empty = await start(dir);
-        expect(empty.serverPlugins.states()[0].status).toBe('loaded');
+        expect(empty.serverPlugins.states()[0]).toMatchObject({ status: 'needs-configuration', missing: ['settings.roots'], settings: 'filesystem-os' });
         expect(empty.builder.fileStorageProvider).toBeUndefined();
 
         const store = new InMemoryConfigStore();
@@ -296,9 +299,13 @@ describe('server plugins: official entries through the loader', () => {
         const { createPlugin } = await import('../../plugins/data-explorer-postgres/plugin');
         const added: Array<{ provider: unknown; options: Record<string, unknown> }> = [];
         const store = new InMemoryConfigStore();
+        const missing: string[][] = [];
         const context = (values: Record<string, unknown>) => {
             const providers: Array<{ attachStore(s: InMemoryConfigStore): Promise<void> }> = [];
             return {
+                options: {},
+                services: { get: () => undefined, set() {}, has: () => false },
+                needsConfiguration: (m: string[]) => void missing.push(m),
                 pluginId: 'data-explorer-postgres',
                 packageName: '@qodalis/cli-server-plugin-data-explorer-postgres',
                 version: '1.0.0',
@@ -316,6 +323,7 @@ describe('server plugins: official entries through the loader', () => {
         };
         await createPlugin(context({}));
         expect(added).toEqual([]);
+        expect(missing).toEqual([['settings.connectionString']]);
         await createPlugin(context({ connectionString: 'postgres://u:p@db:5432/app', name: 'app', readOnly: false, maxRows: 50 }));
         expect(added).toHaveLength(1);
         expect(added[0].options).toEqual({ name: 'app', description: 'PostgreSQL database', language: 'sql', defaultOutputFormat: 'table', readOnly: false, timeout: 30000, maxRows: 50 });

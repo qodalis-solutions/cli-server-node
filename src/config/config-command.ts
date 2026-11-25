@@ -95,6 +95,7 @@ function describeEntry(provider: string, section: CliConfigSectionView, e: CliCo
         `  Value         ${formatConfigValue(e)}`,
         ...(e.sensitive ? [] : [`  Default       ${formatConfigValue({ value: e.default, sensitive: false })}`]),
         `  Source        ${e.source}`,
+        `  Origin        ${e.origin ?? 'default'}`,
         `  Mutable       ${e.mutable ? 'yes' : 'no'}${e.requiresRestart ? ' (restart required)' : ''}`,
     ];
     const v = e.validation;

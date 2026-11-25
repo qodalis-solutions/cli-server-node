@@ -121,6 +121,7 @@ describe('views', () => {
             value: 'v',
             default: null,
             source: 'default',
+            origin: 'default',
             mutable: false,
             requiresRestart: false,
             sensitive: false,
