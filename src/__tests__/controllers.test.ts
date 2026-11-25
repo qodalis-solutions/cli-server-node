@@ -82,7 +82,7 @@ describe('CLI Controllers (integration)', () => {
     let app: Express;
     let httpServer: http.Server;
 
-    beforeAll(() => {
+    beforeAll(async () => {
         const streamProcessor = {
             ...makeProcessor('stream-test'),
             handleStreamAsync: async (_cmd: CliProcessCommand, emit: (output: CliStructuredOutput) => void) => {
@@ -108,7 +108,7 @@ describe('CLI Controllers (integration)', () => {
         });
         app = server.app;
         httpServer = http.createServer(app);
-        httpServer.listen(0); // bind to random available port
+        await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r)); // random available port
     });
 
     afterAll(async () => {
@@ -316,7 +316,7 @@ describe('CLI Controllers (integration)', () => {
         ): Promise<void> {
             const { app } = createCliServer({ configure });
             const srv = http.createServer(app);
-            await new Promise<void>((resolve) => srv.listen(0, resolve));
+            await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
             try {
                 await fn(srv);
             } finally {

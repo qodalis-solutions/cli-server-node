@@ -105,6 +105,7 @@ export default defineConfig({
     test: {
         globals: true,
         environment: 'node',
+        setupFiles: ['src/__tests__/setup/supertest-loopback.ts'],
         exclude: ['dist/**', '**/node_modules/**', 'packages/**', 'demo/**'],
     },
 });

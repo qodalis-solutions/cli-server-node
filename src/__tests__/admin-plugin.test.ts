@@ -91,7 +91,8 @@ beforeAll(async () => {
     app.use(express.json());
     app.use(adminPlugin.prefix, adminPlugin.router);
 
-    server = app.listen(0); // random port
+    server = app.listen(0, '127.0.0.1'); // random port
+    await new Promise<void>((r) => server.once('listening', r));
     eventSocketManager.attach(server);
     logSocketManager.attach(server);
 
@@ -434,7 +435,7 @@ describe('WebSocket Log Streaming', () => {
 
     it('connects to /ws/qcli/logs and receives connected message', async () => {
         const port = getServerPort();
-        const ws = new WebSocket(`ws://localhost:${port}/ws/qcli/logs`);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/qcli/logs`);
 
         const msg = await new Promise<string>((resolve, reject) => {
             ws.on('message', (data) => resolve(data.toString()));
@@ -451,7 +452,7 @@ describe('WebSocket Log Streaming', () => {
 
     it('connects to /ws/v1/qcli/logs and receives connected message', async () => {
         const port = getServerPort();
-        const ws = new WebSocket(`ws://localhost:${port}/ws/v1/qcli/logs`);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/v1/qcli/logs`);
 
         const msg = await new Promise<string>((resolve, reject) => {
             ws.on('message', (data) => resolve(data.toString()));
@@ -467,7 +468,7 @@ describe('WebSocket Log Streaming', () => {
 
     it('receives broadcasted log messages', async () => {
         const port = getServerPort();
-        const ws = new WebSocket(`ws://localhost:${port}/ws/qcli/logs`);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/qcli/logs`);
 
         // Wait for connected message first
         await new Promise<void>((resolve, reject) => {
@@ -504,7 +505,7 @@ describe('WebSocket Log Streaming', () => {
 
     it('respects level filter on connection', async () => {
         const port = getServerPort();
-        const ws = new WebSocket(`ws://localhost:${port}/ws/qcli/logs?level=error`);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/qcli/logs?level=error`);
 
         // Wait for connected
         await new Promise<void>((resolve, reject) => {
@@ -540,7 +541,7 @@ describe('WebSocket Log Streaming', () => {
 
     it('getClients returns connected log clients', async () => {
         const port = getServerPort();
-        const ws = new WebSocket(`ws://localhost:${port}/ws/qcli/logs?level=warning`);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/qcli/logs?level=warning`);
 
         await new Promise<void>((resolve, reject) => {
             ws.on('message', (data) => {
