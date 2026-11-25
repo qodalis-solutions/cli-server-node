@@ -41,6 +41,30 @@ function describeRun(run: CliMigrationRun): string {
 
 const errorText = (err: unknown) => `Error: ${err instanceof Error ? err.message : String(err)}`;
 
+const limitParam = new CliCommandParameterDescriptor('limit', 'How many runs to show (1-100, default 20)', false, 'number', ['n'], 20);
+const jsonParam = new CliCommandParameterDescriptor('json', 'Print the runs as JSON', false, 'boolean');
+
+/** `--limit` / `-n`: a whole number from 1 to `max`; `fallback` when not given; an error text when invalid. */
+export function limitOf(command: CliProcessCommand, fallback: number, max: number): number | string {
+    const raw = command.args?.limit ?? command.args?.n;
+    if (raw === undefined || raw === null || raw === true) return fallback;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > max) return `Error: --limit must be a whole number from 1 to ${max}`;
+    return n;
+}
+
+/** `2026-11-25T10:04:05.123Z` -> `2026-11-25 10:04:05`. */
+function shortTime(iso?: string): string {
+    return iso ? iso.replace('T', ' ').replace(/\.\d+Z$|Z$/, '') : '';
+}
+
+/** One run as a line of `databases runs`: time, direction, status, count, trigger/actor, error. */
+export function formatRunLine(run: CliMigrationRun): string {
+    const who = run.actor ? `${run.trigger} (${run.actor})` : run.trigger;
+    const columns = [shortTime(run.startedAt).padEnd(19), run.direction.padEnd(4), run.status.padEnd(9), String(run.applied.length).padStart(5), who];
+    return [columns.join(' '), run.target ? `to ${run.target}` : '', run.error ?? ''].filter(Boolean).join('  ');
+}
+
 class DatabasesListProcessor extends CliCommandProcessor {
     command = 'list';
     description = 'Lists the databases: size, applied and pending migrations';
@@ -179,7 +203,43 @@ class MigrationsRunProcessor extends CliCommandProcessor {
     }
 }
 
-/** `databases` (alias `db`): `list`, `stats <db>`, `migrations <db>`, `up <db>`, `down <db> --to <id>`. */
+class MigrationRunsProcessor extends CliCommandProcessor {
+    command = 'runs';
+    description = 'Shows the migration run history of a database: time, direction, status, count, who ran it, error';
+    acceptsValue = true;
+    requiredPermissions = [DatabasesPermissions.Read];
+    parameters = [limitParam, jsonParam];
+    examples = [
+        { command: 'databases runs main', description: 'The last 20 runs of the database main' },
+        { command: 'databases runs main -n 5 --json', description: 'The last 5 runs as JSON' },
+    ];
+
+    constructor(private readonly databases: CliDatabases) {
+        super();
+    }
+
+    async handleAsync(command: CliProcessCommand): Promise<string> {
+        try {
+            const limit = limitOf(command, 20, 100);
+            if (typeof limit === 'string') return limit;
+            const name = databaseOf(this.databases, command);
+            const db = this.databases.database(name);
+            if (!db) return `Error: unknown database: ${name}`;
+            const { items, total } = await db.runs(limit, 0);
+            if (command.args?.json) return JSON.stringify({ database: db.name, items, total }, null, 2);
+            if (items.length === 0) return `${db.name}: no migration runs yet`;
+            return [
+                `${db.name} (${db.dialect}): ${items.length} of ${total} run(s)`,
+                `${'Started'.padEnd(19)} Dir  Status    Count Trigger`,
+                ...items.map(formatRunLine),
+            ].join('\n');
+        } catch (err) {
+            return errorText(err);
+        }
+    }
+}
+
+/** `databases` (alias `db`): `list`, `stats <db>`, `migrations <db>`, `up <db>`, `down <db> --to <id>`, `runs <db>`. */
 export class CliDatabasesCommandProcessor extends CliCommandProcessor {
     command = 'databases';
     aliases = ['db'];
@@ -199,6 +259,7 @@ export class CliDatabasesCommandProcessor extends CliCommandProcessor {
             new MigrationsStatusProcessor(databases),
             new MigrationsRunProcessor(databases, 'up'),
             new MigrationsRunProcessor(databases, 'down'),
+            new MigrationRunsProcessor(databases),
         ];
     }
 
