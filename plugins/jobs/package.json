@@ -33,7 +33,7 @@
         "directory": "plugins/jobs"
     },
     "dependencies": {
-        "@qodalis/cli-server-abstractions": "^1.0.0-beta.3",
+        "@qodalis/cli-server-abstractions": "file:../../packages/abstractions",
         "cron-parser": "^5.5.0",
         "express": "^4.21.0"
     },
