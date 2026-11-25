@@ -10,6 +10,8 @@ const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
 export class CliHashCommandProcessor extends CliCommandProcessor {
     command = 'hash';
     description = 'Computes hash of the input text';
+    /** Listed under the server's built-in commands. */
+    module = 'core';
     examples = [
         { command: 'hash hello', description: 'SHA-256 digest of hello' },
         { command: 'hash hello --algorithm md5', description: 'MD5 digest of hello' },

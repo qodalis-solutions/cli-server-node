@@ -8,6 +8,8 @@ const startTime = Date.now();
 export class CliSystemCommandProcessor extends CliCommandProcessor {
     command = 'system';
     description = 'Shows server system information';
+    /** Listed under the server's built-in commands. */
+    module = 'core';
     examples = [
         { command: 'system', description: 'Operating system, CPU and memory of the server' },
     ];

@@ -45,6 +45,8 @@ class Base64DecodeProcessor extends CliCommandProcessor {
 export class CliBase64CommandProcessor extends CliCommandProcessor {
     command = 'base64';
     description = 'Encodes or decodes Base64 text';
+    /** Listed under the server's built-in commands. */
+    module = 'core';
     aliases = ['b64'];
     examples = [
         { command: 'base64 encode hello', description: 'Prints aGVsbG8=' },
