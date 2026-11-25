@@ -35,5 +35,12 @@
     },
     "devDependencies": {
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "filesystem-s3",
+        "entry": "./dist/plugin.js",
+        "title": "Filesystem S3",
+        "icon": "🪣"
     }
 }
