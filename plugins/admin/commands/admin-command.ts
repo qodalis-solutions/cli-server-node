@@ -326,14 +326,50 @@ function terminalActor(): DashboardMarketplaceActor {
     return caller ? { userId: caller.userId, userName: caller.userName } : { userName: 'anonymous' };
 }
 
-/** Runs a marketplace call, turning its refusals into `Error: <reason>`. */
+/** Runs a marketplace call, turning its refusals into `Error: <reason>` (and a line per setting refused). */
 async function marketplaceCall(fn: () => Promise<string>): Promise<string> {
     try {
         return await fn();
     } catch (err) {
-        if (err instanceof DashboardMarketplaceError) return `Error: ${err.message}`;
+        if (err instanceof DashboardMarketplaceError) {
+            return [`Error: ${err.message}`, ...Object.entries(err.errors ?? {}).map(([key, message]) => `  ${key}: ${message}`)].join('\n');
+        }
         throw err;
     }
+}
+
+const configParam = new CliCommandParameterDescriptor('config', "The values of the plugin's settings, a JSON object: --config '{\"refreshSeconds\":60}'", false, 'string');
+
+/** `--config`: a JSON object (text, or already parsed by the client); undefined when absent. Throws 400 when it is not one. */
+function configArg(command: CliProcessCommand): unknown {
+    const raw = command.args?.config;
+    if (raw === undefined || raw === null) return undefined;
+    let value: unknown = raw;
+    if (typeof raw === 'string') {
+        try {
+            value = JSON.parse(raw);
+        } catch {
+            value = undefined;
+        }
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new DashboardMarketplaceError(400, 'invalid --config: use a JSON object, e.g. --config \'{"key":"value"}\'');
+    }
+    return value;
+}
+
+/** A setting's value as printed: strings as they are, anything else as JSON. */
+function settingText(value: unknown): string {
+    if (value === null || value === undefined) return '(none)';
+    return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** `see the settings: admin dashboard info <name>` and the warnings, after an install or update. */
+function afterChange(name: string, hasConfig: boolean, warnings: string[] | undefined): string[] {
+    return [
+        ...(warnings ?? []).map((w) => `Warning: ${w}`),
+        ...(hasConfig ? [`Its settings: admin dashboard info ${name}`] : []),
+    ];
 }
 
 class AdminDashboardListProcessor extends CliCommandProcessor {
@@ -403,7 +439,9 @@ class AdminDashboardInstallProcessor extends CliCommandProcessor {
     examples = [
         { command: 'admin dashboard install @qodalis/cli-dashboard-module-jobs', description: 'The newest version' },
         { command: 'admin dashboard install @acme/cli-dashboard-tickets@1.2.0', description: 'A given version' },
+        { command: `admin dashboard install @acme/cli-dashboard-tickets --config '{"refreshSeconds":60}'`, description: 'With values for its settings' },
     ];
+    parameters = [configParam];
 
     constructor(private readonly marketplace: DashboardMarketplace) {
         super();
@@ -416,18 +454,19 @@ class AdminDashboardInstallProcessor extends CliCommandProcessor {
             const spec = words[0];
             const at = spec.lastIndexOf('@');
             const [name, version] = at > 0 ? [spec.slice(0, at), spec.slice(at + 1)] : [spec, undefined];
-            const plugin = await this.marketplace.installPlugin(name, version, terminalActor());
-            return `Installed ${plugin.name}@${plugin.version}: the dashboard page "${plugin.title}" (/x/${plugin.id}).`;
+            const plugin = await this.marketplace.installPlugin(name, version, terminalActor(), configArg(command));
+            return [`Installed ${plugin.name}@${plugin.version}: the dashboard page "${plugin.title}" (/x/${plugin.id}).`, ...afterChange(plugin.name, plugin.hasConfig, plugin.warnings)].join('\n');
         });
     }
 }
 
 class AdminDashboardUpdateProcessor extends CliCommandProcessor {
     command = 'update';
-    description = 'Updates an installed dashboard plugin to the newest version this dashboard runs';
+    description = "Updates an installed dashboard plugin to the newest version this dashboard runs (settings the new version still accepts are kept)";
     acceptsValue = true;
     valueRequired = true;
     requiredPermissions = [DASHBOARD_INSTALL_PERMISSION];
+    parameters = [configParam];
 
     constructor(private readonly marketplace: DashboardMarketplace) {
         super();
@@ -437,9 +476,14 @@ class AdminDashboardUpdateProcessor extends CliCommandProcessor {
         return marketplaceCall(async () => {
             const words = getPositionals(command);
             if (words.length !== 1) return 'Error: name one package: admin dashboard update <name>';
-            const result = await this.marketplace.updatePlugin(words[0], undefined, terminalActor());
-            if (!result.changed) return `${result.plugin.name} is already at ${result.plugin.version}, the newest version.`;
-            return `Updated ${result.plugin.name} from ${result.previousVersion} to ${result.plugin.version}.`;
+            const config = configArg(command);
+            const result = await this.marketplace.updatePlugin(words[0], undefined, terminalActor(), config);
+            if (!result.changed) {
+                const applied = config && Object.keys(config).length > 0 ? ' Its settings were changed.' : '';
+                return `${result.plugin.name} is already at ${result.plugin.version}, the newest version.${applied}`;
+            }
+            const dropped = result.configDropped.length ? [`Settings dropped (the new version no longer accepts them): ${result.configDropped.join(', ')}`] : [];
+            return [`Updated ${result.plugin.name} from ${result.previousVersion} to ${result.plugin.version}.`, ...dropped, ...afterChange(result.plugin.name, result.plugin.hasConfig, result.warnings)].join('\n');
         });
     }
 }
@@ -466,9 +510,60 @@ class AdminDashboardRemoveProcessor extends CliCommandProcessor {
     }
 }
 
+class AdminDashboardInfoProcessor extends CliCommandProcessor {
+    command = 'info';
+    description = 'Shows an installed dashboard plugin: version, page, files, and its settings with their values';
+    acceptsValue = true;
+    valueRequired = true;
+    parameters = [jsonParam];
+    examples = [{ command: 'admin dashboard info @acme/cli-dashboard-tickets', description: 'The plugin and its settings' }];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return marketplaceCall(async () => {
+            const words = getPositionals(command);
+            if (words.length !== 1) return 'Error: name one package: admin dashboard info <name>';
+            const info = await this.marketplace.pluginInfo(words[0]);
+            if (command.args?.json) return json(info);
+            const p = info.plugin;
+            const lines = [
+                `${p.name}@${p.version}`,
+                `  Page        ${p.title} (/x/${p.id})`,
+                `  Installed   ${shortTime(p.installedAt)}${p.installedBy ? ` by ${p.installedBy}` : ''}`,
+                `  Files       ${info.files.map((f) => `${f.file} (${f.size} bytes)`).join(', ')}`,
+            ];
+            if (info.settings.length === 0) return [...lines, '  Settings    none'].join('\n');
+            lines.push(`Settings (config set dashboard-plugins.${p.id}.<key> <value>; version ${info.configVersion}):`);
+            const rule = (s: (typeof info.settings)[number]): string => {
+                const v = s.validation ?? {};
+                return [
+                    v.required ? 'required' : '',
+                    v.min !== undefined ? `min ${v.min}` : '',
+                    v.max !== undefined ? `max ${v.max}` : '',
+                    v.pattern !== undefined ? `pattern ${v.pattern}` : '',
+                    v.options?.length ? `one of ${v.options.join(', ')}` : '',
+                ]
+                    .filter(Boolean)
+                    .join('; ');
+            };
+            lines.push(
+                formatTable(
+                    ['Key', 'Value', 'Type', 'Default', 'Rule'],
+                    info.settings.map((s) => [s.key, `${settingText(s.value)}${s.isDefault ? '' : ' *'}`, s.type, settingText(s.default), rule(s) || '-']),
+                ),
+            );
+            if (info.settings.some((s) => !s.isDefault)) lines.push('* changed from the default');
+            return lines.join('\n');
+        });
+    }
+}
+
 class AdminDashboardProcessor extends CliCommandProcessor {
     command = 'dashboard';
-    description = 'Dashboard plugins from the marketplace: list the installed ones, search, install, update, remove';
+    description = 'Dashboard plugins from the marketplace: list the installed ones, search, info, install, update, remove';
     processors: ICliCommandProcessor[];
     parameters = [jsonParam];
     private readonly list: AdminDashboardListProcessor;
@@ -479,6 +574,7 @@ class AdminDashboardProcessor extends CliCommandProcessor {
         this.processors = [
             this.list,
             new AdminDashboardSearchProcessor(marketplace),
+            new AdminDashboardInfoProcessor(marketplace),
             new AdminDashboardInstallProcessor(marketplace),
             new AdminDashboardUpdateProcessor(marketplace),
             new AdminDashboardRemoveProcessor(marketplace),
@@ -492,7 +588,7 @@ class AdminDashboardProcessor extends CliCommandProcessor {
 
 /**
  * `admin`: `status [--history]`, `plugins [list|enable|disable <id>]`, `clients`, `logs [...]`,
- * `dashboard [list|search|install|update|remove]`. Needs `admin:access` on a protected server; `logs` also `logs:read`,
+ * `dashboard [list|search|info|install|update|remove]`. Needs `admin:access` on a protected server; `logs` also `logs:read`,
  * `dashboard install|update|remove` also `dashboard:install`. Server settings are the core `config` command.
  */
 export class CliAdminCommandProcessor extends CliCommandProcessor {
