@@ -81,3 +81,5 @@ export { createPermissionsController } from './controllers/permissions-controlle
 export { HttpError } from './errors';
 export { ACCOUNT_DASHBOARD_MODULE, TOKENS_DASHBOARD_MODULE, USERS_DASHBOARD_MODULE, tokensDashboardPage, usersDashboardPages } from './dashboard-page';
 export { createUsersConfigProvider, UsersConfigFacts } from './users-config-provider';
+/** The plugin's entry point (`builder.addPlugin(usersPluginEntry, options)`; what the marketplace loads). */
+export * as usersPluginEntry from './plugin';

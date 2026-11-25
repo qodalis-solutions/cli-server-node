@@ -6,3 +6,5 @@ export {
     REDIS_CONFIG_WRITE_SCRIPT,
 } from './redis-config-store';
 export { configRedisInstalledPlugin } from './package-info';
+/** The plugin's entry point (`builder.addPlugin(configRedisPluginEntry, options)`; what the marketplace loads). */
+export * as configRedisPluginEntry from './plugin';

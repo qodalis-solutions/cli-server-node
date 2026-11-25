@@ -19,7 +19,8 @@
         "start": "tsx src/server.ts",
         "dev": "tsx watch src/server.ts",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "sync:plugin-config": "tsx scripts/sync-plugin-config.ts"
     },
     "keywords": [
         "cli",

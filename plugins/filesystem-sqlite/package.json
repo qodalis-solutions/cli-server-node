@@ -41,9 +41,44 @@
     "qodalis": {
         "kind": "server",
         "plugin": "filesystem-sqlite",
-        "autoInstall": false,
-        "autoInstallReason": "a filesystem storage in the host's SQLite database (through the databases plugin): set up in code",
+        "entry": "./dist/plugin.js",
         "title": "Filesystem SQLite",
-        "icon": "🗃️"
+        "icon": "🗃️",
+        "config": {
+            "entries": [
+                {
+                    "key": "dbPath",
+                    "label": "Database file",
+                    "description": "The SQLite file (relative paths from the plugin's data directory; :memory: for none)",
+                    "type": "string",
+                    "default": "files.db",
+                    "validation": {
+                        "required": true,
+                        "max": 500
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "tablePrefix",
+                    "label": "Table prefix",
+                    "description": "Prepended to the table name (default Qcli)",
+                    "type": "string",
+                    "default": "Qcli",
+                    "validation": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Uploads, new folders and deletes are refused",
+                    "type": "boolean",
+                    "default": false,
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

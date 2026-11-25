@@ -48,9 +48,49 @@
     "qodalis": {
         "kind": "server",
         "plugin": "portal",
-        "autoInstall": false,
-        "autoInstallReason": "a developer portal whose sections come from the host's public API and docs: set up in code",
+        "entry": "./dist/plugin.js",
+        "order": 60,
         "title": "Portal",
-        "icon": "🏠"
+        "icon": "🏠",
+        "config": {
+            "entries": [
+                {
+                    "key": "path",
+                    "label": "Path",
+                    "description": "Where the portal is served (/ for the root)",
+                    "type": "string",
+                    "default": "/qcli/portal",
+                    "validation": {
+                        "required": true,
+                        "pattern": "^(/|(/[A-Za-z0-9._~-]+)+)$"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "name",
+                    "label": "Name",
+                    "type": "string",
+                    "default": "Documentation",
+                    "validation": {
+                        "required": true,
+                        "max": 80
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "logoUrl",
+                    "label": "Logo",
+                    "description": "An http(s) URL or a root-relative path; empty: none",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "max": 2000
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

@@ -40,9 +40,55 @@
     "qodalis": {
         "kind": "server",
         "plugin": "data-explorer",
-        "autoInstall": false,
-        "autoInstallReason": "part of the server: install a source instead (data-explorer-postgres, -mysql, -mssql, -mongo, -redis, -elasticsearch, -sql)",
+        "entry": "./dist/plugin.js",
+        "order": 30,
         "title": "Data explorer",
-        "icon": "🔍"
+        "icon": "🔍",
+        "config": {
+            "entries": [
+                {
+                    "key": "forceReadOnly",
+                    "label": "Read-only for all",
+                    "description": "Every source may only read, whatever its own setting",
+                    "type": "boolean",
+                    "default": false,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "maxRows",
+                    "label": "Rows at most",
+                    "description": "The most rows any source returns; 0: each source its own",
+                    "type": "number",
+                    "default": 0,
+                    "validation": {
+                        "min": 0,
+                        "max": 1000000
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "rateLimitQueries",
+                    "label": "Queries per window",
+                    "description": "Per caller and source, for sources without their own limit; 0: none",
+                    "type": "number",
+                    "default": 0,
+                    "validation": {
+                        "min": 0
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "rateLimitWindowSeconds",
+                    "label": "Window (seconds)",
+                    "type": "number",
+                    "default": 60,
+                    "validation": {
+                        "min": 1,
+                        "max": 86400
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

@@ -23,3 +23,5 @@ export { resolvePortalSiteDir, resolvePortalSite, PortalSiteSource, PORTAL_SITE_
 export { createPortalConfigProvider, PortalBranding, PortalSiteFacts } from './portal-config-provider';
 export { CliPortalCommandProcessor, PortalStatus, formatPortalStatus, PORTAL_BRANDING_HINT } from './portal-command';
 export { portalInstalledPlugin, PORTAL_PLUGIN_ID } from './package-info';
+/** The plugin's entry point (`builder.addPlugin(portalPluginEntry, options)`; what the marketplace loads). */
+export * as portalPluginEntry from './plugin';

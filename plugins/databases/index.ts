@@ -30,3 +30,5 @@ export { DATABASES_DASHBOARD_PREFIX, DATABASES_DASHBOARD_MODULE, databasesDashbo
 export { databasesInstalledPlugin, DATABASES_PLUGIN_ID } from './package-info';
 export { CliDatabaseStats, CliDatabaseTableStats, collectDatabaseStats, databaseSize } from './stats';
 export { CliDatabaseConfigStore, CliDatabaseConfigStoreOptions, configStoreMigrations, SQL_DIALECT_TITLES } from './config-store';
+/** The plugin's entry point (`builder.addPlugin(databasesPluginEntry, options)`; what the marketplace loads). */
+export * as databasesPluginEntry from './plugin';

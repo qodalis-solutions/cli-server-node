@@ -41,9 +41,46 @@
     "qodalis": {
         "kind": "server",
         "plugin": "users-postgres",
-        "autoInstall": false,
-        "autoInstallReason": "the users plugin's stores in PostgreSQL: passed to CliUsersBuilder in code",
+        "entry": "./dist/plugin.js",
+        "order": 5,
         "title": "Users on PostgreSQL",
-        "icon": "🐘"
+        "icon": "🐘",
+        "config": {
+            "entries": [
+                {
+                    "key": "connectionString",
+                    "label": "Connection string",
+                    "description": "postgres://user:password@host:5432/database (kept as a secret, never returned)",
+                    "type": "secret",
+                    "default": null,
+                    "required": true,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "schema",
+                    "label": "Schema",
+                    "description": "The schema of the tables; empty: the search path",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "pattern": "^([A-Za-z_][A-Za-z0-9_]*)?$"
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "tablePrefix",
+                    "label": "Table prefix",
+                    "description": "Prepended to the table names (default Qcli)",
+                    "type": "string",
+                    "default": "Qcli",
+                    "validation": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                    },
+                    "requiresRestart": true
+                }
+            ],
+            "needsConfiguration": true
+        }
     }
 }

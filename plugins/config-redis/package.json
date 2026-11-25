@@ -38,9 +38,46 @@
     "qodalis": {
         "kind": "server",
         "plugin": "config-redis",
-        "autoInstall": false,
-        "autoInstallReason": "a config store, not a plugin: pass it to createCliServer({ config: { store } }) in code",
+        "entry": "./dist/plugin.js",
+        "order": 20,
         "title": "Config on Redis",
-        "icon": "🟥"
+        "icon": "🟥",
+        "config": {
+            "entries": [
+                {
+                    "key": "url",
+                    "label": "Redis URL",
+                    "description": "redis://[:password@]host:6379/0 (rediss:// for TLS); kept as a secret, never returned",
+                    "type": "secret",
+                    "default": null,
+                    "required": true,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "keyPrefix",
+                    "label": "Key prefix",
+                    "description": "Prepended to every key: <prefix><provider>:<section>",
+                    "type": "string",
+                    "default": "qcli:config:",
+                    "validation": {
+                        "max": 200
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "ttlSeconds",
+                    "label": "Expiry (seconds)",
+                    "description": "A section expires this long after its last change; 0: never",
+                    "type": "number",
+                    "default": 0,
+                    "validation": {
+                        "min": 0
+                    },
+                    "requiresRestart": true
+                }
+            ],
+            "needsConfiguration": true
+        }
     }
 }

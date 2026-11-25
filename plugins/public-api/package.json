@@ -42,9 +42,92 @@
     "qodalis": {
         "kind": "server",
         "plugin": "public-api",
-        "autoInstall": false,
-        "autoInstallReason": "publishes the host's own API routes with tokens and quotas, and needs the users plugin: set up in code",
+        "entry": "./dist/plugin.js",
         "title": "Public API",
-        "icon": "🌐"
+        "icon": "🌐",
+        "config": {
+            "entries": [
+                {
+                    "key": "basePath",
+                    "label": "Path",
+                    "description": "Where the OpenAPI document and Swagger UI are served",
+                    "type": "string",
+                    "default": "/qcli/api",
+                    "validation": {
+                        "required": true,
+                        "pattern": "^(/[A-Za-z0-9._~-]+)+$"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "title",
+                    "label": "Title",
+                    "type": "string",
+                    "default": "API reference",
+                    "validation": {
+                        "required": true,
+                        "max": 100
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "openApiFile",
+                    "label": "OpenAPI document",
+                    "description": "A JSON file (relative paths from the plugin's data directory); empty: an empty document",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "max": 500
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "serverUrl",
+                    "label": "Server URL",
+                    "description": "The document's servers URL; empty: the request's",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "pattern": "^(|https?://\\S+)$"
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "requestsPerDay",
+                    "label": "Requests per day",
+                    "description": "Per account; 0: unlimited",
+                    "type": "number",
+                    "default": 0,
+                    "validation": {
+                        "min": 0
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "requestsPerMinute",
+                    "label": "Requests per minute",
+                    "description": "Per account; 0: unlimited",
+                    "type": "number",
+                    "default": 0,
+                    "validation": {
+                        "min": 0
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "usageRetentionDays",
+                    "label": "Usage kept (days)",
+                    "type": "number",
+                    "default": 31,
+                    "validation": {
+                        "min": 1,
+                        "max": 3650
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

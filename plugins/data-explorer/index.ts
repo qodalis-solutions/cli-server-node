@@ -30,3 +30,5 @@ export {
     MASK,
 } from './data-explorer-policy';
 export { DATA_EXPLORER_DASHBOARD_MODULE, dataExplorerDashboardPage } from './dashboard-page';
+/** The plugin's entry point (`builder.addPlugin(dataExplorerPluginEntry, options)`; what the marketplace loads). */
+export * as dataExplorerPluginEntry from './plugin';

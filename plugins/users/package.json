@@ -47,9 +47,49 @@
     "qodalis": {
         "kind": "server",
         "plugin": "users",
-        "autoInstall": false,
-        "autoInstallReason": "replaces the server's sign-in (an auth provider for every route and socket): set up in code (CliUsersBuilder, mountPlugin)",
+        "entry": "./dist/plugin.js",
+        "order": 10,
         "title": "Users",
-        "icon": "👥"
+        "icon": "👥",
+        "config": {
+            "entries": [
+                {
+                    "key": "defaultAdminPassword",
+                    "label": "root password",
+                    "description": "The seeded root user's password; empty: a random one, logged once",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "protectServer",
+                    "label": "Protect the server",
+                    "description": "Every route and socket needs a sign-in",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "allowNonExpiringTokens",
+                    "label": "Tokens without expiry",
+                    "description": "API tokens may be created without an expiry date",
+                    "type": "boolean",
+                    "default": false,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "linkApprovalUrl",
+                    "label": "Link approval page",
+                    "description": "Where users approve a terminal's link request; empty: the dashboard's",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "pattern": "^(|https?://\\S+|/(?![/\\\\])\\S*)$"
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }
