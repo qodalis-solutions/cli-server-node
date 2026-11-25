@@ -413,7 +413,7 @@ describe('dashboard marketplace: install, update, remove', () => {
 
         const res = await request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name: JOBS });
         expect(res.status).toBe(201);
-        expect(res.body).toEqual({ name: JOBS, version: '1.1.0', title: 'Jobs', icon: '⏱️', id: 'jobs', installedAt: expect.any(String), installedBy: 'admin' });
+        expect(res.body).toEqual({ name: JOBS, version: '1.1.0', title: 'Jobs', icon: '⏱️', id: 'jobs', installedAt: expect.any(String), installedBy: 'admin', hasConfig: false });
 
         // stored: <dir>/<safe-name>/<version>/{extension.js,extension.css} and installed.json, no staging leftovers
         const versionDir = join(h.dir, '@qodalis+cli-dashboard-module-jobs', '1.1.0');
@@ -712,7 +712,7 @@ describe('dashboard marketplace: restart', () => {
         expect((await request(second.cli.app).get(page.entry)).status).toBe(200);
         // installed still listed; updateAvailable left out while the marketplace is unreachable
         const installed = await request(second.cli.app).get(`${BASE}/installed`).set(auth(second.token));
-        expect(installed.body).toEqual([{ name: TICKETS, version: '1.0.0', title: 'Tickets', icon: '🎫', id: 'tickets', installedAt: expect.any(String), installedBy: 'admin' }]);
+        expect(installed.body).toEqual([{ name: TICKETS, version: '1.0.0', title: 'Tickets', icon: '🎫', id: 'tickets', installedAt: expect.any(String), installedBy: 'admin', hasConfig: false }]);
         // and removable without the marketplace
         expect((await request(second.cli.app).delete(`${BASE}/installed/${TICKETS}`).set(auth(second.token))).status).toBe(200);
         expect(offline.calls.filter((c) => !c.startsWith(MARKET))).toEqual([]);

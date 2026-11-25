@@ -71,7 +71,10 @@ export {
     DashboardExtensionHost,
     DashboardPluginAnnotations,
     InstalledDashboardPlugin,
+    InstalledDashboardPluginResult,
     InstalledDashboardPluginRecord,
+    DashboardPluginUpdateResult,
+    DashboardPluginInfo,
     InstalledDashboardPluginFile,
     MarketplaceFetch,
     MarketplaceFetchResponse,
@@ -95,3 +98,16 @@ export {
     sha384Integrity,
 } from './services/dashboard-marketplace';
 export { createDashboardMarketplaceController } from './controllers/dashboard-marketplace-controller';
+export {
+    DashboardPluginsConfigProvider,
+    DashboardPluginConfig,
+    DashboardPluginConfigEntry,
+    DashboardPluginConfigEntryType,
+    DASHBOARD_PLUGINS_CONFIG_PROVIDER_ID,
+    DASHBOARD_PLUGIN_CONFIG_KEY,
+    DASHBOARD_PLUGIN_CONFIG_MAX_BYTES,
+    DASHBOARD_PLUGIN_CONFIG_MAX_ENTRIES,
+    DASHBOARD_PLUGIN_CONFIG_TYPES,
+    parseDashboardPluginConfig,
+    validateDashboardPluginConfigValues,
+} from './services/dashboard-plugin-config';

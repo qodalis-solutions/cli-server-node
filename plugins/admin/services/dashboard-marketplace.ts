@@ -3,7 +3,22 @@ import { existsSync, readFileSync } from 'fs';
 import { mkdir, rename, rm, writeFile } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { join, resolve, sep } from 'path';
-import { dashboardModulePage, validateDashboardExtension, type CliDashboardExtension } from '@qodalis/cli-server-abstractions';
+import {
+    dashboardModulePage,
+    validateCliConfigValue,
+    validateDashboardExtension,
+    type CliConfigErrors,
+    type CliConfigValue,
+    type CliDashboardExtension,
+} from '@qodalis/cli-server-abstractions';
+import {
+    DASHBOARD_PLUGINS_CONFIG_PROVIDER_ID,
+    DashboardPluginsConfigProvider,
+    parseDashboardPluginConfig,
+    validateDashboardPluginConfigValues,
+    type DashboardPluginConfig,
+    type DashboardPluginConfigEntry,
+} from './dashboard-plugin-config';
 
 /** Who may install dashboard plugins: listed versions of verified publishers, any listed version, or nobody (browse only). */
 export type DashboardInstallPolicy = 'verified' | 'listed' | 'off';
@@ -51,11 +66,12 @@ export interface DashboardMarketplaceOptions {
     timeoutMs?: number;
 }
 
-/** A refused or failed marketplace operation: the HTTP status and the `{ error }` text. */
+/** A refused or failed marketplace operation: the HTTP status and the `{ error }` text (`errors`: per-key messages of settings). */
 export class DashboardMarketplaceError extends Error {
     constructor(
         readonly status: number,
         message: string,
+        readonly errors?: CliConfigErrors,
     ) {
         super(message);
         this.name = 'DashboardMarketplaceError';
@@ -91,6 +107,8 @@ export interface InstalledDashboardPluginRecord {
     /** ISO 8601 UTC. */
     installedAt: string;
     installedBy: string;
+    /** The installed version's settings (`config.entries` of its marketplace record), so they are restored offline; absent when it has none. */
+    config?: DashboardPluginConfig;
 }
 
 /** An installed plugin as `GET /installed` lists it. */
@@ -102,6 +120,8 @@ export interface InstalledDashboardPlugin {
     id: string;
     installedAt: string;
     installedBy: string;
+    /** The plugin has settings: the section `dashboard-plugins.<id>` of the config providers. */
+    hasConfig: boolean;
     /** Whether the marketplace has a newer installable version; absent when the marketplace was not asked or unreachable. */
     updateAvailable?: boolean;
 }
@@ -134,6 +154,30 @@ export interface DashboardMarketplaceDeps {
     audit?: () => ((entry: DashboardMarketplaceAuditEntry) => Promise<void>) | undefined;
     /** Publishes an event to holders of `admin:access`. */
     publish?: (type: string, data: Record<string, unknown>) => void;
+    /** Publishes `config:changed` (audience `config:read`) when an install, update or removal changes stored settings. */
+    publishConfigChanged?: (data: Record<string, unknown>) => void;
+}
+
+/** What `POST /installed` answers: the installed plugin, and why its settings were ignored (a bad marketplace record). */
+export type InstalledDashboardPluginResult = InstalledDashboardPlugin & { warnings?: string[] };
+
+/** What `PUT /installed/{name}` does. */
+export interface DashboardPluginUpdateResult {
+    plugin: InstalledDashboardPlugin;
+    changed: boolean;
+    previousVersion: string;
+    /** Stored settings the new version no longer has, or whose value it no longer accepts: deleted. */
+    configDropped: string[];
+    warnings?: string[];
+}
+
+/** An installed plugin with its settings and their values (`admin dashboard info`). */
+export interface DashboardPluginInfo {
+    plugin: InstalledDashboardPlugin;
+    files: InstalledDashboardPluginFile[];
+    /** The section's version; null without settings. */
+    configVersion: string | null;
+    settings: Array<DashboardPluginConfigEntry & { value: CliConfigValue; isDefault: boolean }>;
 }
 
 /** What the marketplace lists (its fields are passed through, the annotations added). */
@@ -150,6 +194,8 @@ export interface MarketplaceDashboardItem {
     serverPackages?: unknown;
     versions?: MarketplaceDashboardVersion[];
     extension?: { id?: unknown };
+    /** The latest version's settings. */
+    config?: unknown;
     [key: string]: unknown;
 }
 
@@ -167,6 +213,8 @@ export interface MarketplaceDashboardVersion {
     dashboardApi?: number;
     serverPackages?: unknown;
     extension?: { id?: unknown };
+    /** The version's settings, `{ entries: [...] }` (`null` or absent: none). */
+    config?: unknown;
     [key: string]: unknown;
 }
 
@@ -337,6 +385,8 @@ export class DashboardMarketplace {
     private readonly timeoutMs: number;
     private readonly plugins = new Map<string, ServedPlugin>();
     private queue: Promise<unknown> = Promise.resolve();
+    /** The `dashboard-plugins` config provider: a section per installed plugin with settings (registered by the admin plugin). */
+    readonly config = new DashboardPluginsConfigProvider();
 
     constructor(
         options: DashboardMarketplaceOptions,
@@ -503,18 +553,27 @@ export class DashboardMarketplace {
 
     // ---------------------------------------------------------------- changes
 
-    /** `POST /installed`: installs `name` (the newest fitting version when `version` is absent). 201 with the plugin. */
-    installPlugin(name: unknown, version: unknown, actor: DashboardMarketplaceActor): Promise<InstalledDashboardPlugin> {
+    /**
+     * `POST /installed`: installs `name` (the newest fitting version when `version` is absent) with the values of its
+     * settings in `config` (`{ key: value }`, checked against the version's settings before anything is downloaded:
+     * 400 `validation failed` with per-key `errors`). 201 with the plugin; `warnings` when the marketplace's settings
+     * of the version are invalid (it is installed without settings).
+     */
+    installPlugin(name: unknown, version: unknown, actor: DashboardMarketplaceActor, config?: unknown): Promise<InstalledDashboardPluginResult> {
         return this.exclusive(async () => {
             if (!isValidDashboardPluginName(name)) throw new DashboardMarketplaceError(400, 'invalid package name');
             if (version !== undefined && version !== null && !isValidDashboardPluginVersion(version)) throw new DashboardMarketplaceError(400, 'invalid version');
+            const values = configValuesOf(config);
             const existing = this.recordOf(name);
             if (existing) throw new DashboardMarketplaceError(409, `already installed: ${name}@${existing.version}`);
             const { plugin, target } = await this.resolve(name, (version as string | null | undefined) ?? undefined);
+            const settings = settingsOf(name, target);
+            checkConfigValues(settings.config, values);
             const id = dashboardPluginId(name, target.extension?.id ?? plugin.extension?.id);
             if (!id) throw new DashboardMarketplaceError(400, `no dashboard extension id for ${name}`);
             if (this.deps.extensions.list().some((e) => e.id === id)) throw new DashboardMarketplaceError(409, `dashboard extension already registered: ${id}`);
             const record = await this.store(name, target, id, plugin, actor);
+            if (settings.config) record.config = settings.config;
             try {
                 this.register(record);
             } catch (err) {
@@ -522,23 +581,40 @@ export class DashboardMarketplace {
                 throw new DashboardMarketplaceError(409, (err as Error).message);
             }
             await this.save();
-            await this.changed('install', record, actor);
-            return installedView(record);
+            // A section left from an earlier install of the page (removed while its store was unreachable) starts clean
+            const leftover = Object.keys(await this.config.storedValues(id));
+            const set = Object.keys(values).filter((k) => values[k] !== null);
+            await this.writeConfig(record, { ...nulls(leftover.filter((k) => !set.includes(k))), ...pick(values, set) }, actor);
+            await this.changed('install', record, actor, undefined, set.length ? { config: set } : {});
+            return { ...installedView(record), ...(settings.warning ? { warnings: [settings.warning] } : {}) };
         });
     }
 
-    /** `PUT /installed/{name}`: updates to `version` (default: the newest fitting one). `changed` is false when it already is that version. */
-    updatePlugin(name: unknown, version: unknown, actor: DashboardMarketplaceActor): Promise<{ plugin: InstalledDashboardPlugin; changed: boolean; previousVersion: string }> {
+    /**
+     * `PUT /installed/{name}`: updates to `version` (default: the newest fitting one), with values of its settings in
+     * `config` (checked against the new version's settings before anything is downloaded). Stored values whose key the
+     * new version still has and whose value it still accepts are kept, the others deleted (`configDropped`).
+     * `changed` is false when it already is that version (the given values are applied all the same).
+     */
+    updatePlugin(name: unknown, version: unknown, actor: DashboardMarketplaceActor, config?: unknown): Promise<DashboardPluginUpdateResult> {
         return this.exclusive(async () => {
             if (!isValidDashboardPluginName(name)) throw new DashboardMarketplaceError(400, 'invalid package name');
             if (version !== undefined && version !== null && !isValidDashboardPluginVersion(version)) throw new DashboardMarketplaceError(400, 'invalid version');
+            const values = configValuesOf(config);
             const current = this.recordOf(name);
             if (!current) throw new DashboardMarketplaceError(404, `not installed: ${name}`);
             const { plugin, target } = await this.resolve(name, (version as string | null | undefined) ?? undefined);
-            if (target.version === current.version) return { plugin: installedView(current), changed: false, previousVersion: current.version };
+            if (target.version === current.version) {
+                checkConfigValues(current.config, values);
+                await this.writeConfig(current, values, actor);
+                return { plugin: installedView(current), changed: false, previousVersion: current.version, configDropped: [] };
+            }
+            const settings = settingsOf(name, target);
+            checkConfigValues(settings.config, values);
             // The page keeps its id, so open dashboards and links keep working
             const record = await this.store(name, target, current.id, plugin, actor);
             record.installedAt = new Date().toISOString();
+            if (settings.config) record.config = settings.config;
             this.unregister(current.id);
             try {
                 this.register(record);
@@ -549,8 +625,26 @@ export class DashboardMarketplace {
             }
             await this.save();
             await rm(this.versionDir(name, current.version), { recursive: true, force: true });
-            await this.changed('update', record, actor, current.version);
-            return { plugin: installedView(record), changed: true, previousVersion: current.version };
+            // Stored values the new version still accepts are kept, the others dropped
+            const stored = await this.config.storedValues(record.id);
+            const set = Object.keys(values).filter((k) => values[k] !== null);
+            const dropped = Object.keys(stored).filter((key) => {
+                const entry = record.config?.entries.find((e) => e.key === key);
+                return !entry || validateCliConfigValue(entry, stored[key]) !== undefined;
+            });
+            await this.writeConfig(record, { ...nulls(dropped), ...values }, actor);
+            const configDropped = dropped.filter((k) => !set.includes(k));
+            await this.changed('update', record, actor, current.version, {
+                ...(set.length ? { config: set } : {}),
+                ...(configDropped.length ? { configDropped } : {}),
+            });
+            return {
+                plugin: installedView(record),
+                changed: true,
+                previousVersion: current.version,
+                configDropped,
+                ...(settings.warning ? { warnings: [settings.warning] } : {}),
+            };
         });
     }
 
@@ -563,8 +657,62 @@ export class DashboardMarketplace {
             this.unregister(current.id);
             await this.save();
             await rm(join(this.dir, dashboardPluginDirName(name)), { recursive: true, force: true });
+            // Its settings go with it
+            const cleared = await this.config.clear(current.id);
+            if (cleared.version !== undefined) this.configChanged(current.id, cleared.keys, cleared.version, actor);
             await this.changed('remove', current, actor);
             return installedView(current);
+        });
+    }
+
+    /**
+     * `GET /installed/{name}/config`: the values of a plugin's settings (stored over defaults) and the section's
+     * version; `{ values: {}, version: null }` for a plugin without settings. Throws 404 when it is not installed.
+     */
+    async pluginConfig(name: unknown): Promise<{ values: Record<string, CliConfigValue>; version: string | null }> {
+        if (!isValidDashboardPluginName(name)) throw new DashboardMarketplaceError(400, 'invalid package name');
+        const record = this.recordOf(name);
+        if (!record) throw new DashboardMarketplaceError(404, `not installed: ${name}`);
+        return (await this.config.values(record.id)) ?? { values: {}, version: null };
+    }
+
+    /** An installed plugin with its files and its settings' values (`admin dashboard info`). Throws 404 when it is not installed. */
+    async pluginInfo(name: unknown): Promise<DashboardPluginInfo> {
+        if (!isValidDashboardPluginName(name)) throw new DashboardMarketplaceError(400, 'invalid package name');
+        const record = this.recordOf(name);
+        if (!record) throw new DashboardMarketplaceError(404, `not installed: ${name}`);
+        const current = await this.config.values(record.id);
+        const stored = current ? await this.config.storedValues(record.id) : {};
+        return {
+            plugin: installedView(record),
+            files: record.files.map((f) => ({ ...f })),
+            configVersion: current?.version ?? null,
+            settings: (record.config?.entries ?? []).map((e) => ({
+                ...e,
+                value: current!.values[e.key],
+                isDefault: !Object.prototype.hasOwnProperty.call(stored, e.key),
+            })),
+        };
+    }
+
+    /** Writes a plugin's setting changes (none: nothing written) and publishes `config:changed`; the keys written. */
+    private async writeConfig(record: InstalledDashboardPluginRecord, changes: Record<string, CliConfigValue | null>, actor: DashboardMarketplaceActor): Promise<string[]> {
+        const keys = Object.keys(changes);
+        if (keys.length === 0) return keys;
+        const version = await this.config.write(record.id, changes);
+        this.configChanged(record.id, keys, version, actor);
+        return keys;
+    }
+
+    private configChanged(section: string, keys: string[], version: string, actor: DashboardMarketplaceActor): void {
+        this.deps.publishConfigChanged?.({
+            provider: DASHBOARD_PLUGINS_CONFIG_PROVIDER_ID,
+            section,
+            keys,
+            version,
+            requiresRestart: false,
+            store: this.config.storeKind,
+            user: actor.userName,
         });
     }
 
@@ -596,11 +744,11 @@ export class DashboardMarketplace {
                 throw new DashboardMarketplaceError(404, `no installable version: ${name}`);
             }
         }
-        if (!Array.isArray(target.files)) {
-            // An older details view without files: the version record has them
+        if (!Array.isArray(target.files) || target.config === undefined) {
+            // A details view without files (an older marketplace) or settings: the version record has them
             const record = (await this.getJson(`/plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(target.version)}`)) as MarketplaceDashboardVersion | undefined;
-            if (!record) throw new DashboardMarketplaceError(404, `version not found: ${name}@${target.version}`);
-            target = { ...target, files: record.files };
+            if (!record && !Array.isArray(target.files)) throw new DashboardMarketplaceError(404, `version not found: ${name}@${target.version}`);
+            target = { ...target, files: Array.isArray(target.files) ? target.files : record!.files, config: target.config ?? record?.config ?? null };
         }
         return { plugin, target };
     }
@@ -695,11 +843,14 @@ export class DashboardMarketplace {
         }
         this.deps.extensions.add(extension);
         this.plugins.set(record.id, { record, handler: page.handler });
+        if (record.config) this.config.setSection(record.id, record.title, record.config, `${record.name}@${record.version}`);
+        else this.config.removeSection(record.id);
     }
 
     private unregister(id: string): void {
         this.deps.extensions.remove(id);
         this.plugins.delete(id);
+        this.config.removeSection(id);
     }
 
     /** Writes `installed.json` atomically (a temporary file renamed over it). */
@@ -717,7 +868,13 @@ export class DashboardMarketplace {
         }
     }
 
-    private async changed(action: 'install' | 'update' | 'remove', record: InstalledDashboardPluginRecord, actor: DashboardMarketplaceActor, previousVersion?: string): Promise<void> {
+    private async changed(
+        action: 'install' | 'update' | 'remove',
+        record: InstalledDashboardPluginRecord,
+        actor: DashboardMarketplaceActor,
+        previousVersion?: string,
+        extra: { config?: string[]; configDropped?: string[] } = {},
+    ): Promise<void> {
         const sink = this.deps.audit?.();
         if (sink) {
             try {
@@ -729,7 +886,7 @@ export class DashboardMarketplace {
                     actor: actor.userName,
                     target: record.name,
                     details: previousVersion ? `${record.name} ${previousVersion} -> ${record.version}` : `${record.name}@${record.version}`,
-                    properties: { name: record.name, version: record.version, id: record.id, ...(previousVersion ? { previousVersion } : {}) },
+                    properties: { name: record.name, version: record.version, id: record.id, ...(previousVersion ? { previousVersion } : {}), ...extra },
                 });
             } catch (err) {
                 console.error('[qcli-admin] audit of a dashboard plugin change failed:', (err as Error)?.message ?? err);
@@ -785,6 +942,12 @@ export class DashboardMarketplace {
                     installedAt: typeof raw.installedAt === 'string' ? raw.installedAt : '',
                     installedBy: typeof raw.installedBy === 'string' ? raw.installedBy : '',
                 };
+                try {
+                    const config = parseDashboardPluginConfig(raw.config);
+                    if (config) record.config = config;
+                } catch (err) {
+                    console.warn(`[qcli-admin] the settings of dashboard plugin ${label} are invalid, loaded without them: ${(err as Error).message}`);
+                }
                 this.register(record);
             } catch (err) {
                 console.warn(`[qcli-admin] dashboard plugin ${label} not loaded: ${(err as Error).message}`);
@@ -813,5 +976,30 @@ export class DashboardMarketplace {
 }
 
 function installedView(r: InstalledDashboardPluginRecord): InstalledDashboardPlugin {
-    return { name: r.name, version: r.version, title: r.title, icon: r.icon ?? null, id: r.id, installedAt: r.installedAt, installedBy: r.installedBy };
+    return { name: r.name, version: r.version, title: r.title, icon: r.icon ?? null, id: r.id, installedAt: r.installedAt, installedBy: r.installedBy, hasConfig: !!r.config };
 }
+
+/** The `config` of an install or update: `{ key: value }`; absent or null is none. Throws 400 for anything else. */
+function configValuesOf(config: unknown): Record<string, CliConfigValue | null> {
+    if (config === undefined || config === null) return {};
+    if (typeof config !== 'object' || Array.isArray(config)) throw new DashboardMarketplaceError(400, 'config must be an object');
+    return { ...(config as Record<string, CliConfigValue | null>) };
+}
+
+/** Throws 400 `validation failed` with per-key errors when values do not fit the settings. */
+function checkConfigValues(config: DashboardPluginConfig | undefined, values: Record<string, unknown>): void {
+    const errors = validateDashboardPluginConfigValues(config, values);
+    if (Object.keys(errors).length > 0) throw new DashboardMarketplaceError(400, 'validation failed', errors);
+}
+
+/** A version's settings; a bad record (a secret, invalid rules or defaults) installs without them, with a warning. */
+function settingsOf(name: string, target: MarketplaceDashboardVersion): { config?: DashboardPluginConfig; warning?: string } {
+    try {
+        return { config: parseDashboardPluginConfig(target.config) };
+    } catch (err) {
+        return { warning: `the settings of ${name}@${target.version} are invalid and were ignored: ${(err as Error).message}` };
+    }
+}
+
+const nulls = (keys: string[]): Record<string, null> => Object.fromEntries(keys.map((k) => [k, null]));
+const pick = <T>(values: Record<string, T>, keys: string[]): Record<string, T> => Object.fromEntries(keys.map((k) => [k, values[k]]));

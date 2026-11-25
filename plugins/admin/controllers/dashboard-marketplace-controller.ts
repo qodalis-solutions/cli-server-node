@@ -26,7 +26,7 @@ function callerOf(req: Request): DashboardMarketplaceActor & { permissions: stri
 
 function sendError(res: Response, err: unknown): void {
     if (err instanceof DashboardMarketplaceError) {
-        res.status(err.status).json({ error: err.message });
+        res.status(err.status).json({ error: err.message, ...(err.errors ? { errors: err.errors } : {}) });
         return;
     }
     console.error('[qcli-admin] dashboard marketplace request failed:', (err as Error)?.message ?? err);
@@ -58,9 +58,13 @@ function nameBelow(req: Request, prefix: string): string {
  * - `GET /plugins?query=&page=&pageSize=` — the marketplace's dashboard plugins, annotated (`installed`, `updateAvailable`, `allowed`, `blockedReason`, `requires`)
  * - `GET /plugins/{name}` — one plugin with its versions
  * - `GET /installed` — the installed plugins (`updateAvailable` when the marketplace answers)
- * - `POST /installed` `{ name, version? }` — 201 with the installed plugin
- * - `PUT /installed/{name}` `{ version? }` — the updated plugin
- * - `DELETE /installed/{name}` — the removed plugin
+ * - `GET /installed/{name}/config` — `{ values, version }`: its settings' values (stored over defaults), the section's version
+ * - `POST /installed` `{ name, version?, config? }` — 201 with the installed plugin (`warnings` when its settings were ignored)
+ * - `PUT /installed/{name}` `{ version?, config? }` — the updated plugin with `configDropped`
+ * - `DELETE /installed/{name}` — the removed plugin (its settings deleted)
+ *
+ * `config` (`{ key: value }`) is checked against the version's settings before anything is downloaded: 400
+ * `{ error: 'validation failed', errors: { key: message } }`.
  */
 export function createDashboardMarketplaceController(marketplace: DashboardMarketplace): Router {
     const router = Router();
@@ -110,12 +114,21 @@ export function createDashboardMarketplaceController(marketplace: DashboardMarke
         }
     });
 
+    router.get(/^\/installed\/.+\/config$/, async (req, res) => {
+        try {
+            const name = nameBelow(req, '/installed/');
+            res.json(await marketplace.pluginConfig(name.slice(0, -'/config'.length)));
+        } catch (err) {
+            sendError(res, err);
+        }
+    });
+
     router.post('/installed', async (req, res) => {
         const actor = canInstall(req, res);
         if (!actor) return;
         try {
-            const body = (req.body ?? {}) as { name?: unknown; version?: unknown };
-            res.status(201).json(await marketplace.installPlugin(body.name, body.version, actor));
+            const body = (req.body ?? {}) as { name?: unknown; version?: unknown; config?: unknown };
+            res.status(201).json(await marketplace.installPlugin(body.name, body.version, actor, body.config));
         } catch (err) {
             sendError(res, err);
         }
@@ -125,9 +138,9 @@ export function createDashboardMarketplaceController(marketplace: DashboardMarke
         const actor = canInstall(req, res);
         if (!actor) return;
         try {
-            const body = (req.body ?? {}) as { version?: unknown };
-            const result = await marketplace.updatePlugin(nameBelow(req, '/installed/'), body.version, actor);
-            res.json(result.plugin);
+            const body = (req.body ?? {}) as { version?: unknown; config?: unknown };
+            const result = await marketplace.updatePlugin(nameBelow(req, '/installed/'), body.version, actor, body.config);
+            res.json({ ...result.plugin, configDropped: result.configDropped, ...(result.warnings ? { warnings: result.warnings } : {}) });
         } catch (err) {
             sendError(res, err);
         }

@@ -1,5 +1,5 @@
 import { Router, RequestHandler, static as expressStatic } from 'express';
-import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus, ICliConfigProvider, ICliConfigStore, CliConfigPermissions } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus, ICliConfigProvider, ICliConfigStore, CliConfigPermissions, CLI_CONFIG_CHANGED_EVENT } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
 import { AdminAuthProvider } from './auth/auth-provider';
@@ -79,7 +79,7 @@ export interface CliAdminPluginResult {
     installedPlugin: CliInstalledPlugin;
     /** `config:read` for `GET /config`, `config:write` for `PATCH` (enforced on a protected server). */
     routePermissions: Array<{ path: string; read: string; write: string }>;
-    /** The `auth` (read-only) and `logs` config providers, registered with the server's (also by `build`). */
+    /** The `auth` (read-only), `logs` and `dashboard-plugins` (with the marketplace) config providers, registered with the server's (also by `build`). */
     configProviders: ICliConfigProvider[];
     /**
      * The `admin` terminal command (`status`, `plugins`, `clients`, `logs`), registered by `mountPlugin`; needs
@@ -344,6 +344,10 @@ export class CliAdminBuilder {
                     if (bus) void bus.publish(type, data, { permission: 'admin:access' });
                     else eventSocketManager.broadcastMessage({ type, ...data });
                 },
+                publishConfigChanged: (data) => {
+                    if (bus) void bus.publish(CLI_CONFIG_CHANGED_EVENT, data, { permission: CliConfigPermissions.Read });
+                    else eventSocketManager.broadcastMessage({ type: CLI_CONFIG_CHANGED_EVENT, ...data });
+                },
             });
             marketplace.load();
             router.use('/dashboard/marketplace', authMiddleware, createDashboardMarketplaceController(marketplace));
@@ -365,6 +369,8 @@ export class CliAdminBuilder {
         const configProviders: ICliConfigProvider[] = [
             createAdminAuthConfigProvider(this._config, authMode, () => !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET),
             createLogsConfigProvider(logBuffer).setStore(this._configStore),
+            // The dashboard plugins' settings: the host's store for `dashboard-plugins`, else the default store
+            ...(marketplace ? [marketplace.config] : []),
         ];
         for (const provider of configProviders) {
             if (builder.addConfigProvider && !builder.configProviders?.some((p) => p.id === provider.id)) {
