@@ -1,5 +1,6 @@
 import { ICliCommandProcessor } from './cli-command-processor';
 import { ICliCommandAuthor, DefaultLibraryAuthor } from './cli-command-author';
+import type { ICliConfigProvider } from './config/config-types';
 
 /**
  * Represents a module that bundles one or more command processors.
@@ -22,6 +23,9 @@ export interface ICliModule {
 
     /** One emoji or an image URL shown for the module (the admin dashboard's plugins page); undefined = none. */
     icon?: string;
+
+    /** Config providers the module brings (its settings), registered with the module (`builder.addModule`). */
+    configProviders?: ICliConfigProvider[];
 }
 
 /**
@@ -34,4 +38,5 @@ export abstract class CliModule implements ICliModule {
     author: ICliCommandAuthor = DefaultLibraryAuthor;
     abstract processors: ICliCommandProcessor[];
     icon?: string;
+    configProviders?: ICliConfigProvider[];
 }
