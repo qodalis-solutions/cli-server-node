@@ -76,10 +76,12 @@ All endpoints are mounted at the plugin's built-in prefix (`/api/v1/qcli`). Rout
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/status` | Server uptime, memory, CPU (latest sample), platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the audit plugin, which the users plugin adds) |
-| GET | `/status/history` | Status samples of the last `?minutes=` (default 60, 1-1440), oldest first: `{ intervalSeconds: 15, samples: [{ timestamp, memoryMb, cpuPercent, activeWsConnections, activeShellSessions }] }` |
+| GET | `/status` | Server uptime, process memory (`memoryUsageMb`), the machine's memory (`systemMemoryTotalMb`, `systemMemoryUsedMb`, `memoryLimited`), CPU (latest sample), platform, connections, registered commands, enabled features (`filesystem`, `jobs`, `audit` with the audit plugin, which the users plugin adds) |
+| GET | `/status/history` | Status samples of the last `?minutes=` (default 60, 1-1440), oldest first: `{ intervalSeconds: 15, samples: [{ timestamp, memoryMb, systemMemoryUsedMb, systemMemoryTotalMb, cpuPercent, activeWsConnections, activeShellSessions }] }` |
 
 The plugin samples the status every 15 seconds (the first at build) and keeps 24 hours in memory (lost on restart). `cpuPercent` is the process CPU time over the last interval as a percentage of one core (null for the first sample). The timer never keeps the process alive; `dispose()` stops it.
+
+`systemMemoryTotalMb` is the RAM the server can use: the container (cgroup) limit when one is set below the installed RAM (`process.constrainedMemory()`), then `memoryLimited` is true, otherwise the installed RAM (`os.totalmem()`). `systemMemoryUsedMb` is the memory in use: the container's usage when limited (cgroup v2 `memory.current`, v1 `memory.usage_in_bytes`), otherwise the machine's (`os.totalmem() - os.freemem()`). Each is null when it cannot be read.
 
 ### Plugins
 
@@ -308,7 +310,7 @@ $ admin status
 Server      @qodalis/cli-server-node 1.0.0-beta.31
 Platform    node v22.12.0 (linux)
 Uptime      2 h 5 min (since 2026-11-25 08:00:00)
-Memory      84.2 MB
+Memory      84.2 MB (process) · machine 9.8 GB of 16 GB used (61%)
 CPU         1.3%
 Connections 2 WebSocket, 0 shell
 Commands    41
