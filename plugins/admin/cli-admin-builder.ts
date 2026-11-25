@@ -18,6 +18,13 @@ import { AdminTheme, AdminThemeDocument, validateAdminTheme } from './services/a
 import { AdminBranding, AdminBrandingDocument, validateAdminBranding } from './services/admin-branding';
 import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-info';
 import { ADMIN_MODULE_NAME, CliAdminCommandProcessor } from './commands/admin-command';
+import { createDashboardMarketplaceController } from './controllers/dashboard-marketplace-controller';
+import {
+    DASHBOARD_INSTALL_PERMISSION,
+    DashboardMarketplace,
+    DashboardMarketplaceOptions,
+} from './services/dashboard-marketplace';
+import { DASHBOARD_MODULES_PREFIX } from '@qodalis/cli-server-abstractions';
 import { join } from 'path';
 import * as crypto from 'crypto';
 
@@ -79,6 +86,15 @@ export interface CliAdminPluginResult {
      * `admin:access` on a protected server (`admin logs` also `logs:read`).
      */
     module: ICliModule;
+    /**
+     * Dashboard plugins from the marketplace (`setMarketplace`), served at `/api/v1/qcli/dashboard/marketplace`;
+     * undefined when turned off (`setMarketplace(false)`) or the builder cannot add pages at runtime.
+     */
+    marketplace?: DashboardMarketplace;
+    /** Serves the marketplace plugins' files at `/qcli/modules/<id>/` (mounted by `mountPlugin`). */
+    assetRoutes: Array<{ prefix: string; handler: DashboardMarketplace['handler'] }>;
+    /** Receives the server's event bus from `mountPlugin` (`dashboard:extensions-changed`), unless `deps.eventBus` was given. */
+    setEventBus(eventBus: ICliEventBus): void;
 }
 
 /**
@@ -105,6 +121,19 @@ export class CliAdminBuilder {
     private _theme: AdminThemeDocument = validateAdminTheme(undefined);
     private _branding?: AdminBrandingDocument;
     private _configStore?: ICliConfigStore;
+    private _marketplace: DashboardMarketplaceOptions | false = {};
+
+    /**
+     * Dashboard plugins from the marketplace: `url` (default `https://plugins.qodalis.com`), `install`
+     * (`verified`, the default: listed versions of verified publishers only; `listed`: any listed version; `off`:
+     * browse only), `dir` (default `./qcli-data/dashboard-plugins`), and `fetch` / `cdns` / `timeoutMs` for the
+     * HTTP client. `false` turns the marketplace off (no routes, installed plugins not loaded). Throws for an
+     * invalid url or policy when built.
+     */
+    setMarketplace(options: DashboardMarketplaceOptions | false): CliAdminBuilder {
+        this._marketplace = options === false ? false : { ...options };
+        return this;
+    }
 
     /**
      * Set the dashboard's color scheme: the mode (`dark`, `light` or `system`)
@@ -297,9 +326,35 @@ export class CliAdminBuilder {
 
         // Pages plugins add to the dashboard (docs/extensions.md of the dashboard); the dashboard
         // filters them by the user's permissions, each plugin's own API enforces them
+        // Dashboard plugins from the marketplace: pages added and removed at runtime, served from this server
+        let bus = eventBus;
+        let marketplace: DashboardMarketplace | undefined;
+        if (this._marketplace !== false && builder.addDashboardExtension && builder.removeDashboardExtension) {
+            const add = builder.addDashboardExtension.bind(builder);
+            const remove = builder.removeDashboardExtension.bind(builder);
+            marketplace = new DashboardMarketplace(this._marketplace, {
+                extensions: {
+                    list: () => (builder.dashboardExtensions ?? []) as ReadonlyArray<{ id: string }>,
+                    add: (extension) => void add(extension),
+                    remove,
+                },
+                serverPlugins: () => builder.installedPlugins ?? [],
+                audit: () => builder.auditSink,
+                publish: (type, data) => {
+                    if (bus) void bus.publish(type, data, { permission: 'admin:access' });
+                    else eventSocketManager.broadcastMessage({ type, ...data });
+                },
+            });
+            marketplace.load();
+            router.use('/dashboard/marketplace', authMiddleware, createDashboardMarketplaceController(marketplace));
+        }
+
         router.get('/dashboard/extensions', authMiddleware, (_req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
-            res.json({ extensions: builder.dashboardExtensions ?? [] });
+            const extensions = (builder.dashboardExtensions ?? []) as ReadonlyArray<{ id: string }>;
+            res.json({
+                extensions: marketplace ? extensions.map((e) => (marketplace!.hasExtension(e.id) ? { ...e, source: 'marketplace' } : e)) : extensions,
+            });
         });
 
         // Plugins
@@ -364,6 +419,7 @@ export class CliAdminBuilder {
             logBuffer,
             clients: eventSocketManager,
             installedPlugins: () => builder.installedPlugins ?? [],
+            marketplace,
         });
 
         return {
@@ -377,7 +433,10 @@ export class CliAdminBuilder {
             publicRoutes: ['POST /api/v1/qcli/auth/login', 'GET /api/v1/qcli/auth/mode'],
             dispose,
             installedPlugin: adminInstalledPlugin,
-            routePermissions: [{ path: '/api/v1/qcli/config', read: CliConfigPermissions.Read, write: CliConfigPermissions.Write }],
+            routePermissions: [
+                { path: '/api/v1/qcli/config', read: CliConfigPermissions.Read, write: CliConfigPermissions.Write },
+                { path: '/api/v1/qcli/dashboard/marketplace', read: 'admin:access', write: DASHBOARD_INSTALL_PERMISSION },
+            ],
             configProviders,
             module: {
                 name: ADMIN_MODULE_NAME,
@@ -386,6 +445,11 @@ export class CliAdminBuilder {
                 author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
                 icon: '🛠️',
                 processors: [adminCommand],
+            },
+            marketplace,
+            assetRoutes: marketplace ? [{ prefix: DASHBOARD_MODULES_PREFIX, handler: marketplace.handler }] : [],
+            setEventBus: (eventBus: ICliEventBus) => {
+                bus ??= eventBus;
             },
         };
     }

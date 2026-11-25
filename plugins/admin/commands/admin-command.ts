@@ -2,9 +2,16 @@ import {
     CliCommandParameterDescriptor,
     CliCommandProcessor,
     CliProcessCommand,
+    getCliCaller,
     getPositionals,
     ICliCommandProcessor,
 } from '@qodalis/cli-server-abstractions';
+import {
+    DASHBOARD_INSTALL_PERMISSION,
+    DashboardMarketplace,
+    DashboardMarketplaceActor,
+    DashboardMarketplaceError,
+} from '../services/dashboard-marketplace';
 import { ADMIN_ACCESS_PERMISSION } from '../auth/auth-provider';
 import { DEFAULT_HISTORY_MINUTES, MAX_HISTORY_MINUTES, StatusDeps, statusSnapshot } from '../controllers/status-controller';
 import type { WsClientsDeps } from '../controllers/ws-clients-controller';
@@ -28,6 +35,8 @@ export interface AdminCommandDeps {
     logBuffer: LogRingBuffer;
     clients: WsClientsDeps;
     installedPlugins: () => ReadonlyArray<CliInstalledPlugin>;
+    /** Dashboard plugins from the marketplace (`admin dashboard`); absent when the marketplace is off. */
+    marketplace?: DashboardMarketplace;
 }
 
 const jsonParam = new CliCommandParameterDescriptor('json', 'Print the result as JSON', false, 'boolean');
@@ -311,13 +320,184 @@ class AdminLogsProcessor extends CliCommandProcessor {
     }
 }
 
+/** Who runs the command: the signed-in caller, else `anonymous` (a server without sign-in). */
+function terminalActor(): DashboardMarketplaceActor {
+    const caller = getCliCaller();
+    return caller ? { userId: caller.userId, userName: caller.userName } : { userName: 'anonymous' };
+}
+
+/** Runs a marketplace call, turning its refusals into `Error: <reason>`. */
+async function marketplaceCall(fn: () => Promise<string>): Promise<string> {
+    try {
+        return await fn();
+    } catch (err) {
+        if (err instanceof DashboardMarketplaceError) return `Error: ${err.message}`;
+        throw err;
+    }
+}
+
+class AdminDashboardListProcessor extends CliCommandProcessor {
+    command = 'list';
+    aliases = ['ls'];
+    description = 'Lists the dashboard plugins installed from the marketplace: page id, package, version, who installed them';
+    parameters = [jsonParam];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    async handleAsync(command: CliProcessCommand): Promise<string> {
+        const plugins = await this.marketplace.installed({ checkUpdates: true });
+        if (command.args?.json) return json(plugins);
+        const { marketplaceUrl, install } = this.marketplace.info();
+        if (plugins.length === 0) return `No dashboard plugins installed (marketplace ${marketplaceUrl}, install: ${install}; admin dashboard search <query> finds some).`;
+        return [
+            `${plugins.length} dashboard plugin(s) from ${marketplaceUrl} (install: ${install})`,
+            formatTable(
+                ['ID', 'Package', 'Version', 'Installed', 'By'],
+                plugins.map((p) => [p.id, p.name, `${p.version}${p.updateAvailable ? ' (update available)' : ''}`, shortTime(p.installedAt), p.installedBy || '-']),
+            ),
+        ].join('\n');
+    }
+}
+
+class AdminDashboardSearchProcessor extends CliCommandProcessor {
+    command = 'search';
+    description = "Searches the marketplace's dashboard plugins: package, version, publisher, whether it can be installed";
+    acceptsValue = true;
+    parameters = [jsonParam];
+    examples = [{ command: 'admin dashboard search tickets', description: 'Dashboard plugins about tickets' }];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return marketplaceCall(async () => {
+            const query = getPositionals(command).join(' ');
+            const result = await this.marketplace.search({ query, pageSize: 50 });
+            if (command.args?.json) return json(result);
+            if (result.items.length === 0) return query ? `No dashboard plugins match "${query}".` : 'The marketplace lists no dashboard plugins.';
+            const status = (p: (typeof result.items)[number]): string => {
+                if (p.installed) return p.updateAvailable ? `installed ${p.installed.version}, update available` : `installed ${p.installed.version}`;
+                return p.allowed ? 'installable' : `blocked: ${p.blockedReason}`;
+            };
+            const rows = result.items.map((p) => [
+                p.name,
+                String(p.version ?? p.latest ?? '-'),
+                `${p.publisher?.name ?? '-'}${p.publisher?.verified ? ' (verified)' : ''}`,
+                `${status(p)}${p.requires && !p.requires.installed ? `; needs server plugin ${p.requires.serverPackage}` : ''}`,
+            ]);
+            const more = result.total > result.items.length ? [`${result.items.length} of ${result.total} shown`] : [];
+            return [formatTable(['Package', 'Version', 'Publisher', 'Status'], rows), ...more].join('\n');
+        });
+    }
+}
+
+class AdminDashboardInstallProcessor extends CliCommandProcessor {
+    command = 'install';
+    description = 'Installs a dashboard plugin from the marketplace (the newest version this dashboard runs, or name@version)';
+    acceptsValue = true;
+    valueRequired = true;
+    requiredPermissions = [DASHBOARD_INSTALL_PERMISSION];
+    examples = [
+        { command: 'admin dashboard install @qodalis/cli-dashboard-module-jobs', description: 'The newest version' },
+        { command: 'admin dashboard install @acme/cli-dashboard-tickets@1.2.0', description: 'A given version' },
+    ];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return marketplaceCall(async () => {
+            const words = getPositionals(command);
+            if (words.length !== 1) return 'Error: name one package: admin dashboard install <name>[@version]';
+            const spec = words[0];
+            const at = spec.lastIndexOf('@');
+            const [name, version] = at > 0 ? [spec.slice(0, at), spec.slice(at + 1)] : [spec, undefined];
+            const plugin = await this.marketplace.installPlugin(name, version, terminalActor());
+            return `Installed ${plugin.name}@${plugin.version}: the dashboard page "${plugin.title}" (/x/${plugin.id}).`;
+        });
+    }
+}
+
+class AdminDashboardUpdateProcessor extends CliCommandProcessor {
+    command = 'update';
+    description = 'Updates an installed dashboard plugin to the newest version this dashboard runs';
+    acceptsValue = true;
+    valueRequired = true;
+    requiredPermissions = [DASHBOARD_INSTALL_PERMISSION];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return marketplaceCall(async () => {
+            const words = getPositionals(command);
+            if (words.length !== 1) return 'Error: name one package: admin dashboard update <name>';
+            const result = await this.marketplace.updatePlugin(words[0], undefined, terminalActor());
+            if (!result.changed) return `${result.plugin.name} is already at ${result.plugin.version}, the newest version.`;
+            return `Updated ${result.plugin.name} from ${result.previousVersion} to ${result.plugin.version}.`;
+        });
+    }
+}
+
+class AdminDashboardRemoveProcessor extends CliCommandProcessor {
+    command = 'remove';
+    aliases = ['uninstall'];
+    description = 'Removes an installed dashboard plugin: its page and its files';
+    acceptsValue = true;
+    valueRequired = true;
+    requiredPermissions = [DASHBOARD_INSTALL_PERMISSION];
+
+    constructor(private readonly marketplace: DashboardMarketplace) {
+        super();
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return marketplaceCall(async () => {
+            const words = getPositionals(command);
+            if (words.length !== 1) return 'Error: name one package: admin dashboard remove <name>';
+            const plugin = await this.marketplace.removePlugin(words[0], terminalActor());
+            return `Removed ${plugin.name}@${plugin.version} (the page ${plugin.id}).`;
+        });
+    }
+}
+
+class AdminDashboardProcessor extends CliCommandProcessor {
+    command = 'dashboard';
+    description = 'Dashboard plugins from the marketplace: list the installed ones, search, install, update, remove';
+    processors: ICliCommandProcessor[];
+    parameters = [jsonParam];
+    private readonly list: AdminDashboardListProcessor;
+
+    constructor(marketplace: DashboardMarketplace) {
+        super();
+        this.list = new AdminDashboardListProcessor(marketplace);
+        this.processors = [
+            this.list,
+            new AdminDashboardSearchProcessor(marketplace),
+            new AdminDashboardInstallProcessor(marketplace),
+            new AdminDashboardUpdateProcessor(marketplace),
+            new AdminDashboardRemoveProcessor(marketplace),
+        ];
+    }
+
+    handleAsync(command: CliProcessCommand): Promise<string> {
+        return this.list.handleAsync(command);
+    }
+}
+
 /**
- * `admin`: `status [--history]`, `plugins [list|enable|disable <id>]`, `clients`, `logs [...]`. Needs `admin:access`
- * on a protected server; `logs` also `logs:read`. Server settings are the core `config` command.
+ * `admin`: `status [--history]`, `plugins [list|enable|disable <id>]`, `clients`, `logs [...]`,
+ * `dashboard [list|search|install|update|remove]`. Needs `admin:access` on a protected server; `logs` also `logs:read`,
+ * `dashboard install|update|remove` also `dashboard:install`. Server settings are the core `config` command.
  */
 export class CliAdminCommandProcessor extends CliCommandProcessor {
     command = 'admin';
-    description = 'Server administration: status, command modules, WebSocket clients, logs';
+    description = 'Server administration: status, command modules, WebSocket clients, logs, dashboard plugins';
     module = ADMIN_MODULE_NAME;
     icon = '🛠️';
     requiredPermissions = [ADMIN_ACCESS_PERMISSION];
@@ -328,6 +508,7 @@ export class CliAdminCommandProcessor extends CliCommandProcessor {
         super();
         this.status = new AdminStatusProcessor(deps);
         this.processors = [this.status, new AdminPluginsProcessor(deps.moduleRegistry), new AdminClientsProcessor(deps.clients), new AdminLogsProcessor(deps.logBuffer)];
+        if (deps.marketplace) this.processors.push(new AdminDashboardProcessor(deps.marketplace));
     }
 
     /** `admin` alone: the status. */

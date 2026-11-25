@@ -60,6 +60,12 @@ export interface IBuilderLike {
      * `@qodalis/cli-server-node`), listed by `GET /dashboard/extensions`.
      */
     readonly dashboardExtensions?: ReadonlyArray<object>;
+    /** Adds a dashboard extension at runtime (`CliBuilder.addDashboardExtension`): the marketplace's plugins. */
+    addDashboardExtension?(extension: import('@qodalis/cli-server-abstractions').CliDashboardExtension): unknown;
+    /** Removes a dashboard extension at runtime (`CliBuilder.removeDashboardExtension`). */
+    removeDashboardExtension?(id: string): boolean;
+    /** The server's audit sink (`CliBuilder.auditSink`): the marketplace's `dashboard.plugin.*` entries. */
+    readonly auditSink?: ((entry: import('@qodalis/cli-server-abstractions').AuditEntry) => Promise<void>) | undefined;
     /** The server's configuration service (`CliBuilder.config`), served at `/config`. */
     readonly config?: ICliConfigService;
     /** The registered config providers (`CliBuilder.configProviders`). */
