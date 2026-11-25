@@ -16,76 +16,8 @@ import {
     describeCliConfigStoreLine,
     type ICliConfigStore,
 } from '@qodalis/cli-server-abstractions';
+import { storeContract } from './config-store-contract';
 import { CliDatabaseConfigStore, CliMigrationRunner, cliDatabaseName, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
-
-/** The behaviour every store shares. */
-function storeContract(name: string, create: () => Promise<ICliConfigStore>, cleanup?: () => Promise<void>) {
-    describe(`${name}: the store contract`, () => {
-        let store: ICliConfigStore;
-        beforeEach(async () => {
-            store = await create();
-        });
-        afterEach(async () => {
-            await cleanup?.();
-        });
-
-        it('an unknown section is empty at version 0', async () => {
-            expect(await store.read('p', 's')).toEqual({ values: {}, version: 0 });
-        });
-
-        it('writes bump the version by one and keep the values', async () => {
-            const first = await store.write('p', 's', { a: 1, b: ['x'] });
-            expect(first).toEqual({ values: { a: 1, b: ['x'] }, version: 1 });
-            const second = await store.write('p', 's', { c: { deep: true } });
-            expect(second).toEqual({ values: { a: 1, b: ['x'], c: { deep: true } }, version: 2 });
-            expect(await store.read('p', 's')).toEqual(second);
-        });
-
-        it('null removes a key (reset)', async () => {
-            await store.write('p', 's', { a: 1, b: 2 });
-            const after = await store.write('p', 's', { a: null });
-            expect(after.values).toEqual({ b: 2 });
-            expect(after.version).toBe(2);
-        });
-
-        it('sections and providers are independent', async () => {
-            await store.write('p', 's1', { a: 1 });
-            await store.write('p', 's2', { a: 2 });
-            await store.write('q', 's1', { a: 3 });
-            expect((await store.read('p', 's1')).values).toEqual({ a: 1 });
-            expect((await store.read('p', 's2')).values).toEqual({ a: 2 });
-            expect((await store.read('q', 's1')).values).toEqual({ a: 3 });
-            expect((await store.read('q', 's1')).version).toBe(1);
-        });
-
-        it('the expected version must match: a stale one is a conflict carrying the current version', async () => {
-            await store.write('p', 's', { a: 1 }, 0);
-            await store.write('p', 's', { a: 2 }, 1);
-            const err = await store.write('p', 's', { a: 3 }, 1).catch((e) => e);
-            expect(err).toBeInstanceOf(CliConfigConflictError);
-            expect(err.currentVersion).toBe('2');
-            expect((await store.read('p', 's')).values).toEqual({ a: 2 });
-        });
-
-        it('a first write with an expected version other than 0 is a conflict', async () => {
-            await expect(store.write('p', 'new', { a: 1 }, 3)).rejects.toBeInstanceOf(CliConfigConflictError);
-            expect(await store.read('p', 'new')).toEqual({ values: {}, version: 0 });
-        });
-
-        it('returned values are copies', async () => {
-            const written = await store.write('p', 's', { list: ['a'] });
-            (written.values.list as string[]).push('mutated');
-            const read = await store.read('p', 's');
-            (read.values.list as string[]).push('again');
-            expect((await store.read('p', 's')).values.list).toEqual(['a']);
-        });
-
-        it('secrets are stored as given', async () => {
-            await store.write('p', 's', { apiKey: 'sk_live_1' });
-            expect((await store.read('p', 's')).values.apiKey).toBe('sk_live_1');
-        });
-    });
-}
 
 describe('applyCliConfigChanges', () => {
     it('sets, replaces and removes without touching the input', () => {
@@ -213,6 +145,132 @@ describe('JsonFileConfigStore', () => {
         } finally {
             fs.chmodSync(sub, 0o700);
         }
+    });
+});
+
+let sectionDir: string;
+storeContract(
+    'JsonFileConfigStore (a section of a settings file)',
+    async () => {
+        sectionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-config-section-'));
+        const file = path.join(sectionDir, 'app.json');
+        fs.writeFileSync(file, JSON.stringify({ logging: { level: 'info' }, app: { name: 'demo' } }, null, 4));
+        return new JsonFileConfigStore(file, { section: 'app.qcli' });
+    },
+    async () => fs.rmSync(sectionDir, { recursive: true, force: true }),
+);
+
+describe('JsonFileConfigStore with a section (an app settings file)', () => {
+    let dir: string;
+    let file: string;
+    const original = {
+        ConnectionStrings: { main: 'Server=db;Password=keep-me' },
+        logging: { level: 'info', targets: ['console', 'file'] },
+        port: 8080,
+        flags: [true, false],
+    };
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-config-section-'));
+        file = path.join(dir, 'app.json');
+        fs.writeFileSync(file, `${JSON.stringify(original, null, 4)}\n`);
+    });
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('describes itself by the file and the section', () => {
+        expect(new JsonFileConfigStore(file, { section: 'qcli' }).describe()).toEqual({
+            kind: 'file',
+            title: 'JSON file',
+            detail: 'app.json, section qcli',
+            persistent: true,
+        });
+        expect(new JsonFileConfigStore(path.join(process.cwd(), 'config', 'app.json'), { section: 'qcli' }).describe().detail).toBe('config/app.json, section qcli');
+        expect(new JsonFileConfigStore(file, { section: 'app:qcli' }).describe().detail).toBe('app.json, section app.qcli');
+        expect(describeCliConfigStoreLine(new JsonFileConfigStore(file, { section: 'qcli' }).describe())).toBe('JSON file (app.json, section qcli), kept across restarts');
+    });
+
+    it('keeps the settings under the section and the rest of the file as it was (keys, order, indentation, trailing newline)', async () => {
+        const store = new JsonFileConfigStore(file, { section: 'qcli' });
+        await store.write('jobs', 'history', { maxAge: '30d' });
+        const text = fs.readFileSync(file, 'utf8');
+        const parsed = JSON.parse(text);
+        expect(parsed).toEqual({ ...original, qcli: { jobs: { history: { values: { maxAge: '30d' }, version: 1 } } } });
+        expect(Object.keys(parsed)).toEqual(['ConnectionStrings', 'logging', 'port', 'flags', 'qcli']);
+        expect(text).toContain('\n    "logging": {\n        "level": "info"');
+        expect(text.endsWith('}\n')).toBe(true);
+    });
+
+    it('a nested section (app.qcli or app:qcli) is created inside the existing object', async () => {
+        fs.writeFileSync(file, JSON.stringify({ app: { name: 'demo' }, other: 1 }, null, 2));
+        await new JsonFileConfigStore(file, { section: 'app:qcli' }).write('p', 's', { a: 1 });
+        expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ app: { name: 'demo', qcli: { p: { s: { values: { a: 1 }, version: 1 } } } }, other: 1 });
+        expect(await new JsonFileConfigStore(file, { section: 'app.qcli' }).read('p', 's')).toEqual({ values: { a: 1 }, version: 1 });
+    });
+
+    it('re-reads the rest of the file on every write: edits made meanwhile are kept', async () => {
+        const store = new JsonFileConfigStore(file, { section: 'qcli' });
+        await store.write('p', 's', { a: 1 });
+        const edited = JSON.parse(fs.readFileSync(file, 'utf8'));
+        edited.port = 9090;
+        edited.added = 'by hand';
+        fs.writeFileSync(file, JSON.stringify(edited, null, 4));
+        await store.write('p', 's', { b: 2 });
+        const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+        expect(after.port).toBe(9090);
+        expect(after.added).toBe('by hand');
+        expect(after.qcli.p.s).toEqual({ values: { a: 1, b: 2 }, version: 2 });
+    });
+
+    it('versions persist across instances (a restart) and a stale version is refused', async () => {
+        await new JsonFileConfigStore(file, { section: 'qcli' }).write('p', 's', { a: 1 });
+        const restarted = new JsonFileConfigStore(file, { section: 'qcli' });
+        expect(await restarted.read('p', 's')).toEqual({ values: { a: 1 }, version: 1 });
+        await expect(restarted.write('p', 's', { a: 2 }, 0)).rejects.toMatchObject({ currentVersion: '1' });
+        expect((await restarted.write('p', 's', { a: 2 }, 1)).version).toBe(2);
+        expect(JSON.parse(fs.readFileSync(file, 'utf8')).qcli.p.s.version).toBe(2);
+    });
+
+    it('writes atomically: a temporary file renamed over the original (a new inode), none left behind; the file keeps its mode', async () => {
+        if (process.platform === 'win32') return;
+        fs.chmodSync(file, 0o644);
+        const before = fs.statSync(file).ino;
+        // A reader holding the old file sees it whole: it is replaced, never rewritten in place
+        const held = fs.openSync(file, 'r');
+        try {
+            await new JsonFileConfigStore(file, { section: 'qcli' }).write('p', 's', { a: 1 });
+            expect(JSON.parse(fs.readFileSync(held, 'utf8'))).toEqual(original);
+        } finally {
+            fs.closeSync(held);
+        }
+        expect(fs.statSync(file).ino).not.toBe(before);
+        expect(fs.readdirSync(dir)).toEqual(['app.json']);
+        expect(fs.statSync(file).mode & 0o777).toBe(0o644);
+    });
+
+    it('a new settings file is created with the section, readable by the owner only', async () => {
+        if (process.platform === 'win32') return;
+        const fresh = path.join(dir, 'new', 'settings.json');
+        await new JsonFileConfigStore(fresh, { section: 'qcli' }).write('p', 's', { a: 1 });
+        expect(JSON.parse(fs.readFileSync(fresh, 'utf8'))).toEqual({ qcli: { p: { s: { values: { a: 1 }, version: 1 } } } });
+        expect(fs.statSync(fresh).mode & 0o777).toBe(0o600);
+    });
+
+    it('a section that is not an object, or a file that is not JSON, is refused and the file left untouched', async () => {
+        fs.writeFileSync(file, JSON.stringify({ qcli: 'oops', app: [1] }));
+        await expect(new JsonFileConfigStore(file, { section: 'qcli' }).read('p', 's')).rejects.toThrow(/qcli is not an object/);
+        await expect(new JsonFileConfigStore(file, { section: 'app.qcli' }).read('p', 's')).rejects.toThrow(/app is not an object/);
+        const store = new JsonFileConfigStore(file, { section: 'fresh' });
+        expect(await store.read('p', 's')).toEqual({ values: {}, version: 0 });
+        fs.writeFileSync(file, '{broken');
+        await expect(store.write('p', 's', { a: 1 })).rejects.toThrow(/is not valid JSON/);
+        expect(fs.readFileSync(file, 'utf8')).toBe('{broken');
+        // The failed change is not kept
+        fs.writeFileSync(file, '{}');
+        expect(await store.read('p', 's')).toEqual({ values: {}, version: 0 });
+    });
+
+    it('an empty part of the section path is refused', () => {
+        expect(() => new JsonFileConfigStore(file, { section: 'app..qcli' })).toThrow('invalid config file section: app..qcli');
+        expect(new JsonFileConfigStore(file, { section: '  ' }).sectionPath).toEqual([]);
     });
 });
 
