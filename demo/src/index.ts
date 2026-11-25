@@ -17,7 +17,7 @@ import { CliJobsBuilder } from '@qodalis/cli-server-plugin-jobs';
 import { CliAdminBuilder } from '@qodalis/cli-server-plugin-admin';
 import { AwsModule } from '@qodalis/cli-server-plugin-aws';
 import { CliUsersBuilder } from '@qodalis/cli-server-plugin-users';
-import { CliDatabasesBuilder, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
+import { CliDatabaseConfigStore, CliDatabasesBuilder, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
 import Database from 'better-sqlite3';
 import * as os from 'os';
 import * as path from 'path';
@@ -47,9 +47,30 @@ const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
           'http://127.0.0.1:*',
       ];
 
-// Config providers: settings changed from the dashboard's Config page, `config set` or MCP `config_set` are kept in
-// a JSON file (QCLI_DEMO_CONFIG) and applied again at the next start.
+// The demo's SQLite database (the databases plugin below shows its migrations; it also keeps the jobs settings)
+const demoDb = sqliteConnection(new Database(process.env.QCLI_DEMO_DB ?? path.join(os.tmpdir(), 'qcli-demo.sqlite')));
+
+// -----------------------------------------------------------
+// Config stores: settings changed from the dashboard's Config page, `config set` or MCP `config_set` are kept
+// and applied again at the next start. Each provider may keep its settings in a store of its own:
+//
+//   - the default store, for every provider without one: a JSON file (QCLI_DEMO_CONFIG). To keep them in a
+//     section of the app's own settings file instead: new JsonFileConfigStore('config/app.json', { section: 'qcli' })
+//   - `jobs` (history retention): the demo's SQLite database, table QcliConfig (migration source qcli-config,
+//     shown on the Databases page), set by id with `config.stores` (the host's choice wins over the plugin's)
+//   - `demo` (the app's own settings below): Redis when QCLI_DEMO_REDIS_URL is set (redis://localhost:6379/0),
+//     through the provider's own `store` option; else the default store
+//
+// `config list` and GET /api/v1/qcli/config show the store of every provider.
+// -----------------------------------------------------------
 const configStore = new JsonFileConfigStore(process.env.QCLI_DEMO_CONFIG ?? path.join(os.tmpdir(), 'qcli-demo-config.json'));
+const jobsConfigStore = new CliDatabaseConfigStore({ connection: demoDb });
+const redisConfigStore = process.env.QCLI_DEMO_REDIS_URL
+    ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+      new (require('@qodalis/cli-server-plugin-config-redis') as typeof import('@qodalis/cli-server-plugin-config-redis')).CliRedisConfigStore({
+          url: process.env.QCLI_DEMO_REDIS_URL,
+      })
+    : undefined;
 
 // A host app's own settings: what the demo's greeting says, and a secret it never shows
 const greeting = { text: 'Hello from the Qodalis CLI demo', apiKey: null as string | null };
@@ -57,6 +78,8 @@ const demoConfig = new CliStoredConfigProvider({
     id: 'demo',
     title: 'Demo app',
     description: "The demo host application's own settings",
+    // Its own store: Redis with QCLI_DEMO_REDIS_URL, else (undefined) the default store
+    store: redisConfigStore,
     sections: [
         {
             id: 'greeting',
@@ -84,7 +107,7 @@ const demoConfig = new CliStoredConfigProvider({
 
 const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin, config } = createCliServer({
     allowedOrigins,
-    config: { store: configStore },
+    config: { store: configStore, stores: { jobs: jobsConfigStore } },
     // The demo exposes the interactive shell. The users plugin is mounted below, so
     // the shell runs in "users" mode: a WS ticket from a session holding
     // shell:execute (root has '*'). Without the users plugin, set shell.token
@@ -359,9 +382,9 @@ mountPlugin(usersPlugin);
 // a server's connections and load.
 // -----------------------------------------------------------
 const databasesBuilder = new CliDatabasesBuilder()
-    .addDatabase('demo', {
-        connection: sqliteConnection(new Database(process.env.QCLI_DEMO_DB ?? path.join(os.tmpdir(), 'qcli-demo.sqlite'))),
-    })
+    .addDatabase('demo', { connection: demoDb })
+    // The jobs settings' table (QcliConfig), applied by the store itself at startup
+    .addSource('demo', jobsConfigStore.migrationSource)
     .addMigrations('demo', 'app', [
         {
             id: '0001',
@@ -395,7 +418,7 @@ mountPlugin(databasesPlugin);
 // -----------------------------------------------------------
 addPublicApi({ app, builder, mountPlugin }, usersPlugin);
 
-// Stored settings are applied once loaded (immediate for the file store; await it with a database store)
+// Stored settings are applied once every store has loaded them (the file at once, the database once its table exists)
 config.ready().catch((err) => console.error('[demo] config store failed:', err));
 
 const server = app.listen(port, () => {
@@ -425,6 +448,7 @@ logSocketManager.attach(server);
 const shutdown = async () => {
     await jobsPlugin.scheduler.stop();
     usersPlugin.dispose();
+    await redisConfigStore?.close();
     await eventSocketManager.broadcastDisconnect();
     await logSocketManager.broadcastDisconnect();
     server.close();
