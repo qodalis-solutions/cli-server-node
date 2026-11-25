@@ -12,9 +12,11 @@ import {
     InMemoryConfigStore,
     JsonFileConfigStore,
     applyCliConfigChanges,
+    describeCliConfigStore,
+    describeCliConfigStoreLine,
     type ICliConfigStore,
 } from '@qodalis/cli-server-abstractions';
-import { CliDatabaseConfigStore, CliMigrationRunner, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
+import { CliDatabaseConfigStore, CliMigrationRunner, cliDatabaseName, postgresConnection, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
 
 /** The behaviour every store shares. */
 function storeContract(name: string, create: () => Promise<ICliConfigStore>, cleanup?: () => Promise<void>) {
@@ -99,6 +101,34 @@ describe('InMemoryConfigStore', () => {
     it('is the runtime source', () => {
         expect(new InMemoryConfigStore().source).toBe('runtime');
     });
+
+    it('describes itself: in memory, lost on restart', () => {
+        expect(new InMemoryConfigStore().describe()).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
+        expect(describeCliConfigStoreLine(describeCliConfigStore(new InMemoryConfigStore()))).toBe('In memory, changes are lost on restart');
+    });
+});
+
+describe('describeCliConfigStore', () => {
+    it("a store without describe() is a custom store named after its class; persistent unless it is the runtime source", () => {
+        class RedisConfigStore extends InMemoryConfigStore {
+            readonly source = 'database' as const;
+        }
+        const redis = new RedisConfigStore();
+        (redis as { describe?: unknown }).describe = undefined;
+        expect(describeCliConfigStore(redis)).toEqual({ kind: 'custom', title: 'Custom store', detail: 'RedisConfigStore', persistent: true });
+        const plain: ICliConfigStore = { source: 'runtime', read: async () => ({ values: {}, version: 0 }), write: async () => ({ values: {}, version: 1 }) };
+        expect(describeCliConfigStore(plain)).toEqual({ kind: 'custom', title: 'Custom store', detail: '', persistent: false });
+    });
+
+    it('a custom description is used as given', () => {
+        const store: ICliConfigStore = {
+            source: 'database',
+            describe: () => ({ kind: 'database', title: 'Redis', detail: 'db 3', persistent: true }),
+            read: async () => ({ values: {}, version: 0 }),
+            write: async () => ({ values: {}, version: 1 }),
+        };
+        expect(describeCliConfigStoreLine(describeCliConfigStore(store))).toBe('Redis (db 3), kept across restarts');
+    });
 });
 
 let tempDir: string;
@@ -117,6 +147,17 @@ describe('JsonFileConfigStore', () => {
         dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-config-'));
     });
     afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('describes itself by the path relative to the app, or the file name only outside it', () => {
+        expect(new JsonFileConfigStore(path.join(dir, 'qcli-demo-config.json')).describe()).toEqual({
+            kind: 'file',
+            title: 'JSON file',
+            detail: 'qcli-demo-config.json',
+            persistent: true,
+        });
+        expect(new JsonFileConfigStore(path.join(process.cwd(), 'data', 'config.json')).describe().detail).toBe('data/config.json');
+        expect(new JsonFileConfigStore('qcli-demo-config.json').describe().detail).toBe('qcli-demo-config.json');
+    });
 
     it('is the file source and persists across instances, in the documented shape', async () => {
         const file = path.join(dir, 'nested', 'config.json');
@@ -200,6 +241,42 @@ describe('CliDatabaseConfigStore', () => {
         const applied = db.prepare('SELECT "Source", "Id" FROM "QcliMigrations"').all();
         expect(applied).toEqual([{ Source: 'qcli-config', Id: '1' }]);
         db.close();
+    });
+
+    it('describes itself by dialect, database name and table; never credentials', async () => {
+        const db = new Database(':memory:');
+        const memory = new CliDatabaseConfigStore({ connection: sqliteConnection(db) });
+        await memory.ready;
+        expect(memory.describe()).toEqual({ kind: 'database', title: 'Database', detail: 'SQLite, table QcliConfig', persistent: true });
+        const named = new CliDatabaseConfigStore({ connection: sqliteConnection(db), database: '/var/lib/app/qcli.db', tablePrefix: 'App' });
+        await named.ready;
+        expect(named.describe().detail).toBe('SQLite database qcli.db, table AppConfig');
+        db.close();
+
+        // PostgreSQL from a pool's connection string: the name only (the database is offline here)
+        const pool = {
+            options: { connectionString: 'postgresql://admin:s3cr3t@db.internal:5432/qcli?sslmode=require' },
+            connect: async () => {
+                throw new Error('offline');
+            },
+        };
+        const connection = postgresConnection(pool as never);
+        expect(connection.database).toBe('qcli');
+        const pg = new CliDatabaseConfigStore({ connection, schema: 'qcli' });
+        await pg.ready.catch(() => undefined);
+        const described = pg.describe();
+        expect(described.detail).toBe('PostgreSQL database qcli, table qcli.QcliConfig');
+        expect(JSON.stringify(described)).not.toMatch(/s3cr3t|admin|db\.internal|5432/);
+        expect(cliDatabaseName('Server=db;Database=qcli;User Id=sa;Password=s3cr3t')).toBeUndefined();
+        expect(cliDatabaseName('mysql://root:s3cr3t@localhost/shop')).toBe('shop');
+        expect(cliDatabaseName('orders')).toBe('orders');
+        // A connection string given as the name is never shown
+        const sqlServer = new CliDatabaseConfigStore({
+            connection: { dialect: 'mssql', session: async () => { throw new Error('offline'); } },
+            database: 'Server=db;Database=qcli;User Id=sa;Password=s3cr3t',
+        });
+        await sqlServer.ready.catch(() => undefined);
+        expect(sqlServer.describe().detail).toBe('SQL Server, table QcliConfig');
     });
 
     it('stores one row per section with its values as JSON', async () => {

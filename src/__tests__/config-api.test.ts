@@ -76,7 +76,15 @@ describe('config API on an open server (static admin)', () => {
         const ids = res.body.providers.map((p: any) => p.id);
         expect(ids).toEqual(['server', 'auth', 'host', 'cors', 'mcp', 'jobs', 'logs', 'billing', 'custom']);
         const billingView = res.body.providers.find((p: any) => p.id === 'billing');
-        expect(Object.keys(billingView).sort()).toEqual(['description', 'id', 'order', 'sections', 'title', 'writable']);
+        expect(Object.keys(res.body).sort()).toEqual(['providers', 'store']);
+        expect(res.body.store).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
+        expect(Object.keys(billingView).sort()).toEqual(['description', 'id', 'order', 'sections', 'storage', 'title', 'writable']);
+        expect(billingView.storage).toEqual({ kind: 'store', description: 'Changes are saved to the config store', sources: [] });
+        const storage = Object.fromEntries(res.body.providers.map((p: any) => [p.id, p.storage]));
+        expect(storage.server).toEqual({ kind: 'runtime', description: 'Read from the running server process', sources: [] });
+        expect(storage.host).toEqual({ kind: 'options', description: 'Server options and environment variables', sources: ['Server options', 'Environment variables'] });
+        expect(storage.auth).toMatchObject({ kind: 'options', sources: [] });
+        for (const id of ['cors', 'mcp', 'jobs', 'logs', 'custom']) expect(storage[id].kind).toBe('store');
         expect(billingView).toMatchObject({ title: 'Billing', description: '', order: 100, writable: true });
         const section = billingView.sections[0];
         expect(Object.keys(section).sort()).toEqual(['allowCustomKeys', 'description', 'entries', 'id', 'mutable', 'title', 'version']);
@@ -101,6 +109,8 @@ describe('config API on an open server (static admin)', () => {
         const res = await request(app).get(`${V1}/config/server`).set(bearer(token)).expect(200);
         expect(res.body.id).toBe('server');
         expect(res.body.writable).toBe(false);
+        expect(res.body.storage.kind).toBe('runtime');
+        expect(res.body.store).toBeUndefined();
         expect(res.body.sections[0].entries.find((e: any) => e.key === 'platform').value).toBe('node');
         const missing = await request(app).get(`${V1}/config/nope`).set(bearer(token)).expect(404);
         expect(missing.body).toEqual({ error: 'unknown config provider: nope' });

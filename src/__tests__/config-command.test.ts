@@ -7,7 +7,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
-import { CliStoredConfigProvider, splitShellWords } from '@qodalis/cli-server-abstractions';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { CliStoredConfigProvider, InMemoryConfigStore, JsonFileConfigStore, splitShellWords } from '@qodalis/cli-server-abstractions';
 import { formatConfigValue } from '../config/config-command';
 
 const V1 = '/api/v1/qcli';
@@ -77,7 +80,9 @@ describe('config command (open server)', () => {
 
     it('config / config list: providers and sections', async () => {
         const { text } = await run(cli, 'config list');
-        expect(text).toContain('server  Server');
+        expect(text.split('\n')[0]).toBe('Store: In memory, changes are lost on restart');
+        expect(text).toContain('server  Server  (read-only)');
+        expect(text).toContain('host  Host  (read-only; from Server options, Environment variables)');
         expect(text).toMatch(/app {2}App\n {2}main +7 setting\(s\) {2}version 0\n {2}main\.extra +1 setting\(s\) {2}version 0/);
         expect((await run(cli, 'config')).text).toBe(text);
     });
@@ -180,6 +185,31 @@ describe('config command (open server)', () => {
 
     it('can be left out: config.command false', () => {
         expect(createCliServer({ config: { command: false } }).registry.findProcessor('config')).toBeUndefined();
+    });
+});
+
+describe('config list: where changes are saved', () => {
+    let dir: string;
+    beforeAll(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-config-cmd-'));
+    });
+    afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('a JSON file outside the app: its name only, kept across restarts', async () => {
+        const cli = createCliServer({ config: { store: new JsonFileConfigStore(path.join(dir, 'qcli-demo-config.json')) } });
+        const { text } = await run(cli, 'config list');
+        expect(text.split('\n')[0]).toBe('Store: JSON file (qcli-demo-config.json), kept across restarts');
+        expect(text).not.toContain(dir);
+    });
+
+    it('a store that does not describe itself: a custom store named after its class', async () => {
+        class VaultStore extends InMemoryConfigStore {
+            readonly source = 'database' as const;
+        }
+        const store = new VaultStore();
+        (store as { describe?: unknown }).describe = undefined;
+        const cli = createCliServer({ config: { store } });
+        expect((await run(cli, 'config list')).text.split('\n')[0]).toBe('Store: Custom store (VaultStore), kept across restarts');
     });
 });
 
