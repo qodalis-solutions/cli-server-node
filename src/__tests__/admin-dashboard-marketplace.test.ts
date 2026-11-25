@@ -7,247 +7,42 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { createHash } from 'crypto';
-import type { AuditEntry, CliEvent } from '@qodalis/cli-server-abstractions';
-import { createCliServer, CliServerResult } from '../create-cli-server';
+import { createCliServer } from '../create-cli-server';
 import {
     CliAdminBuilder,
-    CliAdminPluginResult,
-    DashboardInstallPolicy,
-    MarketplaceFetch,
     compareDashboardPluginVersions,
     dashboardPluginDirName,
     dashboardPluginId,
     isValidDashboardPluginName,
     nodeServerPackage,
     sha384Integrity,
+    type MarketplaceFetch,
 } from '../../plugins/admin/index';
-import { CliUsersBuilder, UsersPluginResult } from '../../plugins/users/index';
-import { runCommand, ROOT_PASS, V1 } from './command-test-helpers';
+import { runCommand, V1 } from './command-test-helpers';
+import {
+    API,
+    BASE,
+    FakeNet,
+    FakePluginOptions,
+    Host,
+    JOBS,
+    MARKET,
+    TICKETS,
+    JSDELIVR,
+    UNPKG,
+    auth,
+    cleanupMarketplaceHosts,
+    integrityOf,
+    response,
+    start,
+    startProtected,
+    trackHost,
+} from './dashboard-marketplace-test-helpers';
 
-const MARKET = 'https://market.test';
-const API = `${MARKET}/api/v1/qcli/marketplace`;
-const JSDELIVR = 'https://cdn.jsdelivr.net/npm';
-const UNPKG = 'https://unpkg.com';
-const BASE = `${V1}/dashboard/marketplace`;
+afterEach(cleanupMarketplaceHosts);
 
-const integrityOf = (text: string) => `sha384-${createHash('sha384').update(text).digest('base64')}`;
-
-interface FakeVersion {
-    version: string;
-    status?: string;
-    dashboardApi?: number;
-    js?: string;
-    css?: string | null;
-    /** What the CDNs serve instead of the published bytes. */
-    jsdelivr?: string | null;
-    unpkg?: string | null;
-}
-
-interface FakePluginOptions {
-    verified?: boolean;
-    kind?: string;
-    title?: string;
-    icon?: string;
-    serverPackages?: unknown;
-    extensionId?: string;
-    versions: FakeVersion[];
-}
-
-/** The marketplace's public API and the two CDNs, in memory. */
-class FakeNet {
-    readonly plugins = new Map<string, Record<string, unknown>>();
-    readonly files = new Map<string, string>();
-    readonly calls: string[] = [];
-    marketplaceDown = false;
-    /** Answer details without `files` (an older marketplace): the version record has them. */
-    filesOnlyInVersionRecord = false;
-    /** Ignore the `kind` filter (the marketplace before dashboard plugins): every plugin listed and counted. */
-    ignoresKind = false;
-
-    readonly fetch: MarketplaceFetch = async (url) => {
-        this.calls.push(url);
-        if (url.startsWith(MARKET)) {
-            if (this.marketplaceDown) throw new TypeError('fetch failed');
-            return this.marketplace(url);
-        }
-        const body = this.files.get(url);
-        return body === undefined ? response(404, { error: 'not found' }) : response(200, body);
-    };
-
-    publish(name: string, options: FakePluginOptions): void {
-        const versions = options.versions.map((v) => {
-            const js = v.js ?? `export default { id: '${name}', version: '${v.version}' };`;
-            const css = v.css === undefined ? `.x-${v.version.replace(/\W/g, '')} { color: red; }` : v.css;
-            const files = [{ path: 'dist/extension.js', integrity: integrityOf(js), size: Buffer.byteLength(js) }];
-            if (css !== null) files.push({ path: 'dist/extension.css', integrity: integrityOf(css), size: Buffer.byteLength(css) });
-            const put = (cdn: string, path: string, published: string, served: string | null | undefined) => {
-                if (served === null) return;
-                this.files.set(`${cdn}/${name}@${v.version}/${path}`, served ?? published);
-            };
-            put(JSDELIVR, 'dist/extension.js', js, v.jsdelivr);
-            put(UNPKG, 'dist/extension.js', js, v.unpkg);
-            if (css !== null) {
-                put(JSDELIVR, 'dist/extension.css', css, v.jsdelivr === null ? null : undefined);
-                put(UNPKG, 'dist/extension.css', css, undefined);
-            }
-            return {
-                version: v.version,
-                status: v.status ?? 'listed',
-                kind: options.kind ?? 'dashboard',
-                files,
-                dashboardApi: v.dashboardApi ?? 1,
-                ...(options.serverPackages ? { serverPackages: options.serverPackages } : {}),
-                publishedAt: '2026-11-20T10:00:00.000Z',
-            };
-        });
-        const listed = versions.filter((v) => v.status === 'listed').map((v) => v.version).sort(compareDashboardPluginVersions);
-        this.plugins.set(name, {
-            name,
-            shortName: name.split('/').pop(),
-            description: `The ${name} page`,
-            kind: options.kind ?? 'dashboard',
-            ...(options.title ? { title: options.title } : {}),
-            ...(options.icon ? { icon: options.icon } : {}),
-            publisher: { id: name.startsWith('@') ? name.slice(1, name.indexOf('/')) : name, name: name.startsWith('@') ? name.slice(0, name.indexOf('/')) : name, verified: options.verified ?? true },
-            latest: listed[listed.length - 1] ?? null,
-            version: listed[listed.length - 1] ?? null,
-            dashboardApi: versions.find((v) => v.version === listed[listed.length - 1])?.dashboardApi ?? 1,
-            ...(options.serverPackages ? { serverPackages: options.serverPackages } : {}),
-            ...(options.extensionId ? { extension: { id: options.extensionId } } : {}),
-            versions,
-        });
-    }
-
-    private marketplace(url: string) {
-        const u = new URL(url);
-        const path = u.pathname.slice('/api/v1/qcli/marketplace'.length);
-        if (path === '/plugins') {
-            const query = (u.searchParams.get('query') ?? '').toLowerCase();
-            const kind = u.searchParams.get('kind');
-            const items = [...this.plugins.values()]
-                .filter((p) => (!kind || this.ignoresKind || p.kind === kind) && String(p.name).includes(query))
-                .map(({ versions: _v, extension: _e, ...summary }) => summary);
-            return response(200, { items, total: items.length, page: Number(u.searchParams.get('page') ?? 1), pageSize: Number(u.searchParams.get('pageSize') ?? 24) });
-        }
-        const m = /^\/plugins\/(.+?)(?:\/versions\/([^/]+))?$/.exec(path);
-        if (m) {
-            const plugin = this.plugins.get(decodeURIComponent(m[1]));
-            if (!plugin) return response(404, { error: 'plugin not found' });
-            const versions = plugin.versions as Array<Record<string, unknown>>;
-            if (m[2]) {
-                const v = versions.find((x) => x.version === decodeURIComponent(m[2]));
-                return v ? response(200, v) : response(404, { error: 'version not found' });
-            }
-            if (this.filesOnlyInVersionRecord) return response(200, { ...plugin, versions: versions.map(({ files: _f, ...v }) => v) });
-            return response(200, plugin);
-        }
-        return response(404, { error: 'not found' });
-    }
-}
-
-function response(status: number, body: unknown) {
-    const bytes = typeof body === 'string' ? Buffer.from(body) : Buffer.from(JSON.stringify(body));
-    return {
-        ok: status >= 200 && status < 300,
-        status,
-        headers: { get: (name: string) => (name.toLowerCase() === 'content-length' ? String(bytes.length) : null) },
-        json: async () => JSON.parse(bytes.toString()),
-        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    };
-}
-
-interface Host {
-    cli: CliServerResult;
-    admin: CliAdminPluginResult;
-    users?: UsersPluginResult;
-    dir: string;
-    net: FakeNet;
-    audit: AuditEntry[];
-    events: CliEvent[];
-    token: string;
-}
-
-const hosts: Host[] = [];
-const dirs: string[] = [];
-afterEach(() => {
-    for (const h of hosts.splice(0)) {
-        h.admin.dispose();
-        h.cli.eventSocketManager.dispose();
-        h.cli.logSocketManager.dispose();
-    }
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-
-function tempDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'qcli-dashboard-plugins-'));
-    dirs.push(dir);
-    return dir;
-}
-
-/** A server with the admin plugin (password sign-in) and the fake marketplace. */
-async function start(options: { net?: FakeNet; dir?: string; install?: DashboardInstallPolicy; configure?: (cli: CliServerResult) => void } = {}): Promise<Host> {
-    const net = options.net ?? new FakeNet();
-    const dir = options.dir ?? tempDir();
-    const cli = createCliServer();
-    const audit: AuditEntry[] = [];
-    cli.builder.setConfigAuditStore({ log: async (e) => void audit.push(e), getEntries: async () => audit, clear: async () => void audit.splice(0) });
-    const events: CliEvent[] = [];
-    cli.eventBus.subscribe('dashboard:*', (e) => void events.push(e));
-    options.configure?.(cli);
-    const admin = new CliAdminBuilder()
-        .setCredentials('admin', 'pass')
-        .setJwtSecret('marketplace-test')
-        .setMarketplace({ url: MARKET, dir, fetch: net.fetch, install: options.install })
-        .build({ registry: cli.registry, eventSocketManager: cli.eventSocketManager, builder: cli.builder, executor: cli.executor, broadcastFn: () => {} });
-    admin.logBuffer.restoreConsole();
-    admin.statusSampler.stop();
-    cli.mountPlugin(admin);
-    const token = (await request(cli.app).post(`${V1}/auth/login`).send({ username: 'admin', password: 'pass' })).body.token as string;
-    const host = { cli, admin, dir, net, audit, events, token };
-    hosts.push(host);
-    return host;
-}
-
-/** A protected server (users plugin) whose dashboard signs in through it; one user per entry with those permissions. */
-async function startProtected(users: Record<string, string[]>): Promise<Host & { tokens: Record<string, string> }> {
-    const net = new FakeNet();
-    const dir = tempDir();
-    const cli = createCliServer();
-    const audit: AuditEntry[] = [];
-    const events: CliEvent[] = [];
-    const usersPlugin = new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).setIpRateLimit(10_000).setMinPasswordLength(4).build();
-    await usersPlugin.ready;
-    const admin = new CliAdminBuilder()
-        .setAuthProvider(usersPlugin.serverAuth)
-        .setMarketplace({ url: MARKET, dir, fetch: net.fetch })
-        .build({ registry: cli.registry, eventSocketManager: cli.eventSocketManager, builder: cli.builder, executor: cli.executor, broadcastFn: () => {} });
-    admin.logBuffer.restoreConsole();
-    admin.statusSampler.stop();
-    cli.mountPlugin(admin);
-    cli.mountPlugin(usersPlugin);
-    const login = async (username: string, password: string) => (await request(cli.app).post(`${V1}/sessions`).send({ username, password })).body.token as string;
-    const tokens: Record<string, string> = { root: await login('root', ROOT_PASS) };
-    for (const [name, permissions] of Object.entries(users)) {
-        await request(cli.app).post(`${V1}/groups`).set('Authorization', `Bearer ${tokens.root}`).send({ name: `${name}s`, permissions }).expect(201);
-        await request(cli.app)
-            .post(`${V1}/users`)
-            .set('Authorization', `Bearer ${tokens.root}`)
-            .send({ name, email: `${name}@x.io`, password: `${name}pass`, groups: [`${name}s`] })
-            .expect(201);
-        tokens[name] = await login(name, `${name}pass`);
-    }
-    const host = { cli, admin, users: usersPlugin, dir, net, audit, events, token: tokens.root, tokens };
-    hosts.push(host);
-    return host;
-}
-
-const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
-const TICKETS = '@acme/cli-dashboard-tickets';
-const JOBS = '@qodalis/cli-dashboard-module-jobs';
 
 describe('dashboard marketplace: helpers', () => {
     it('derives the page id: official modules by their suffix, else the extension id, else the package name', () => {
@@ -752,7 +547,7 @@ describe('dashboard marketplace: restart', () => {
         admin.logBuffer.restoreConsole();
         admin.statusSampler.stop();
         cli.mountPlugin(admin);
-        hosts.push({ cli, admin } as Host);
+        trackHost({ cli, admin } as Host);
         expect(admin.marketplace).toBeUndefined();
         expect(admin.assetRoutes).toEqual([]);
         const token = (await request(cli.app).post(`${V1}/auth/login`).send({ username: 'admin', password: 'pass' })).body.token;
