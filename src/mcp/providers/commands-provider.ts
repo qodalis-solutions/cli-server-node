@@ -105,6 +105,8 @@ export class CommandsMcpToolProvider implements McpToolProvider {
         private readonly registry: ICliCommandRegistry,
         private readonly executor: ICliCommandExecutorService,
         private readonly eventBus?: ICliEventBus,
+        /** Root commands left out (served by dedicated tools, e.g. `config` by `config_*`). */
+        private readonly skip?: (root: ICliCommandProcessor) => boolean,
     ) {}
 
     getTools(): McpTool[] {
@@ -121,7 +123,7 @@ export class CommandsMcpToolProvider implements McpToolProvider {
             }
         };
         for (const root of this.registry.processors) {
-            if (root?.command) walk(root, [root.command], []);
+            if (root?.command && !this.skip?.(root)) walk(root, [root.command], []);
         }
         return tools;
     }

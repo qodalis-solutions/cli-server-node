@@ -388,7 +388,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     // MCP tool providers, in priority order: built-in features, plugins/host (registration order), then commands
     const mcpFeatureProviders: McpToolProvider[] = [];
-    const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor, eventBus);
+    // The `config` command is served by the config_* tools instead
+    const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor, eventBus, (root) => root instanceof CliConfigCommandProcessor);
     const mcpFeatures = new Set<string>(['commands']);
     if (mcpOptions) {
         mcpFeatures.add('mcp');

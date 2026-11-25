@@ -29,7 +29,9 @@ function isEmpty(value: unknown): boolean {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
 }
 
 function isJson(value: unknown, depth = 0): boolean {

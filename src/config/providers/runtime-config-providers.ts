@@ -7,7 +7,12 @@ const ORIGIN = /^https?:\/\/[^\s/:?#]+(:(\d{1,5}|\*))?$/i;
 
 /** The first invalid origin of a list, as an error message. */
 export function invalidOrigin(value: CliConfigValue): string | undefined {
-    const bad = (value as string[]).find((o) => !ORIGIN.test(o.trim().replace(/\/+$/, '')));
+    const valid = (origin: string) => {
+        const match = ORIGIN.exec(origin.trim().replace(/\/+$/, ''));
+        const port = match?.[2];
+        return !!match && (port === undefined || port === '*' || Number(port) <= 65535);
+    };
+    const bad = (value as string[]).find((o) => !valid(o));
     return bad !== undefined ? `'${bad}' is not an origin (http(s)://host[:port], or :* for any port)` : undefined;
 }
 
