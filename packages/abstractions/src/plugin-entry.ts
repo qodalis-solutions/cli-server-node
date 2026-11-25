@@ -141,7 +141,7 @@ export interface CliPluginContext {
  * What `createPlugin` returns: a plugin result the server mounts (`mountPlugin`: anything with `prefix` and
  * `router`), a module (`addModule`), or nothing when the entry registered everything on the builder itself.
  */
-export type CliPluginEntryResult = { prefix: string; router: unknown; [key: string]: unknown } | ICliModule | void | undefined;
+export type CliPluginEntryResult = { prefix: string; router: unknown } | ICliModule | void | undefined;
 
 /** The module a plugin's entry exports. */
 export interface CliPluginEntry {
