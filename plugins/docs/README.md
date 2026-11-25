@@ -47,6 +47,32 @@ No sign-in; credentials are ignored (the pages stay public on a protected server
 | GET | `/qcli/docs/pages` | `[{ slug, title, group, order }]` in page order, `Cache-Control: no-cache` |
 | GET | `/qcli/docs/pages/<slug>` | `{ slug, title, group, order, markdown }`, `Cache-Control: no-cache`; 404 `{ "error": "page not found" }` for an unknown slug |
 
+## Terminal commands
+
+`docs`, registered by `mountPlugin`. The pages are public, so the command needs no permission beyond `commands:execute`
+on a protected server. `{{baseUrl}}` is the `setBaseUrl` URL, else empty (links relative to the server root): a command
+has no request to take the host from.
+
+| Command | Permission | Does |
+|---|---|---|
+| `docs`, `docs list [--group <group>] [--json]` | none | Slug and title of every page, by group, in page order (`GET /pages`) |
+| `docs read <slug> [--json]` | none | The page's markdown with the variables replaced, its title as a heading unless the page starts with one (`GET /pages/{slug}`) |
+
+```text
+$ docs
+Guides
+  getting-started  Getting started with RateBell API
+  auth             Authentication
+
+Reference
+  errors           Errors
+
+$ docs read auth
+# Authentication
+
+Send `Authorization: Bearer <token>` with every request.
+```
+
 ## Builder
 
 | Method | Default | Description |

@@ -65,6 +65,11 @@ the dashboard, register the store's database with the databases plugin:
 - `better-sqlite3`
 - `@qodalis/cli-server-plugin-databases`
 
+## Terminal commands
+
+None of its own: the storage is reached through the [filesystem plugin](../filesystem/README.md#terminal-commands)
+(`scp` in the web CLI).
+
 ## License
 
 MIT

@@ -136,6 +136,13 @@ The admin dashboard's Data explorer page is `@qodalis/cli-dashboard-module-data-
 package) and served at `/qcli/modules/data-explorer` (outside the API, so the dashboard loads it without a token); it shows for
 users with `data:query`. The server registers it when a data explorer provider is added (it serves the data explorer API). `builder.setDashboardModuleDir('data-explorer', dir)` serves another build, `false` leaves the page out.
 
+## Terminal commands
+
+No server-side command: the web CLI plugin [`@qodalis/cli-data-explorer`](https://www.npmjs.com/package/@qodalis/cli-data-explorer)
+opens a console on a source (`data-explorer [--server <name>]`, `data:query` on a protected server) with `\format`,
+`\templates`, `\use`, `\schema`, `\history`, `\help` and `\quit`. With the MCP endpoint on, AI clients get the `data_*`
+tools.
+
 ## License
 
 MIT

@@ -76,3 +76,8 @@ The site is found as on the .NET server: `setSiteDir(dir)` alone when given (no 
 | `addSection(plugin)` | | The docs or public-api plugin (its `portalSection`); one of each kind (`portal section already registered: <kind>`) |
 | `setSiteDir(dir)` | resolved | The site's directory |
 | `build()` | | `{ prefix, router, cliRoutes: false, publicRoutes, installedPlugin }`; throws on invalid options |
+
+## Terminal commands
+
+None: the portal is a site. Its content comes from the [docs plugin](../docs/README.md#terminal-commands) (`docs list`,
+`docs read`) and the [public-api plugin](../public-api/README.md#terminal-commands) (`api usage`).

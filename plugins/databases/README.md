@@ -85,13 +85,34 @@ or reordered: add a new one instead. Each migration runs in its own transaction 
 | `POST /api/v1/qcli/databases/{db}/migrations/up` `{ to?, force? }` | apply pending migrations |
 | `POST /api/v1/qcli/databases/{db}/migrations/down` `{ to }` | roll back to `to` (kept; `base` for everything) |
 
-Permissions on a protected server: `databases:read` for reading, `databases:migrate` for up and down. Terminal
-(`databases`, alias `db`): `databases list`, `databases stats <db>`, `databases migrations <db>`,
-`databases up <db> [--to <id>] [--dry-run] [--force]`, `databases down <db> --to <id> [--dry-run]`.
+Permissions on a protected server: `databases:read` for reading, `databases:migrate` for up and down. Terminal:
+see [Terminal commands](#terminal-commands).
 
 With the server's MCP endpoint on, AI clients get `databases_list`, `databases_stats`, `migrations_status`,
 `migrations_runs`, `migrations_sql`
 (`databases:read`), `migrations_up` and `migrations_down` (`databases:migrate`); their runs are recorded with trigger `mcp`.
+
+## Terminal commands
+
+`databases` (alias `db`), registered by `mountPlugin`. The database name may be left out when there is only one.
+
+| Command | Permission | Does |
+|---|---|---|
+| `databases`, `databases list` | `databases:read` | Databases: dialect, size, applied, pending, problems |
+| `databases stats <db>` | `databases:read` | Server version, uptime, size, connections, load counters, cache hits, largest tables |
+| `databases migrations <db>` | `databases:read` | Every migration and its status |
+| `databases runs <db> [-n 20] [--json]` | `databases:read` | Run history, newest first (1-100): start, direction, status, migrations run, trigger and who ran it, target, error (`GET /{db}/migrations/runs`) |
+| `databases up <db> [--to <id>] [--dry-run] [--force]` | `databases:migrate` | Applies the pending migrations (`--dry-run` prints the SQL, `Nothing to run.` when none) |
+| `databases down <db> --to <id\|base> [--dry-run]` | `databases:migrate` | Rolls back what came after `--to` |
+
+```text
+$ databases runs main -n 3
+main (sqlite): 3 of 5 run(s)
+Started             Dir  Status    Count Trigger
+2026-11-25 10:02:00 down succeeded     1 terminal (root)  to 0002
+2026-11-25 10:01:00 up   failed        0 api  no such table: Notes
+2026-11-25 10:00:00 up   succeeded     2 startup
+```
 
 ## Dashboard page
 

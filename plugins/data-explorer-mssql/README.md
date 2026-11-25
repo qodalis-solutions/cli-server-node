@@ -51,6 +51,11 @@ app.use('/api/v1/qcli/data-explorer', createDataExplorerController(deBuilder.reg
 
 - `mssql`
 
+## Terminal commands
+
+None of its own: the provider is queried through the [data explorer plugin](../data-explorer/README.md#terminal-commands)
+(`data-explorer` in the web CLI).
+
 ## License
 
 MIT

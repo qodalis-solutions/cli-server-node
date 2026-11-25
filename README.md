@@ -259,9 +259,9 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | [`@qodalis/cli-server-plugin-users-postgres`](plugins/users-postgres/README.md) | PostgreSQL stores for the users plugin (users, groups, passwords, sessions, API tokens, audit), with versioned migrations |
 | [`@qodalis/cli-server-plugin-databases`](plugins/databases/README.md) | The server's relational databases (PostgreSQL, MySQL, SQL Server, SQLite): size, load and largest tables, and versioned migrations applied under a lock, run and tracked from the dashboard, the terminal (`databases`), MCP and the API |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
-| [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration through the [config providers](#config-providers), logs) |
+| [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration through the [config providers](#config-providers), logs) and the `admin` command |
 | [`@qodalis/cli-server-plugin-public-api`](plugins/public-api/README.md) | Your public REST API: a host-token guard with per-account daily and per-minute quotas, usage per token, your OpenAPI document and Swagger UI at `/qcli/api` |
-| [`@qodalis/cli-server-plugin-docs`](plugins/docs/README.md) | Markdown guides from folders or code (front matter, variables), served as JSON at `/qcli/docs` |
+| [`@qodalis/cli-server-plugin-docs`](plugins/docs/README.md) | Markdown guides from folders or code (front matter, variables), served as JSON at `/qcli/docs` and read with `docs` |
 | [`@qodalis/cli-server-plugin-portal`](plugins/portal/README.md) | The documentation portal (guides and API reference with code samples) at `/qcli/portal` |
 | [`@qodalis/cli-server-plugin-jobs`](plugins/jobs/README.md) | Cron and interval background jobs with history and REST management; `maxConcurrentRuns` per job and an overlap policy, never a job started twice |
 | [`@qodalis/cli-server-plugin-filesystem`](plugins/filesystem/README.md) | File storage abstraction with in-memory and OS providers |
@@ -943,6 +943,26 @@ Reset cors.cors.allowedOrigins = [] (version 2)
 ```
 
 (A free key of the `custom` section is not a secret: keep secrets in a provider that declares them `secret`.)
+
+### Plugin commands
+
+Every plugin README has a `Terminal commands` section. Commands served by this server (registered by `mountPlugin`
+or `addModule`; permissions enforced on a protected server, along the command chain):
+
+| Plugin | Commands | Permission |
+|---|---|---|
+| [admin](plugins/admin/README.md#terminal-commands) | `admin status [--history]`, `admin plugins [list\|enable\|disable <id>]`, `admin clients`, `admin logs [--level] [--search] [--service] [--since] [-n]` | `admin:access`; `logs` also `logs:read` |
+| [databases](plugins/databases/README.md#terminal-commands) | `databases list\|stats\|migrations\|runs\|up\|down` | `databases:read`; `up`/`down` `databases:migrate` |
+| [docs](plugins/docs/README.md#terminal-commands) | `docs list [--group]`, `docs read <slug>` | none |
+| [public-api](plugins/public-api/README.md#terminal-commands) | `api usage [--user <name\|id>] [--days N]` | none for your own; `tokens:read` for another account |
+| [aws](plugins/aws/README.md#terminal-commands) | `aws configure\|status\|s3\|ec2\|lambda\|cloudwatch\|sns\|sqs\|iam\|ecs\|dynamodb ...` | `aws:read`; changes also `aws:write` |
+| [weather](plugins/weather/README.md#terminal-commands) | `weather [current\|forecast] [location]` | none |
+
+Lists take `--json`. Plugins driven by web CLI plugins: jobs (`server jobs ...`, `@qodalis/cli-server-jobs`), users
+and audit (`adduser`, `token`, `link approve`, `audit`, ..., `@qodalis/cli-users`), data explorer (`data-explorer`,
+`@qodalis/cli-data-explorer`), filesystem (`scp`, `@qodalis/cli-scp`), live logs (`server logs`,
+`@qodalis/cli-server-logs`). Commands a module declares can bring their permissions to the catalog:
+`ICliModule.permissions` (`{ name, description, group }`, added by `addModule` with surface `cli`).
 
 ## Built-in processors
 

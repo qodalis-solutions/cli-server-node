@@ -75,3 +75,9 @@ Unlike the in-memory store (latest 1000 entries), the PostgreSQL audit store kee
 The store tests run the same contract against the in-memory and the PostgreSQL stores. The PostgreSQL part runs
 when `QCLI_TEST_POSTGRES` holds a connection string to an empty database the tests may wipe; CI starts a
 `postgres:17` service for it.
+
+## Terminal commands
+
+None of its own: it stores the [users plugin](../users/README.md#terminal-commands)'s data, managed with that plugin's
+commands (`adduser`, `token`, `audit`, ...). Its migrations show in `databases runs` when the
+[databases plugin](../databases/README.md#terminal-commands) runs them.

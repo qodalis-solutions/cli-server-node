@@ -123,6 +123,21 @@ Check connectivity: `aws status`
 | `aws ecs services <cluster>` | List services in a cluster |
 | `aws ecs tasks <cluster>` | List tasks in a cluster |
 
+## Terminal commands
+
+The commands are listed under [Commands](#commands). Permissions, enforced on a protected server (the users plugin)
+along the command chain and added to the permission catalog by `addModule` (group `AWS`):
+
+| Permission | Commands |
+|---|---|
+| `aws:read` | Every `aws` command (the root needs it) |
+| `aws:write` (with `aws:read`) | `aws configure set`, `aws s3 cp`, `aws s3 rm`, `aws s3 mb`, `aws s3 rb`, `aws ec2 start`, `aws ec2 stop`, `aws ec2 reboot`, `aws lambda invoke`, `aws sqs send`, `aws sqs purge`, `aws sns publish` |
+
+```text
+$ aws s3 rm s3://reports/2026-11.csv      (signed in with aws:read only)
+forbidden: missing permission aws:write
+```
+
 ## Common Parameters
 
 | Parameter | Alias | Description |

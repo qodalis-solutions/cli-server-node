@@ -39,6 +39,11 @@ The entire tree is loaded into memory on construction and flushed to disk after 
 
 The provider stores the complete directory tree as a nested JSON structure in a single file. This makes it easy to inspect, back up, and version-control the stored data. It is best suited for small to medium datasets where simplicity is preferred over performance.
 
+## Terminal commands
+
+None of its own: the storage is reached through the [filesystem plugin](../filesystem/README.md#terminal-commands)
+(`scp` in the web CLI).
+
 ## License
 
 MIT

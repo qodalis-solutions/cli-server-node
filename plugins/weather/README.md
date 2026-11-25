@@ -29,6 +29,11 @@ const { app } = createCliServer({
 | `weather current [location]` | Show current weather conditions |
 | `weather forecast [location]` | Show a 3-day weather forecast |
 
+## Terminal commands
+
+The commands are listed under [Commands](#commands); they need no permission beyond `commands:execute` on a protected
+server.
+
 ## Parameters
 
 | Parameter | Alias | Type | Default | Description |
