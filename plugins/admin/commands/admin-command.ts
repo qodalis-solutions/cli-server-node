@@ -21,9 +21,12 @@ import type { CliInstalledPlugin } from '../services/package-info';
 import { QueryError, parseSince } from '../services/query-time';
 import { StatusSampler, summarizeStatusHistory } from '../services/status-sampler';
 import { AdminRestartProcessor } from './admin-restart-command';
+import { formatTable } from './format-table';
 import { serverPluginProcessors } from './admin-server-plugins-command';
 import type { ServerPluginMarketplace } from '../services/server-plugin-marketplace';
 import type { ICliServerRestart } from '@qodalis/cli-server-abstractions';
+
+export { formatTable };
 
 /** The permission `admin logs` needs besides `admin:access` (as the log socket and event audience do). */
 export const LOGS_READ_PERMISSION = 'logs:read';
@@ -66,12 +69,6 @@ export function formatDuration(seconds: number): string {
     return h > 0 ? `${h} h ${m} min` : `${m} min`;
 }
 
-/** Aligned columns: every column but the last padded to its widest cell. */
-export function formatTable(headers: string[], rows: string[][]): string {
-    const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
-    const line = (cells: string[]) => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i]))).join('  ').trimEnd();
-    return [line(headers), ...rows.map(line)].join('\n');
-}
 
 /** A whole number flag from 1 to `max`: `fallback` when absent, an error text when invalid. */
 function intArg(command: CliProcessCommand, names: string[], fallback: number, max: number, label: string): number | string {

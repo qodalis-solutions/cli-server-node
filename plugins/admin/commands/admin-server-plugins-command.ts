@@ -1,5 +1,6 @@
 import { CliCommandParameterDescriptor, CliCommandProcessor, CliProcessCommand, getCliCaller, getPositionals } from '@qodalis/cli-server-abstractions';
 import { DashboardMarketplaceActor, DashboardMarketplaceError } from '../services/dashboard-marketplace';
+import { formatTable } from './format-table';
 import { PLUGINS_INSTALL_PERMISSION, SERVER_PLUGIN_PLATFORM, ServerPluginChangeResult, ServerPluginMarketplace } from '../services/server-plugin-marketplace';
 
 const jsonParam = new CliCommandParameterDescriptor('json', 'Print the result as JSON', false, 'boolean');
@@ -7,12 +8,6 @@ const json = (value: unknown) => JSON.stringify(value, null, 2);
 
 /** `2026-11-25T10:04:05.123Z` -> `2026-11-25 10:04:05`. */
 const shortTime = (iso: string) => (iso ? iso.replace('T', ' ').replace(/(\.\d+)?Z$/, '') : '-');
-
-function table(headers: string[], rows: string[][]): string {
-    const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
-    const line = (cells: string[]) => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i]))).join('  ').trimEnd();
-    return [line(headers), line(widths.map((w) => '-'.repeat(w))), ...rows.map(line)].join('\n');
-}
 
 function actor(): DashboardMarketplaceActor {
     const caller = getCliCaller();
@@ -68,7 +63,7 @@ class SearchProcessor extends CliCommandProcessor {
                 ];
             });
             const more = result.total > result.items.length ? [`${result.items.length} of ${result.total} shown`] : [];
-            return [table(['Plugin', 'Package', 'Version', 'Platforms', 'Publisher', 'Status'], rows), ...more].join('\n');
+            return [formatTable(['Plugin', 'Package', 'Version', 'Platforms', 'Publisher', 'Status'], rows), ...more].join('\n');
         });
     }
 }
@@ -92,7 +87,7 @@ class InstalledProcessor extends CliCommandProcessor {
                 p.status === 'pending' ? 'pending restart' : p.status === 'removed' ? 'removed, running until a restart' : p.error ? `${p.status}: ${p.error}` : p.status;
             return [
                 `${plugins.length} server plugin(s) from ${marketplaceUrl} (install: ${install})`,
-                table(
+                formatTable(
                     ['Plugin', 'Package', 'Version', 'Status', 'Installed', 'By'],
                     plugins.map((p) => [p.name, p.package, `${p.version}${p.updateAvailable ? ' (update available)' : ''}`, statusText(p), shortTime(p.installedAt), p.installedBy || '-']),
                 ),
