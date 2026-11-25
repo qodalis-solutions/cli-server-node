@@ -312,7 +312,8 @@ export class CliJobScheduler implements ICliJobScheduler {
     private _eventBus: ICliEventBus | null = null;
     private _running = false;
     /** The global history limits, undefined when none is set. */
-    private readonly _historyRule?: JobHistoryRule;
+    private _historyRule?: JobHistoryRule;
+    private _historyLimits: JobHistoryLimits = {};
     private readonly _pruneIntervalMs: number;
 
     /**
@@ -323,6 +324,10 @@ export class CliJobScheduler implements ICliJobScheduler {
         const history = options?.history;
         const rule = history ? resolveHistoryLimits(history, 'Jobs') : undefined;
         this._historyRule = rule && hasHistoryLimit(rule) ? rule : undefined;
+        if (history) {
+            const { pruneInterval: _interval, ...limits } = history;
+            this._historyLimits = { ...limits };
+        }
         if (history?.pruneInterval !== undefined) {
             const ms = parseDuration(history.pruneInterval);
             if (ms === null) throw new Error(`Jobs: history.pruneInterval must be a duration like '6h' or milliseconds > 0`);
@@ -496,6 +501,32 @@ export class CliJobScheduler implements ICliJobScheduler {
             overridden: history.overridden,
             keepAll: history.keepAll,
         };
+    }
+
+    /** The global history limits as configured (`maxAge`, `maxRunsPerJob`, `failedMaxAge`, `failedMaxRunsPerJob`). */
+    get historyDefaults(): JobHistoryLimits {
+        return { ...this._historyLimits };
+    }
+
+    /** How often the built-in `jobs:prune-history` job runs, in milliseconds. */
+    get historyPruneIntervalMs(): number {
+        return this._pruneIntervalMs;
+    }
+
+    /**
+     * Replaces the global history limits at runtime (the `jobs` config provider): the next prune
+     * applies them. Registers (and, while running, starts) the `jobs:prune-history` job when it
+     * was not needed before. Throws on an invalid limit.
+     */
+    setHistoryDefaults(limits: JobHistoryLimits): void {
+        const rule = resolveHistoryLimits(limits, 'Jobs');
+        this._historyRule = hasHistoryLimit(rule) ? rule : undefined;
+        this._historyLimits = { ...limits };
+        const existed = this._registrations.has(HISTORY_PRUNE_JOB_ID);
+        if (!existed && this.ensureHistoryPruneJob() && this._running) {
+            const reg = this._registrations.get(HISTORY_PRUNE_JOB_ID);
+            if (reg && reg.status === 'active') this._startTimer(reg, true);
+        }
     }
 
     /** Load persisted job states and start timers for all active jobs. */

@@ -1,5 +1,6 @@
 import {
     ICliJob,
+    ICliConfigProvider,
     CliJobOptions,
     ICliJobStorageProvider,
     CliInstalledPlugin,
@@ -14,6 +15,7 @@ import { InMemoryJobStorageProvider } from './in-memory-job-storage-provider';
 import { createCliJobsController } from './cli-jobs-controller';
 import { jobsInstalledPlugin } from './package-info';
 import { jobsDashboardPage } from './dashboard-page';
+import { createJobsConfigProvider } from './jobs-config-provider';
 
 export interface CliJobsPluginResult {
     /** Default mount prefix for this plugin. */
@@ -26,6 +28,8 @@ export interface CliJobsPluginResult {
     installedPlugin: CliInstalledPlugin;
     /** The admin dashboard's Jobs page and Overview cards (`/qcli/modules/jobs`), when the package carries its build. */
     dashboardPages: CliDashboardModulePage[];
+    /** The `jobs` config provider (history retention defaults), registered by `mountPlugin`. */
+    configProviders: ICliConfigProvider[];
     /**
      * Publishes the job events on `eventBus` unless `build()` was given a bus or a
      * broadcast function. `mountPlugin` calls it with the server's bus.
@@ -126,6 +130,7 @@ export class CliJobsBuilder {
             scheduler,
             installedPlugin: jobsInstalledPlugin,
             dashboardPages: page ? [page] : [],
+            configProviders: [createJobsConfigProvider(scheduler)],
             setEventBus: (eventBus) => {
                 if (!explicitBus) scheduler.setEventBus(eventBus);
             },
