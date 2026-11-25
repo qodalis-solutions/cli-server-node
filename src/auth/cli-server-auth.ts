@@ -123,6 +123,10 @@ export interface CliServerAuditEntry {
     actorName?: string;
     details?: string;
     metadata?: Record<string, unknown>;
+    /** What the event is about when it is not a user (e.g. `config:cors.cors`). */
+    target?: string;
+    /** The event's own values (e.g. a config change's old and new values, secrets masked). */
+    properties?: Record<string, unknown>;
 }
 
 /**

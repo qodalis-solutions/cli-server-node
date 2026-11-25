@@ -213,6 +213,8 @@ export class UsersServerAuth {
         actorName?: string;
         details?: string;
         metadata?: Record<string, unknown>;
+        target?: string;
+        properties?: Record<string, unknown>;
     }): Promise<void> {
         await this.authService.audit({
             event: entry.event,
@@ -222,6 +224,8 @@ export class UsersServerAuth {
             actorId: entry.actorId ?? entry.userId,
             details: entry.details,
             metadata: entry.metadata,
+            ...(entry.target !== undefined ? { target: entry.target } : {}),
+            ...(entry.properties !== undefined ? { properties: entry.properties } : {}),
         });
     }
 

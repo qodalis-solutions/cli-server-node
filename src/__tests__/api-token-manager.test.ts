@@ -349,7 +349,7 @@ describe('ApiTokenManager: grantable permissions', () => {
         expect(host).toEqual([{ name: 'rates:read', description: 'Official exchange rates', group: 'Rates', surface: 'host' }]);
         const admin = await h.addUser('admin2', ['*']);
         expect((await h.plugin.apiTokens.grantablePermissions(admin, 'host')).map((p) => p.name)).toEqual(['rates:read', 'banks:read']);
-        expect(await h.plugin.apiTokens.grantablePermissions(admin)).toHaveLength(25);
+        expect(await h.plugin.apiTokens.grantablePermissions(admin)).toHaveLength(27);
     });
 
     it('unknown user → 404; bad audience → 400', async () => {

@@ -25,13 +25,21 @@ export interface CliMcpOptions {
     token?: string;
     /** Returned by `initialize`. */
     instructions?: string;
+    /**
+     * Only tools annotated `readOnlyHint: true` are listed and callable (e.g. `config_get`, not
+     * `config_set`), the server-side counterpart of the MCP client's `QCLI_READ_ONLY`. Default false.
+     */
+    readOnly?: boolean;
 }
 
 /** Resolves the `mcp` server option: undefined when MCP is disabled. */
 export function resolveMcpOptions(option: boolean | CliMcpOptions | undefined): CliMcpOptions | undefined {
     if (!option) return undefined;
     if (option === true) return {};
-    return option.enabled === false ? undefined : option;
+    // A copy: the `mcp` config provider changes the lists at runtime, never the host's object
+    return option.enabled === false
+        ? undefined
+        : { ...option, ...(option.tools ? { tools: [...option.tools] } : {}), ...(option.exclude ? { exclude: [...option.exclude] } : {}) };
 }
 
 /** True when `name` matches a pattern (exact, or prefix with a trailing `*`); case-insensitive. */
@@ -261,6 +269,7 @@ export function createMcpController(options: McpControllerOptions): Router {
         const tools = await collectMcpTools(options.providers());
         return tools.filter((tool) => {
             if (!isMcpToolAllowed(tool.name, mcp.tools, mcp.exclude)) return false;
+            if (mcp.readOnly && tool.annotations?.readOnlyHint !== true) return false;
             if (!auth?.protectServer) return true;
             if (!ctx) return false;
             return (tool.requiredPermissions ?? []).every((p) => auth.hasPermission(ctx, p));
@@ -324,6 +333,9 @@ export function createMcpController(options: McpControllerOptions): Router {
         }
         const tool = (await visibleTools(ctx)).find((t) => t.name === name);
         if (!tool) {
+            if (mcp.readOnly && (await collectMcpTools(options.providers())).some((t) => t.name === name && t.annotations?.readOnlyHint !== true)) {
+                throw new JsonRpcError(INVALID_PARAMS, `Tool ${name} is not available: the MCP endpoint is read-only`);
+            }
             throw new JsonRpcError(INVALID_PARAMS, `Unknown tool: ${name}`);
         }
         const invalid = validateMcpArguments(tool.inputSchema, args);

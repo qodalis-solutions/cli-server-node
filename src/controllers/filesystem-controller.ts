@@ -80,11 +80,20 @@ function createUploadParser(maxUploadBytes: number): RequestHandler {
 export function createFilesystemRouter(provider: IFileStorageProvider, options: FileSystemApiOptions = {}): Router {
     const router = Router();
 
-    const maxUploadBytes = options.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
-    if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
-        throw new Error(`maxUploadBytes must be a positive number of bytes (got ${maxUploadBytes})`);
+    const limitOf = () => options.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+    const initial = limitOf();
+    if (!Number.isFinite(initial) || initial <= 0) {
+        throw new Error(`maxUploadBytes must be a positive number of bytes (got ${initial})`);
     }
-    const upload = createUploadParser(maxUploadBytes);
+    // `options.maxUploadBytes` is read per upload: the filesystem config provider changes it at runtime
+    let parser = { limit: initial, handler: createUploadParser(initial) };
+    const upload: RequestHandler = (req, res, next) => {
+        const limit = limitOf();
+        if (limit !== parser.limit && Number.isFinite(limit) && limit > 0) {
+            parser = { limit, handler: createUploadParser(limit) };
+        }
+        parser.handler(req, res, next);
+    };
 
     router.get('/ls', async (req: Request, res: Response) => {
         try {

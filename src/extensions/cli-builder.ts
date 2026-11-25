@@ -11,7 +11,14 @@ import {
     installedPluginOf,
     readInstalledPlugin,
     validateDashboardExtension,
+    type AuditEntry,
+    type ICliAuditStore,
+    type ICliConfigProvider,
+    type ICliEventBus,
+    type ICliConfigStore,
 } from '@qodalis/cli-server-abstractions';
+import { CliConfigRegistry } from '../config/cli-config-registry';
+import { CliConfigService } from '../config/cli-config-service';
 import {
     CliPermissionCatalog,
     CliPermissionInput,
@@ -57,6 +64,28 @@ export class CliBuilder {
      * core's permissions, then the plugins', then the host's ({@link addPermissions}).
      */
     readonly permissions = new CliPermissionCatalog();
+
+    /** The config providers and the store of their writable settings (see {@link addConfigProvider}). */
+    readonly configRegistry = new CliConfigRegistry();
+    private _configAuditStore?: ICliAuditStore;
+    private _configAudit?: () => ((entry: AuditEntry) => Promise<void>) | undefined;
+    private _configEventBus?: () => ICliEventBus | undefined;
+
+    /**
+     * The server's configuration (`GET/PATCH /api/v1/qcli/config`, the `config` command, the
+     * `config_*` MCP tools): providers filtered by permission, secrets masked, changes validated,
+     * audited (`config.update`) and published (`config:changed`).
+     */
+    readonly config: CliConfigService = new CliConfigService(this.configRegistry, {
+        audit: () => {
+            if (this._configAuditStore) {
+                const store = this._configAuditStore;
+                return (entry) => store.log(entry);
+            }
+            return this._configAudit?.();
+        },
+        eventBus: () => this._configEventBus?.(),
+    });
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
@@ -157,14 +186,69 @@ export class CliBuilder {
         return this;
     }
 
-    /** Registers a module and all of its command processors. */
+    /** Registers a module, its command processors and its config providers (`configProviders`). */
     addModule(module: ICliModule): CliBuilder {
         this._modules.push(module);
         this._addInstalledPluginOf(module);
         for (const processor of module.processors) {
             this._registry.register(processor);
         }
+        for (const provider of module.configProviders ?? []) {
+            this.addConfigProvider(provider);
+        }
         return this;
+    }
+
+    /**
+     * Registers a config provider: its sections are listed by `GET /api/v1/qcli/config` and the
+     * `config` command; a provider that also implements `ICliConfigWriter` can be changed. A
+     * `CliStoredConfigProvider` keeps its changes in the server's config store. Throws
+     * `config provider already registered: <id>`.
+     *
+     * @example
+     * ```ts
+     * builder.addConfigProvider(new CliStoredConfigProvider({
+     *     id: 'billing', title: 'Billing',
+     *     sections: [{ id: 'invoices', settings: [{ key: 'dueDays', type: 'number', default: 30, validation: { min: 1 } }] }],
+     * }));
+     * ```
+     */
+    addConfigProvider(provider: ICliConfigProvider): CliBuilder {
+        this.configRegistry.add(provider);
+        return this;
+    }
+
+    /** The registered config providers, sorted by `order`, then id. */
+    get configProviders(): ReadonlyArray<ICliConfigProvider> {
+        return this.configRegistry.providers;
+    }
+
+    /**
+     * Keeps writable settings in `store` (default in memory, lost on restart): a
+     * `JsonFileConfigStore`, or the databases plugin's `CliDatabaseConfigStore`. Set it in
+     * `configure`, before the server is created.
+     */
+    setConfigStore(store: ICliConfigStore): CliBuilder {
+        this.configRegistry.setStore(store);
+        return this;
+    }
+
+    /**
+     * Writes config changes (`config.update`) to this audit log. By default they go to the auth
+     * provider's (the users plugin's audit log), when one is installed.
+     */
+    setConfigAuditStore(store: ICliAuditStore | undefined): CliBuilder {
+        this._configAuditStore = store;
+        return this;
+    }
+
+    /** Used by `createCliServer`: the default audit sink (the auth provider's) and the event bus. */
+    attachConfigServices(services: {
+        audit: () => ((entry: AuditEntry) => Promise<void>) | undefined;
+        eventBus: () => ICliEventBus | undefined;
+    }): void {
+        this._configAudit = services.audit;
+        this._configEventBus = services.eventBus;
     }
 
     /** Returns all registered modules. */

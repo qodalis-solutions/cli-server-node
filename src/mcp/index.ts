@@ -29,3 +29,4 @@ export { ServerMcpToolProvider } from './providers/server-provider';
 export { FilesystemMcpToolProvider } from './providers/filesystem-provider';
 export { DataExplorerMcpToolProvider } from './providers/data-explorer-provider';
 export { JobsMcpToolProvider } from './providers/jobs-provider';
+export { ConfigMcpToolProvider } from './providers/config-provider';

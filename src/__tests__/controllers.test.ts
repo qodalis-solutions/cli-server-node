@@ -145,8 +145,10 @@ describe('CLI Controllers (integration)', () => {
         it('should return all registered commands', async () => {
             const res = await request(app).get('/api/v1/qcli/commands').expect(200);
 
-            expect(res.body).toHaveLength(4);
+            // The four registered here, and the server's own `config`
+            expect(res.body).toHaveLength(5);
             const commands = res.body.map((c: any) => c.command);
+            expect(commands).toContain('config');
             expect(commands).toContain('echo');
             expect(commands).toContain('greet');
             expect(commands).toContain('stream-test');

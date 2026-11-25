@@ -37,7 +37,29 @@ import {
     resolveMcpOptions,
 } from './mcp';
 import type { CliJobScheduler } from '@qodalis/cli-server-plugin-jobs';
-import { CliDashboardExtension, CliDashboardModulePage, CliInstalledPlugin, ICliEventBus, ICliModule, installedPluginOf } from '@qodalis/cli-server-abstractions';
+import {
+    CliDashboardExtension,
+    CliDashboardModulePage,
+    CliInstalledPlugin,
+    ICliConfigProvider,
+    ICliConfigStore,
+    ICliEventBus,
+    ICliModule,
+    createCustomConfigProvider,
+    installedPluginOf,
+} from '@qodalis/cli-server-abstractions';
+import {
+    CliConfigCommandProcessor,
+    CliConfigService,
+    CliHostConfigProvider,
+    CliHostEnvironmentOptions,
+    CliServerConfigProvider,
+    createCorsConfigProvider,
+    createFilesystemConfigProvider,
+    createMcpConfigProvider,
+    type CliCorsMode,
+} from './config';
+import { ConfigMcpToolProvider } from './mcp/providers/config-provider';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 
 /**
@@ -82,6 +104,8 @@ export interface MountablePlugin {
     module?: ICliModule;
     /** Permissions the plugin checks, added to the server's catalog (`GET /api/v1/qcli/permissions`) when mounted. */
     permissions?: CliPermissionInput[];
+    /** Config providers the plugin brings (its settings), registered with `builder.addConfigProvider` when mounted. */
+    configProviders?: ICliConfigProvider[];
     /** Pages the plugin adds to the admin dashboard (`builder.addDashboardExtension`), registered when mounted. */
     dashboardExtensions?: CliDashboardExtension[];
     /**
@@ -174,8 +198,20 @@ export interface CliServerOptions {
      * catalog, the event bus and installed plugins stay.
      */
     cliRoutes?: boolean;
+    /** Config providers: the store of writable settings, what the `host` provider shows, the `config` command. */
+    config?: CliServerConfigOptions;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
+}
+
+/** The `config` option of `createCliServer`. */
+export interface CliServerConfigOptions {
+    /** Where writable settings are kept (default in memory); same as `builder.setConfigStore`. */
+    store?: ICliConfigStore;
+    /** Which environment variables the `host` provider lists (default every one but `npm_*`), secrets masked. */
+    environment?: CliHostEnvironmentOptions;
+    /** Register the `config` command (default true). */
+    command?: boolean;
 }
 
 /**
@@ -220,10 +256,18 @@ export interface CliServerResult {
     setAuth(auth: ICliServerAuth | undefined): void;
     /** MCP endpoint: register tool providers (`mcp.addProvider(p)`). */
     mcp: CliServerMcp;
+    /**
+     * The server's configuration (same as `builder.config`): `config.ready()` resolves once every
+     * provider applied its stored settings (await it before listening with a database store).
+     */
+    config: CliConfigService;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
-    const { basePath = '/api/qcli', cors: corsOption, configure, allowedOrigins, enableShell = false, shell, trustProxy = false } = options;
+    const { basePath = '/api/qcli', cors: corsOption, configure, enableShell = false, shell, trustProxy = false } = options;
+    // The live list of allowed origins (CORS, sockets, MCP, CSRF): the `cors` config provider changes its items
+    const allowedOrigins: string[] = [...(options.allowedOrigins ?? [])];
+    const corsMode: CliCorsMode = corsOption === true ? 'permissive' : corsOption && typeof corsOption === 'object' ? 'custom' : corsOption === false ? 'disabled' : 'origins';
     const cliRoutes = options.cliRoutes ?? true;
     if (shell && !enableShell) {
         logger.warn('shell options are set but enableShell is false: the shell stays disabled');
@@ -239,16 +283,16 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         app.use(cors());
     } else if (corsOption && typeof corsOption === 'object') {
         app.use(cors(corsOption));
-    } else if (corsOption === undefined && allowedOrigins && allowedOrigins.length > 0) {
+    } else if (corsOption === undefined) {
         // Same-origin requests (e.g. the bundled admin dashboard) are always allowed.
-        app.use(
-            cors((req, callback) => {
-                const origin = req.headers.origin;
-                callback(null, {
-                    origin: isOriginAllowed(origin, allowedOrigins) || isSameOrigin(origin, req as express.Request),
-                });
-            }),
-        );
+        const originsCors = cors((req, callback) => {
+            const origin = req.headers.origin;
+            callback(null, {
+                origin: isOriginAllowed(origin, allowedOrigins) || isSameOrigin(origin, req as express.Request),
+            });
+        });
+        // Only while origins are allowed (the list changes at runtime)
+        app.use((req, res, next) => (allowedOrigins.length > 0 ? originsCors(req, res, next) : next()));
     }
 
     // Without CLI routes there is no MCP endpoint either
@@ -283,6 +327,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
+    if (options.config?.store) builder.setConfigStore(options.config.store);
 
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;
@@ -455,6 +500,66 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
     }
 
+    // Config providers: the built-in ones (a provider the host registered under the same id wins)
+    const addBuiltInConfig = (provider: ICliConfigProvider) => {
+        if (!builder.configRegistry.has(provider.id)) builder.addConfigProvider(provider);
+    };
+    addBuiltInConfig(new CliServerConfigProvider(MCP_SERVER_VERSION));
+    addBuiltInConfig(
+        new CliHostConfigProvider(
+            () => [
+                { key: 'basePath', label: 'Base path', description: 'Base path of the CLI routes', value: basePath },
+                { key: 'cliRoutes', label: 'CLI routes', description: "The CLI's routes and sockets are served", value: cliRoutes },
+                { key: 'enableShell', label: 'Shell', description: 'Interactive shell sessions are accepted', value: enableShell },
+                { key: 'shellAuth', label: 'Shell access', description: 'How shell sessions are authorized', value: eventSocketManager.shellAuthMode ?? 'none' },
+                { key: 'trustProxy', label: 'Trusted proxy hops', description: 'Reverse proxies trusted for the client address', value: proxyHops },
+                { key: 'maxTableRows', label: 'Table rows', description: 'Rows a table returns without paging (0: no limit)', value: options.maxTableRows ?? 200 },
+                { key: 'protected', label: 'Protected', description: 'An auth provider protects every route', value: !!serverAuth?.protectServer },
+            ],
+            options.config?.environment,
+        ),
+    );
+    addBuiltInConfig(createCorsConfigProvider(allowedOrigins, corsMode));
+    addBuiltInConfig(createMcpConfigProvider(mcpOptions, mcpPath));
+    const fsStorage = builder.fileStorageProvider ?? (builder.fileSystemOptions ? 'os' : undefined);
+    if (cliRoutes && fsStorage) {
+        addBuiltInConfig(
+            createFilesystemConfigProvider(
+                typeof fsStorage === 'string' ? fsStorage : (fsStorage.name ?? 'custom'),
+                builder.fileSystemApiOptions,
+                builder.fileSystemOptions?.allowedPaths,
+            ),
+        );
+    }
+    addBuiltInConfig(createCustomConfigProvider());
+    builder.attachConfigServices({
+        // The auth provider's audit log (the users plugin's), unless `builder.setConfigAuditStore` set one
+        audit: () => {
+            const auth = serverAuth;
+            if (!auth?.audit) return undefined;
+            return (entry) =>
+                auth.audit!({
+                    event: entry.event,
+                    userId: entry.userId ?? entry.username,
+                    userName: entry.username,
+                    ...(entry.actorId ? { actorId: entry.actorId } : {}),
+                    ...(entry.actor ? { actorName: entry.actor } : {}),
+                    ...(entry.details !== undefined ? { details: entry.details } : {}),
+                    ...(entry.target !== undefined ? { target: entry.target } : {}),
+                    ...(entry.properties !== undefined ? { properties: entry.properties } : {}),
+                });
+        },
+        eventBus: () => eventBus,
+    });
+    builder.configRegistry.start();
+    if (cliRoutes && options.config?.command !== false && !registry.findProcessor('config')) {
+        builder.addProcessor(new CliConfigCommandProcessor(builder.config));
+    }
+    if (mcpOptions) {
+        mcpFeatureProviders.push(new ConfigMcpToolProvider(builder.config, () => serverAuth));
+        mcpFeatures.add('config');
+    }
+
     logger.info('CLI server created with %d processors', registry.processors.length);
 
     const serverOptions = builder.serverOptions;
@@ -525,6 +630,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             if (fresh.length) builder.addPermissions(fresh, 'cli');
         }
         if (plugin.module) builder.addModule(plugin.module);
+        for (const provider of plugin.configProviders ?? []) {
+            if (!builder.configRegistry.has(provider.id)) builder.addConfigProvider(provider);
+        }
         if (hostRoutes) {
             if (exact.length > 0 || prefixes.length > 0) {
                 const handler = Router();
@@ -592,7 +700,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         },
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */
