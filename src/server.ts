@@ -4,12 +4,7 @@ import { createCliServer } from './create-cli-server';
 import { createLogger } from './utils/logger';
 
 const logger = createLogger('Server');
-import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
-import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
-import { CliSystemCommandProcessor } from './processors/cli-system-command-processor';
 import { CliHttpCommandProcessor } from './processors/cli-http-command-processor';
-import { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
-import { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 
 const port = process.env.PORT ?? 8047;
@@ -28,12 +23,7 @@ const { app, eventSocketManager } = createCliServer({
     shell: shellToken ? { token: shellToken } : undefined,
     configure: (builder) => {
         builder
-            .addProcessor(new CliEchoCommandProcessor())
-            .addProcessor(new CliStatusCommandProcessor())
-            .addProcessor(new CliSystemCommandProcessor())
             .addProcessor(new CliHttpCommandProcessor())
-            .addProcessor(new CliHashCommandProcessor())
-            .addProcessor(new CliBase64CommandProcessor())
             .addModule(new WeatherModule());
     },
 });

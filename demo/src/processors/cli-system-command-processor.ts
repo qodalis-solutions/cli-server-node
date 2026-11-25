@@ -1,6 +1,5 @@
 import os from 'os';
-import { CliCommandProcessor } from '../abstractions/cli-command-processor';
-import { CliProcessCommand } from '../abstractions/cli-process-command';
+import { CliCommandProcessor, CliProcessCommand } from '@qodalis/cli-server-node';
 
 const startTime = Date.now();
 
@@ -8,8 +7,6 @@ const startTime = Date.now();
 export class CliSystemCommandProcessor extends CliCommandProcessor {
     command = 'system';
     description = 'Shows server system information';
-    /** Listed under the server's built-in commands. */
-    module = 'core';
     examples = [
         { command: 'system', description: 'Operating system, CPU and memory of the server' },
     ];

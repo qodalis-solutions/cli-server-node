@@ -1,9 +1,6 @@
 import {
     createCliServer,
-    CliSystemCommandProcessor,
     CliHttpCommandProcessor,
-    CliHashCommandProcessor,
-    CliBase64CommandProcessor,
     CliStoredConfigProvider,
     JsonFileConfigStore,
 } from '@qodalis/cli-server-node';
@@ -109,10 +106,7 @@ const { app, registry, builder, executor, eventSocketManager, logSocketManager, 
         builder.addConfigProvider(demoConfig);
         builder
             .addModule(new DemoModule())
-            .addProcessor(new CliSystemCommandProcessor())
             .addProcessor(new CliHttpCommandProcessor())
-            .addProcessor(new CliHashCommandProcessor())
-            .addProcessor(new CliBase64CommandProcessor())
             .addModule(new WeatherModule())
             .addModule(new AwsModule())
             .addFileSystem({ allowedPaths: ['/tmp', '/app', '/home'] });

@@ -1,7 +1,4 @@
-import { CliCommandProcessor } from '../abstractions/cli-command-processor';
-import { CliProcessCommand } from '../abstractions/cli-process-command';
-import { ICliCommandProcessor } from '../abstractions/cli-command-processor';
-import { getPositionalText } from '../abstractions';
+import { CliCommandProcessor, CliProcessCommand, ICliCommandProcessor, getPositionalText } from '@qodalis/cli-server-node';
 
 /** Sub-processor that encodes text to Base64. */
 class Base64EncodeProcessor extends CliCommandProcessor {
@@ -45,8 +42,6 @@ class Base64DecodeProcessor extends CliCommandProcessor {
 export class CliBase64CommandProcessor extends CliCommandProcessor {
     command = 'base64';
     description = 'Encodes or decodes Base64 text';
-    /** Listed under the server's built-in commands. */
-    module = 'core';
     aliases = ['b64'];
     examples = [
         { command: 'base64 encode hello', description: 'Prints aGVsbG8=' },

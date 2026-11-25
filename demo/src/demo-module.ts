@@ -4,9 +4,12 @@ import { CliStatusCommandProcessor } from './processors/cli-status-command-proce
 import { CliTimeCommandProcessor } from './processors/cli-time-command-processor';
 import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
 import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
+import { CliSystemCommandProcessor } from './processors/cli-system-command-processor';
+import { CliHashCommandProcessor } from './processors/cli-hash-command-processor';
+import { CliBase64CommandProcessor } from './processors/cli-base64-command-processor';
 
 /**
- * The demo's own example commands (echo, status, time, hello, math) as one module: `GET /commands` lists them
+ * The demo's own example commands (echo, status, time, hello, math, system, hash, base64) as one module: `GET /commands` lists them
  * with `module: "demo"`, and the dashboard's plugins page shows them as the demo plugin (enable/disable).
  */
 export class DemoModule extends CliModule {
@@ -20,5 +23,8 @@ export class DemoModule extends CliModule {
         new CliTimeCommandProcessor(),
         new CliHelloCommandProcessor(),
         new CliMathCommandProcessor(),
+        new CliSystemCommandProcessor(),
+        new CliHashCommandProcessor(),
+        new CliBase64CommandProcessor(),
     ];
 }
