@@ -31,3 +31,6 @@ plugins/filesystem-sqlite/package-lock.json
 
 # Portal site copied into the portal plugin at build time
 plugins/portal/site/
+
+# Dashboard plugins installed from the marketplace (admin plugin, default dir)
+qcli-data/
