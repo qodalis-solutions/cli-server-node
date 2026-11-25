@@ -20,6 +20,7 @@ import {
 import { CliConfigRegistry } from '../config/cli-config-registry';
 import { CliConfigService } from '../config/cli-config-service';
 import { CliServerRestart } from '../restart/cli-server-restart';
+import { CliServerPlugins, DEFAULT_DATA_DIR } from '../server-plugins/cli-server-plugins';
 import {
     CliPermissionCatalog,
     CliPermissionInput,
@@ -52,6 +53,7 @@ export class CliBuilder {
     private readonly _installedPlugins: CliInstalledPlugin[] = [];
     private readonly _dashboardExtensions: CliDashboardExtension[] = [];
     private readonly _dashboardModuleDirs = new Map<string, string | false>();
+    private _serverPlugins = new CliServerPlugins(DEFAULT_DATA_DIR, false);
 
     /**
      * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,
@@ -122,6 +124,28 @@ export class CliBuilder {
      */
     addPermissions(entries: readonly CliPermissionInput[], surface: CliPermissionSurface = 'host'): CliBuilder {
         this.permissions.add(entries, surface);
+        return this;
+    }
+
+    /** Removes a package from the installed plugins (a runtime plugin that failed to load); false when it is not listed. */
+    removeInstalledPlugin(id: string): boolean {
+        const index = this._installedPlugins.findIndex((p) => p.id === id);
+        if (index < 0) return false;
+        this._installedPlugins.splice(index, 1);
+        return true;
+    }
+
+    /**
+     * The plugins installed at runtime from the marketplace (`<dataDir>/server-plugins`): their installed list, where
+     * they are kept, and what this process loaded (`createCliServer({ dataDir, serverPlugins })`).
+     */
+    get serverPlugins(): CliServerPlugins {
+        return this._serverPlugins;
+    }
+
+    /** Set by `createCliServer` from its `dataDir` and `serverPlugins` options. */
+    useServerPlugins(serverPlugins: CliServerPlugins): CliBuilder {
+        this._serverPlugins = serverPlugins;
         return this;
     }
 

@@ -36,6 +36,7 @@ export const CORE_PERMISSIONS: readonly CliPermissionInput[] = [
     { name: 'logs:read', description: "Read the server's logs", group: 'Server' },
     { name: 'admin:access', description: 'Open the admin dashboard and its server pages', group: 'Server' },
     { name: 'dashboard:install', description: 'Install, update and remove dashboard plugins from the marketplace', group: 'Server' },
+    { name: 'plugins:install', description: 'Install, update and remove server plugins from the marketplace', group: 'Server' },
     { name: 'server:restart', description: 'Restart the server', group: 'Server' },
     { name: 'config:read', description: "See the server's configuration (secrets stay hidden)", group: 'Config' },
     { name: 'config:write', description: "Change the server's configuration", group: 'Config' },

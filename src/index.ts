@@ -291,3 +291,33 @@ export {
     CliServerRestartError,
     ICliServerRestart,
 } from '@qodalis/cli-server-abstractions';
+// Server plugins installed at runtime (from the marketplace): the loader and the entry point contract
+export {
+    CliServerPlugins,
+    CliServerPluginsOptions,
+    CliServerPluginsHost,
+    DEFAULT_DATA_DIR,
+    SHARED_PACKAGES,
+    isValidServerPluginName,
+    isValidServerPluginPackage,
+    isValidServerPluginVersion,
+    serverPluginEntryPath,
+    serverPluginManifestOf,
+} from './server-plugins';
+export {
+    CLI_SERVER_PLUGIN_KIND,
+    CLI_SERVER_PLUGINS_DIR,
+    CLI_SERVER_PLUGINS_FILE,
+    CLI_PLUGINS_INSTALL_PERMISSION,
+    CliServerPluginManifest,
+    CliPluginLogger,
+    CliPluginBuilder,
+    CliPluginSettingsOptions,
+    CliPluginContext,
+    CliPluginEntryResult,
+    CliPluginEntry,
+    CliServerPluginRecord,
+    CliServerPluginStatus,
+    CliServerPluginState,
+    ICliServerPlugins,
+} from '@qodalis/cli-server-abstractions';

@@ -19,6 +19,7 @@ const CORE_NAMES = [
     'logs:read',
     'admin:access',
     'dashboard:install',
+    'plugins:install',
     'server:restart',
     'config:read',
     'config:write',

@@ -1,4 +1,4 @@
-import express, { Express, NextFunction, Request, Response, Router } from 'express';
+import express, { Express, NextFunction, Request, RequestHandler, Response, Router } from 'express';
 import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventBus, CliEventSocketManager, CliLogSocketManager } from './services';
 import { withFileStorageEvents } from './filesystem/file-storage-events';
@@ -62,6 +62,7 @@ import {
 import { ConfigMcpToolProvider } from './mcp/providers/config-provider';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 import { CliServerRestart, CliServerRestartOptions, createRestartController } from './restart';
+import { CliServerPlugins, CliServerPluginsOptions, DEFAULT_DATA_DIR } from './server-plugins';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -216,6 +217,16 @@ export interface CliServerOptions {
      * command again, then exit: bare runs and development) or `handler` (the host's function).
      */
     restart?: CliServerRestartOptions;
+    /**
+     * The server's data directory (default `./qcli-data`, from the working directory): runtime-installed server
+     * plugins (`server-plugins/`) and their own data (`plugin-data/<id>/`).
+     */
+    dataDir?: string;
+    /**
+     * Server plugins installed at runtime from the marketplace (the admin plugin installs them): loaded at startup
+     * from `<dataDir>/server-plugins` (`dir` to keep them elsewhere); `false` loads none.
+     */
+    serverPlugins?: CliServerPluginsOptions | false;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -291,6 +302,11 @@ export interface CliServerResult {
      * `clearRequired`, `status()`, `onShutdown(name, fn)` for the host's own clean-up (pools, stores).
      */
     restart: CliServerRestart;
+    /**
+     * Server plugins installed at runtime (same as `builder.serverPlugins`): loaded on the next turn of the event loop,
+     * after the host's own mounts; `await serverPlugins.ready()` before listening to have them all.
+     */
+    serverPlugins: CliServerPlugins;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
@@ -359,6 +375,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
+    builder.useServerPlugins(new CliServerPlugins(options.dataDir ?? DEFAULT_DATA_DIR, options.serverPlugins ?? {}));
     if (options.config?.store) builder.setConfigStore(options.config.store);
     for (const [providerId, store] of Object.entries(options.config?.stores ?? {})) builder.setConfigStore(store, providerId);
 
@@ -398,6 +415,11 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             routePermissions,
         }),
     );
+
+    // Routes of plugins mounted at runtime (installed from the marketplace, loaded after the host's own mounts) and
+    // the filesystem and data explorer pages wired then: here, so a host's catch-all added later does not hide them
+    const lateRouter = Router();
+    app.use((req, res, next) => (lateRouter.stack.length > 0 ? lateRouter(req, res, next) : next()));
 
     if (configure) {
         configure(builder);
@@ -467,46 +489,39 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         );
     }
 
-    // The CLI's own routes (none on a server without CLI routes)
-    if (cliRoutes) {
-        // Version discovery endpoint
-        app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
-
-        // Restart: GET the status (admin:access), POST restarts (server:restart)
-        routePermissions.push({ path: '/api/v1/qcli/server/restart', read: 'admin:access', write: 'server:restart' });
-        app.use('/api/v1/qcli/server/restart', createRestartController(restart));
-
-        // API v1 routes
-        app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
-
-        // Custom basePath fallback (when user overrides the default)
-        if (basePath !== '/api/v1/qcli') {
-            app.use(basePath, createCliController(registry, executor, { shellCapabilities, eventBus }));
-        }
-
-        // Filesystem API — provider-based
+    // The filesystem API and the data explorer: wired at creation, and again once the plugins installed at runtime
+    // are loaded (one of them may set the storage or add sources)
+    let fsRouter: Router | undefined;
+    let deRouter: Router | undefined;
+    const wireFilesystem = (late = false) => {
         let fsProvider = builder.fileStorageProvider;
         if (!fsProvider && builder.fileSystemOptions) {
             // Backward compatibility: create OsFileStorageProvider from old-style options
             fsProvider = new OsFileStorageProvider(builder.fileSystemOptions);
         }
-        if (fsProvider) {
+        if (!fsRouter && fsProvider) {
             // The API and the MCP tools share it, so both publish fs:changed
             fsProvider = withFileStorageEvents(fsProvider, eventBus);
-            app.use('/api/qcli/fs', createFilesystemRouter(fsProvider, builder.fileSystemApiOptions));
+            fsRouter = createFilesystemRouter(fsProvider, builder.fileSystemApiOptions);
             mcpFeatureProviders.push(new FilesystemMcpToolProvider(fsProvider));
             mcpFeatures.add('filesystem');
             // The dashboard's Filesystem page (@qodalis/cli-dashboard-module-filesystem)
             const page = filesystemDashboardPage(builder.dashboardModuleDir('filesystem'));
             if (page) {
                 builder.addDashboardExtension(page.extension);
-                app.use(page.prefix, page.handler);
+                lateRouter.use(page.prefix, page.handler);
             }
         }
-
-        // Data Explorer API
+        if (late && fsRouter && !builder.configRegistry.has('filesystem')) {
+            const storage = builder.fileStorageProvider;
+            builder.addConfigProvider(
+                createFilesystemConfigProvider(storage?.name ?? 'custom', builder.fileSystemApiOptions, builder.fileSystemOptions?.allowedPaths),
+            );
+        }
+    };
+    const wireDataExplorer = () => {
         const deBuilder = builder.dataExplorerBuilder;
-        if (deBuilder && deBuilder.registry.size > 0) {
+        if (!deRouter && deBuilder && deBuilder.registry.size > 0) {
             // The sign-in provider can be set later (setAuth, mountPlugin): read it per request
             const deExecutor = new DataExplorerExecutor(deBuilder.registry, {
                 audit: () => {
@@ -532,12 +547,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
                     hasPermission: auth?.protectServer && ctx ? (p: string) => auth.hasPermission(ctx, p) : undefined,
                 };
             };
-            app.use(
-                '/api/qcli/data-explorer',
-                createDataExplorerController(deBuilder.registry, deExecutor, {
-                    caller: (req) => dataCaller(req.qcliServerAuth, clientAddress(req, trustProxy)),
-                }),
-            );
+            deRouter = createDataExplorerController(deBuilder.registry, deExecutor, {
+                caller: (req) => dataCaller(req.qcliServerAuth, clientAddress(req, trustProxy)),
+            });
             mcpFeatureProviders.push(
                 new DataExplorerMcpToolProvider(deBuilder.registry, deExecutor, (context) =>
                     dataCaller(context.auth, clientAddress(context.request, trustProxy)),
@@ -548,9 +560,35 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             const page = dataExplorerDashboardPage(builder.dashboardModuleDir('data-explorer'));
             if (page) {
                 builder.addDashboardExtension(page.extension);
-                app.use(page.prefix, page.handler);
+                lateRouter.use(page.prefix, page.handler);
             }
         }
+    };
+
+    // The CLI's own routes (none on a server without CLI routes)
+    if (cliRoutes) {
+        // Version discovery endpoint
+        app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
+
+        // Restart: GET the status (admin:access), POST restarts (server:restart)
+        routePermissions.push({ path: '/api/v1/qcli/server/restart', read: 'admin:access', write: 'server:restart' });
+        app.use('/api/v1/qcli/server/restart', createRestartController(restart));
+
+        // API v1 routes
+        app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
+
+        // Custom basePath fallback (when user overrides the default)
+        if (basePath !== '/api/v1/qcli') {
+            app.use(basePath, createCliController(registry, executor, { shellCapabilities, eventBus }));
+        }
+
+        // Filesystem API — provider-based (also set by a plugin loaded at runtime: wired then)
+        app.use('/api/qcli/fs', (req, res, next) => (fsRouter ? fsRouter(req, res, next) : next()));
+        wireFilesystem();
+
+        // Data Explorer API (sources added by plugins loaded at runtime are served too)
+        app.use('/api/qcli/data-explorer', (req, res, next) => (deRouter ? deRouter(req, res, next) : next()));
+        wireDataExplorer();
     }
 
     // Config providers: the built-in ones (a provider the host registered under the same id wins)
@@ -640,7 +678,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         setAuth(options.auth);
     }
 
-    const mountPlugin = (plugin: MountablePlugin) => {
+    const mountInto = (plugin: MountablePlugin, use: (path: string, handler: RequestHandler) => void) => {
         // Validated in full before anything is registered: a bad entry fails startup
         const hostRoutes = plugin.cliRoutes === false;
         const mount = normalizePath(plugin.prefix);
@@ -725,15 +763,15 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
                 cliRoutePrefixes.add(normalizePath(plugin.prefix));
                 if (plugin.dashboardPrefix) cliRoutePrefixes.add(normalizePath(plugin.dashboardPrefix));
             }
-            app.use(plugin.prefix, plugin.router);
+            use(plugin.prefix, plugin.router);
             if (plugin.dashboardPrefix && plugin.dashboardRouter) {
-                app.use(plugin.dashboardPrefix, plugin.dashboardRouter);
+                use(plugin.dashboardPrefix, plugin.dashboardRouter);
             }
             for (const page of pages) {
-                app.use(page.prefix, page.handler);
+                use(page.prefix, page.handler);
             }
             for (const route of plugin.assetRoutes ?? []) {
-                app.use(route.prefix, route.handler);
+                use(route.prefix, route.handler);
             }
         }
         if (isJobScheduler(plugin.scheduler)) {
@@ -752,6 +790,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             builder.addMcpToolProvider(provider);
         }
     };
+    const mountPlugin = (plugin: MountablePlugin) => mountInto(plugin, (path, handler) => app.use(path, handler));
 
     const mcp: CliServerMcp = {
         enabled: !!mcpOptions,
@@ -761,7 +800,22 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         },
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config, restart };
+    // Server plugins installed at runtime: loaded after the host's own mounts (next turn of the event loop)
+    const serverPlugins = builder.serverPlugins;
+    serverPlugins.attach({
+        builder,
+        config: builder.config,
+        eventBus,
+        restart,
+        mount: (plugin) => mountInto(plugin as MountablePlugin, (path, handler) => lateRouter.use(path, handler)),
+        afterLoad: () => {
+            if (!cliRoutes) return;
+            wireFilesystem(true);
+            wireDataExplorer();
+        },
+    });
+
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config, restart, serverPlugins };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */
