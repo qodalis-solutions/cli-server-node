@@ -1010,6 +1010,27 @@ The example commands `echo`, `status`, `time`, `hello`, `math`, `system`, `hash`
 A command added with `addModule` is listed by `GET /api/v1/qcli/commands` under the module's name (`module`) unless it
 names a module itself, so the dashboard's Plugins page groups it with its module.
 
+Each command, and each sub-command in `processors`, lists the permissions it declares itself as `requiredPermissions`;
+the field is left out when it declares none. Running a command also needs the permissions of the commands above it and,
+on a protected server, `commands:execute`; neither is repeated:
+
+```json
+{
+  "command": "aws",
+  "module": "aws",
+  "requiredPermissions": ["aws:read"],
+  "processors": [
+    {
+      "command": "s3",
+      "processors": [
+        { "command": "ls" },
+        { "command": "rm", "requiredPermissions": ["aws:write"] }
+      ]
+    }
+  ]
+}
+```
+
 ## Docker
 
 ```bash
