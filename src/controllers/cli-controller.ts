@@ -58,7 +58,12 @@ export function createCliController(
     });
 
     router.get('/commands', (_req, res) => {
-        const descriptors = registry.processors.map(mapToDescriptor);
+        // A command added by a module is listed under the module's name unless it names a module itself
+        const descriptors = registry.processors.map((p) => {
+            const descriptor = mapToDescriptor(p);
+            const module = descriptor.module ?? registry.moduleOf?.(p);
+            return module ? { ...descriptor, module } : descriptor;
+        });
         res.json(descriptors);
     });
 

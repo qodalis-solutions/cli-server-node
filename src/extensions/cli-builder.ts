@@ -191,7 +191,7 @@ export class CliBuilder {
         this._modules.push(module);
         this._addInstalledPluginOf(module);
         for (const processor of module.processors) {
-            this._registry.register(processor);
+            this._registry.register(processor, module.name);
         }
         for (const provider of module.configProviders ?? []) {
             this.addConfigProvider(provider);

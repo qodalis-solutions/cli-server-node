@@ -7,8 +7,13 @@ const logger = createLogger('CommandRegistry');
 export interface ICliCommandRegistry {
     /** All registered top-level processors. */
     readonly processors: ReadonlyArray<ICliCommandProcessor>;
-    /** Registers a command processor. */
-    register(processor: ICliCommandProcessor): void;
+    /** Registers a command processor; `module` names the module that added it (see {@link moduleOf}). */
+    register(processor: ICliCommandProcessor, module?: string): void;
+    /**
+     * The name of the module that registered `processor` (`addModule`), if any. `GET /commands` lists it as the
+     * command's `module` when the processor names none itself.
+     */
+    moduleOf?(processor: ICliCommandProcessor): string | undefined;
     /**
      * Finds a processor by command name, optionally resolving a sub-command chain.
      * @param command - Top-level command name.
@@ -21,14 +26,21 @@ export interface ICliCommandRegistry {
 /** Default in-memory implementation of {@link ICliCommandRegistry}. */
 export class CliCommandRegistry implements ICliCommandRegistry {
     private _processors: Map<string, ICliCommandProcessor> = new Map();
+    private _modules = new WeakMap<ICliCommandProcessor, string>();
 
     get processors(): ReadonlyArray<ICliCommandProcessor> {
         return Array.from(this._processors.values());
     }
 
-    register(processor: ICliCommandProcessor): void {
+    register(processor: ICliCommandProcessor, module?: string): void {
         this._processors.set(processor.command.toLowerCase(), processor);
+        if (module?.trim()) this._modules.set(processor, module);
+        else this._modules.delete(processor);
         logger.debug('Registered processor: %s', processor.command);
+    }
+
+    moduleOf(processor: ICliCommandProcessor): string | undefined {
+        return this._modules.get(processor);
     }
 
     findProcessor(command: string, chainCommands?: string[]): ICliCommandProcessor | undefined {
