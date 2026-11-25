@@ -9,7 +9,7 @@ export {
 } from './cli-config-service';
 export { CliConfigCommandProcessor, formatConfigValue } from './config-command';
 export { CliServerConfigProvider } from './providers/server-config-provider';
-export { CliHostConfigProvider, CliHostEnvironmentOptions, CliHostOption, isSecretEnvironmentVariable } from './providers/host-config-provider';
+export { CliHostConfigProvider, CliHostEnvironmentOptions, DEFAULT_ENVIRONMENT_ALLOW, CliHostOption, isSecretEnvironmentVariable } from './providers/host-config-provider';
 export {
     createCorsConfigProvider,
     createMcpConfigProvider,

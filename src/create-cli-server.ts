@@ -208,7 +208,7 @@ export interface CliServerOptions {
 export interface CliServerConfigOptions {
     /** Where writable settings are kept (default in memory); same as `builder.setConfigStore`. */
     store?: ICliConfigStore;
-    /** Which environment variables the `host` provider lists (default every one but `npm_*`), secrets masked. */
+    /** Which environment variables the `host` provider lists (default `QCLI_*`, NODE_ENV, PORT, HOST, TZ, LANG; `allow` adds names), secrets masked. */
     environment?: CliHostEnvironmentOptions;
     /** Register the `config` command (default true). */
     command?: boolean;

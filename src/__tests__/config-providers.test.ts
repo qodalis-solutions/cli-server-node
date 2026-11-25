@@ -10,7 +10,7 @@ import * as path from 'path';
 import request from 'supertest';
 import Database from 'better-sqlite3';
 import { createCliServer, CliServerOptions } from '../create-cli-server';
-import { CliHostConfigProvider, isSecretEnvironmentVariable } from '../config/providers/host-config-provider';
+import { CliHostConfigProvider, DEFAULT_ENVIRONMENT_ALLOW, isSecretEnvironmentVariable } from '../config/providers/host-config-provider';
 import { InMemoryFileStorageProvider } from '@qodalis/cli-server-plugin-filesystem';
 import { CliJobsBuilder, HISTORY_PRUNE_JOB_ID } from '@qodalis/cli-server-plugin-jobs';
 import { CliDatabaseConfigStore, sqliteConnection } from '@qodalis/cli-server-plugin-databases';
@@ -77,20 +77,42 @@ describe('built-in providers', () => {
 
 describe('host: options and environment, secrets masked', () => {
     it('names and URLs that hold secrets', () => {
-        for (const name of ['DB_PASSWORD', 'JWT_SECRET', 'GITHUB_TOKEN', 'API_KEY', 'STRIPE_APIKEY', 'KEY', 'AWS_SECRET_ACCESS_KEY', 'PRIVATE_KEY_PATH', 'SESSION_COOKIE', 'SENTRY_DSN', 'CONNECTION_STRING', 'QCLI_ADMIN_PASSWORD', 'BASIC_AUTH']) {
-            expect(isSecretEnvironmentVariable(name, 'x')).toBe(true);
+        for (const name of [
+            'DB_PASSWORD', 'JWT_SECRET', 'GITHUB_TOKEN', 'API_KEY', 'STRIPE_APIKEY', 'KEY', 'AWS_SECRET_ACCESS_KEY', 'PRIVATE_KEY_PATH',
+            'SESSION_COOKIE', 'SENTRY_DSN', 'CONNECTION_STRING', 'QCLI_ADMIN_PASSWORD', 'BASIC_AUTH', 'TERM_SESSION_ID', 'SSH_PASSPHRASE',
+            'DB_PASS', 'MONGO_CONN', 'REDIS_CONNSTR', 'GPG_KEYRING', 'ssh_auth_sock', 'Oauth_Client', 'X_CREDENTIALS',
+        ]) {
+            expect(isSecretEnvironmentVariable(name, 'x'), name).toBe(true);
         }
-        for (const name of ['PATH', 'HOME', 'NODE_ENV', 'PORT', 'PWD', 'KEYBOARD', 'MONKEY']) {
+        for (const name of ['PATH', 'HOME', 'NODE_ENV', 'PORT', 'PWD', 'HOST', 'TZ', 'LANG', 'QCLI_PORT']) {
             expect(isSecretEnvironmentVariable(name, 'x')).toBe(false);
         }
         expect(isSecretEnvironmentVariable('DATABASE_URL', 'postgres://user:pw@db:5432/app')).toBe(true);
         expect(isSecretEnvironmentVariable('DATABASE_URL', 'postgres://db:5432/app')).toBe(false);
+        expect(isSecretEnvironmentVariable('UPSTREAM', 'https://admin:hunter2@example.com/x')).toBe(true);
+        expect(isSecretEnvironmentVariable('UPSTREAM', 'https://user@example.com/x')).toBe(false);
         expect(isSecretEnvironmentVariable('MY_THING', 'x', ['MY_*'])).toBe(true);
+    });
+
+    it('shows only QCLI_* and a few harmless variables by default; allow adds names, secrets still masked', () => {
+        expect([...DEFAULT_ENVIRONMENT_ALLOW]).toEqual(['QCLI_*', 'NODE_ENV', 'PORT', 'HOST', 'TZ', 'LANG']);
+        const env = {
+            PATH: '/usr/bin', HOME: '/home/x', TERM_SESSION_ID: 'abc', SSH_AUTH_SOCK: '/tmp/ssh', AWS_ACCESS_KEY_ID: 'AKIA',
+            NODE_ENV: 'production', PORT: '8047', HOST: '0.0.0.0', TZ: 'UTC', LANG: 'en_US.UTF-8', QCLI_URL: 'https://a:b@x.io', QCLI_MODE: 'demo', APP_REGION: 'eu',
+        };
+        const keys = (o: object) => new CliHostConfigProvider(() => [], o, env).getSections()[1].entries.map((e) => e.key);
+        expect(keys({})).toEqual(['HOST', 'LANG', 'NODE_ENV', 'PORT', 'QCLI_MODE', 'QCLI_URL', 'TZ']);
+        expect(keys({ allow: ['APP_*', 'TERM_SESSION_ID'] })).toEqual(['APP_REGION', 'HOST', 'LANG', 'NODE_ENV', 'PORT', 'QCLI_MODE', 'QCLI_URL', 'TERM_SESSION_ID', 'TZ']);
+        const entries = new CliHostConfigProvider(() => [], { allow: ['TERM_SESSION_ID'] }, env).getSections()[1].entries;
+        expect(entries.find((e) => e.key === 'TERM_SESSION_ID')).toMatchObject({ type: 'secret', value: null, isSet: true });
+        expect(entries.find((e) => e.key === 'QCLI_URL')).toMatchObject({ type: 'secret', value: null });
+        expect(entries.find((e) => e.key === 'QCLI_MODE')).toMatchObject({ value: 'demo' });
+        expect(JSON.stringify(entries)).not.toMatch(/\/usr\/bin|abc|AKIA|a:b@/);
     });
 
     it('lists the environment sorted, masks secrets, include / exclude', () => {
         const env = { ZED: 'z', ALPHA: 'a', DB_PASSWORD: 'hunter2', EMPTY_TOKEN: '', npm_config_x: '1', DATABASE_URL: 'mysql://u:p@h/db', QCLI_PORT: '8047' };
-        const host = new CliHostConfigProvider(() => [{ key: 'basePath', value: '/api/qcli' }], {}, env);
+        const host = new CliHostConfigProvider(() => [{ key: 'basePath', value: '/api/qcli' }], { include: ['*'] }, env);
         const [options, environment] = host.getSections();
         expect(options.entries).toEqual([{ key: 'basePath', type: 'string', value: '/api/qcli' }]);
         expect(environment.entries.map((e) => e.key)).toEqual(['ALPHA', 'DATABASE_URL', 'DB_PASSWORD', 'EMPTY_TOKEN', 'QCLI_PORT', 'ZED']);

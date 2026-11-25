@@ -204,7 +204,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
 | `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
 | `mcp` | off | `true` or `{ tools, exclude, token, instructions, readOnly, enabled }` (see [MCP](#mcp-endpoint)) |
-| `config` | in memory | `{ store, environment, command }`: the store of writable settings, the environment variables the `host` provider lists, the `config` command (default on); see [Config providers](#config-providers) |
+| `config` | in memory | `{ store, environment, command }`: the store of writable settings, the environment variables the `host` provider lists (an allowlist: `QCLI_*`, NODE_ENV, PORT, HOST, TZ, LANG; `allow` adds names), the `config` command (default on); see [Config providers](#config-providers) |
 | `cliRoutes` | `true` | `false` serves none of the CLI's routes and sockets (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`, `basePath`, MCP, `/ws/*`): for a service that only hosts its own routes (see the users plugin's [guard-only mode](plugins/users/README.md#guard-only-mode)). `mountPlugin` then mounts only plugins with `cliRoutes: false` and logs `[qcli] CLI routes are turned off; <prefix> is not mounted` for the others (the admin dashboard is not served either); a guard-only users plugin is accepted only there (`guard-only needs cliRoutes: false`); the catalog, events and installed plugins stay |
 | `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
@@ -801,7 +801,7 @@ server only.
 |---|---|---|---|
 | `server` | 0 | `runtime`: platform, platformVersion, version, nodeEnv, pid, hostname, os, startedAt, uptime | no |
 | `auth` (admin plugin) | 10 | `admin`: mode (`password`, `users`, `external`), username, defaultCredentials, jwtSecretConfigured, signInUrl | no |
-| `host` | 20 | `options`: basePath, cliRoutes, enableShell, shellAuth, trustProxy, maxTableRows, protected; `environment`: the environment variables, secrets masked | no |
+| `host` | 20 | `options`: basePath, cliRoutes, enableShell, shellAuth, trustProxy, maxTableRows, protected; `environment`: the allowed environment variables, secrets masked | no |
 | `cors` | 30 | `cors`: mode (read-only), allowedOrigins | allowedOrigins: CORS (in `origins` mode), WebSocket upgrades, the MCP endpoint and CSRF checks follow it at once |
 | `mcp` | 40 | `mcp`: enabled, path (read-only), tools, exclude, instructions, readOnly | when MCP is on |
 | `filesystem` | 50 | `filesystem`: storage, allowedPaths (read-only), maxUploadBytes | maxUploadBytes |
@@ -810,10 +810,14 @@ server only.
 | `logs` (admin plugin) | 80 | `buffer`: capacity (100-100000), minLevel | yes |
 | `custom` | 1000 | `custom`: free keys (the admin plugin's former `custom` section) | yes |
 
-The `host` provider lists every environment variable but `npm_*`; a variable is a secret (value never returned,
-`isSet` only) when its name contains SECRET, PASSWORD, PASSWD, TOKEN, KEY (as a word: `API_KEY`, `KEY_ID`),
-PRIVATE, CREDENTIAL, AUTH, DSN, CONNECTION STRING, COOKIE, SALT, SIGNATURE or CERT, or its value is a URL with
-credentials. Narrow it with `createCliServer({ config: { environment: { include: ['QCLI_*', 'PORT'], exclude: [], secrets: ['MY_*'] } } })`.
+The `host` provider lists only an allowlist of environment variables: `QCLI_*`, `NODE_ENV`, `PORT`, `HOST`, `TZ` and
+`LANG` (`DEFAULT_ENVIRONMENT_ALLOW`); PATH, session ids, socket paths and the rest stay out. Add names with
+`createCliServer({ config: { environment: { allow: ['APP_*', 'REGION'] } } })`, or replace the list with `include`
+(`include: ['*']` shows every variable; `exclude`, default `npm_*`, applies after it). A variable that is shown is a
+secret (value never returned, `isSet` only) when its name contains SECRET, PASS (PASSWORD, PASSWD, PASSPHRASE), PWD_,
+TOKEN, KEY, SESSION, CREDENTIAL, AUTH, PRIVATE, CONN (CONNECTION, CONNSTR), DSN, COOKIE, SALT, SIGNATURE or CERT, in any
+case, when it matches a `secrets` pattern (`secrets: ['MY_*']`), or when its value is a URL with credentials
+(`scheme://user:password@host`).
 The filesystem roots stay read-only on purpose: widening what the server may read is a deployment decision.
 
 ### API

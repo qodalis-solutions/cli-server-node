@@ -1,8 +1,19 @@
 import type { CliConfigEntry, CliConfigSection, CliConfigValue, ICliConfigProvider } from '@qodalis/cli-server-abstractions';
 
+/**
+ * The environment variables the `host` provider shows by default: the server's own (`QCLI_*`) and a few harmless
+ * ones. Everything else (PATH, session ids, socket paths, cloud credentials, ...) stays out unless allowed.
+ */
+export const DEFAULT_ENVIRONMENT_ALLOW: readonly string[] = ['QCLI_*', 'NODE_ENV', 'PORT', 'HOST', 'TZ', 'LANG'];
+
 /** Which environment variables the `host` provider shows (`createCliServer({ config: { environment } })`). */
 export interface CliHostEnvironmentOptions {
-    /** Names to show; `*` matches any run of characters (default `['*']`: every variable). */
+    /** Further names to show, besides {@link DEFAULT_ENVIRONMENT_ALLOW}; `*` matches any run of characters. */
+    allow?: string[];
+    /**
+     * Names to show instead of the default list (and `allow`): replaces it entirely, so `['*']` shows every
+     * variable. Values that look secret are masked either way.
+     */
     include?: string[];
     /** Names to leave out, applied after `include` (default `['npm_*']`). */
     exclude?: string[];
@@ -19,10 +30,11 @@ export interface CliHostOption {
 }
 
 /**
- * Names treated as secrets: anything with SECRET, PASSWORD/PASSWD/PWD_, TOKEN, KEY (API_KEY, _KEY,
- * KEY_), PRIVATE, CREDENTIAL, AUTH, DSN, CONNECTION STRING, COOKIE, SALT, SIGNATURE or CERT in it.
+ * Names treated as secrets: anything with SECRET, PASS (PASSWORD, PASSWD, PASSPHRASE), PWD_, TOKEN, KEY, SESSION,
+ * CREDENTIAL, AUTH, PRIVATE, CONN (CONNECTION, CONNSTR), DSN, COOKIE, SALT, SIGNATURE or CERT in it, anywhere and
+ * in any case. Broad on purpose: a harmless variable masked costs less than a secret shown.
  */
-const SECRET_NAME = /(SECRET|PASSWORD|PASSWD|PWD_|TOKEN|APIKEY|API_KEY|(^|_)KEY($|_)|PRIVATE|CREDENTIAL|AUTH|DSN|CONN(ECTION)?_?STR(ING)?|COOKIE|SALT|SIGNATURE|CERT)/i;
+const SECRET_NAME = /(SECRET|PASS|PWD_|TOKEN|KEY|SESSION|CREDENTIAL|AUTH|PRIVATE|CONN|DSN|COOKIE|SALT|SIGNATURE|CERT)/i;
 
 /** `scheme://user:password@host`: a URL carrying credentials. */
 const URL_WITH_CREDENTIALS = /^[a-z][a-z0-9+.-]*:\/\/[^/\s@]*:[^/\s@]*@/i;
@@ -41,7 +53,8 @@ export function isSecretEnvironmentVariable(name: string, value: string | undefi
 
 /**
  * `host` (read-only): the host's configuration. Section `options`: the options the server was
- * created with; section `environment`: the process environment variables, secrets masked
+ * created with; section `environment`: the allowed environment variables ({@link DEFAULT_ENVIRONMENT_ALLOW} plus
+ * `allow`, or `include`), secrets masked
  * (`value: null`, `isSet: true`; see {@link isSecretEnvironmentVariable}).
  */
 export class CliHostConfigProvider implements ICliConfigProvider {
@@ -58,7 +71,7 @@ export class CliHostConfigProvider implements ICliConfigProvider {
         environment: CliHostEnvironmentOptions = {},
         private readonly env: NodeJS.ProcessEnv = process.env,
     ) {
-        this.include = (environment.include ?? ['*']).map(globToRegExp);
+        this.include = (environment.include ?? [...DEFAULT_ENVIRONMENT_ALLOW, ...(environment.allow ?? [])]).map(globToRegExp);
         this.exclude = (environment.exclude ?? ['npm_*']).map(globToRegExp);
         this.secrets = environment.secrets ?? [];
     }
