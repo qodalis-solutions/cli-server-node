@@ -155,6 +155,7 @@ export const CliServerPermissions = {
     HttpRequest: 'http:request',
     AdminAccess: 'admin:access',
     DashboardInstall: 'dashboard:install',
+    ServerRestart: 'server:restart',
 } as const;
 
 /**

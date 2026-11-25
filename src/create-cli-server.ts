@@ -61,6 +61,7 @@ import {
 } from './config';
 import { ConfigMcpToolProvider } from './mcp/providers/config-provider';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
+import { CliServerRestart, CliServerRestartOptions, createRestartController } from './restart';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -121,6 +122,8 @@ export interface MountablePlugin {
     assetRoutes?: Array<{ prefix: string; handler: (req: Request, res: Response, next: NextFunction) => void }>;
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
     setEventBus?(eventBus: ICliEventBus): void;
+    /** Releases the plugin's resources (timers, pools); called by a restart's graceful shutdown. */
+    dispose?(): unknown;
     /**
      * False for a plugin that serves host routes (public-api, docs, portal): its prefixes
      * are not CLI routes, so host tokens are not refused there, and it is mounted on a
@@ -206,6 +209,13 @@ export interface CliServerOptions {
     cliRoutes?: boolean;
     /** Config providers: the stores of writable settings (default and per provider), what the `host` provider shows, the `config` command. */
     config?: CliServerConfigOptions;
+    /**
+     * Restarting the server from the dashboard, `admin restart` or `POST /api/v1/qcli/server/restart`:
+     * `mode` `auto` (default: `exit` under a detected supervisor, else not supported), `exit` (exit with
+     * `exitCode`, default 75, for Docker, systemd, PM2 or Kubernetes to start it again), `self` (start the same
+     * command again, then exit: bare runs and development) or `handler` (the host's function).
+     */
+    restart?: CliServerRestartOptions;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -276,6 +286,11 @@ export interface CliServerResult {
      * provider applied its stored settings (await it before listening with a database store).
      */
     config: CliConfigService;
+    /**
+     * Restarting the server and the changes waiting for it (same as `builder.restart`): `markRequired`,
+     * `clearRequired`, `status()`, `onShutdown(name, fn)` for the host's own clean-up (pools, stores).
+     */
+    restart: CliServerRestart;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
@@ -289,6 +304,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     }
 
     const app = express();
+    // In-flight requests, which a restart's graceful shutdown waits for (the builder is created below)
+    app.use((req, res, next) => builder.restart.trackRequests(req, res, next));
     const proxyHops = trustedProxyHops(trustProxy);
     if (proxyHops > 0) {
         app.set('trust proxy', proxyHops);
@@ -397,6 +414,21 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         sessionCheckIntervalMs: shell?.sessionCheckIntervalMs,
         cliRoutes,
     });
+    // Restart: the graceful shutdown closes the HTTP server the sockets attach to, then the sockets (1012)
+    const restart: CliServerRestart = builder.restart.configure(options.restart, {
+        eventBus: () => eventBus,
+        audit: () => builder.auditSink,
+        isProtected: () => !!serverAuth?.protectServer,
+        closeSockets: async (code, reason) => {
+            await eventSocketManager.broadcastDisconnect(code, reason);
+            await logSocketManager.broadcastDisconnect(code, reason);
+        },
+    });
+    const attachSockets = eventSocketManager.attach.bind(eventSocketManager);
+    eventSocketManager.attach = (server) => {
+        restart.attachServer(server);
+        attachSockets(server);
+    };
     const shellCapabilities = (): ShellCapabilities => {
         const mode = eventSocketManager.shellAuthMode;
         return mode ? { shell: true, shellAuth: mode } : { shell: false };
@@ -439,6 +471,10 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     if (cliRoutes) {
         // Version discovery endpoint
         app.use('/api/qcli', createCliVersionController({ shellCapabilities }));
+
+        // Restart: GET the status (admin:access), POST restarts (server:restart)
+        routePermissions.push({ path: '/api/v1/qcli/server/restart', read: 'admin:access', write: 'server:restart' });
+        app.use('/api/v1/qcli/server/restart', createRestartController(restart));
 
         // API v1 routes
         app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
@@ -702,6 +738,11 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
         if (isJobScheduler(plugin.scheduler)) {
             serverOptions.jobsEnabled = true;
+            const scheduler = plugin.scheduler as unknown as { stop?: () => unknown };
+            if (typeof scheduler.stop === 'function') restart.onShutdown('job scheduler', () => scheduler.stop!());
+        }
+        if (typeof plugin.dispose === 'function') {
+            restart.onShutdown(`plugin ${plugin.prefix}`, () => plugin.dispose!());
         }
         if (isJobScheduler(plugin.scheduler) && !mcpFeatures.has('jobs')) {
             mcpFeatureProviders.push(new JobsMcpToolProvider(plugin.scheduler, eventBus));
@@ -720,7 +761,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         },
     };
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config, restart };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */

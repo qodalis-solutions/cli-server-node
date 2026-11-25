@@ -94,3 +94,18 @@ export {
 export * from './table-names';
 export { CliCaller, getCliCaller, runAsCliCaller } from './cli-caller';
 export * from './config';
+export {
+    CLI_SERVER_RESTART_PERMISSION,
+    CLI_SERVER_RESTART_REQUIRED_EVENT,
+    CLI_SERVER_RESTARTING_EVENT,
+    CLI_SERVER_RESTART_AUDIT_EVENT,
+    CLI_SERVER_RESTART_CLOSE_CODE,
+    CliServerRestartMode,
+    CliServerSupervisor,
+    CliRestartRequirementInput,
+    CliRestartRequirement,
+    CliServerRestartStatus,
+    CliServerRestartRequest,
+    CliServerRestartError,
+    ICliServerRestart,
+} from './restart';

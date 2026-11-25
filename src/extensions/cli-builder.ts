@@ -19,6 +19,7 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { CliConfigRegistry } from '../config/cli-config-registry';
 import { CliConfigService } from '../config/cli-config-service';
+import { CliServerRestart } from '../restart/cli-server-restart';
 import {
     CliPermissionCatalog,
     CliPermissionInput,
@@ -76,9 +77,17 @@ export class CliBuilder {
      * `config_*` MCP tools): providers filtered by permission, secrets masked, changes validated,
      * audited (`config.update`) and published (`config:changed`).
      */
+    /**
+     * Restarting the server (`/api/v1/qcli/server/restart`, `admin restart`) and the changes waiting for it:
+     * plugins mark theirs with `restart.markRequired({ id, source, description })`; the config service marks
+     * the settings with `requiresRestart`.
+     */
+    readonly restart = new CliServerRestart();
+
     readonly config: CliConfigService = new CliConfigService(this.configRegistry, {
         audit: () => this.auditSink,
         eventBus: () => this._configEventBus?.(),
+        restart: () => this.restart,
     });
 
     /**

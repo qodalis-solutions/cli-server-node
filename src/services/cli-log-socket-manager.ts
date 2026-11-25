@@ -205,7 +205,7 @@ export class CliLogSocketManager {
     /**
      * Send a disconnect message to all clients and close connections.
      */
-    async broadcastDisconnect(): Promise<void> {
+    async broadcastDisconnect(code = 1000, reason = 'Server shutting down'): Promise<void> {
         logger.info('Broadcasting disconnect to %d log clients', this._clients.size);
         const disconnectMsg = JSON.stringify({ type: 'disconnect' });
         const promises: Promise<void>[] = [];
@@ -215,7 +215,7 @@ export class CliLogSocketManager {
                 promises.push(
                     new Promise<void>((resolve) => {
                         entry.ws.send(disconnectMsg, () => {
-                            entry.ws.close(1000, 'Server shutting down');
+                            entry.ws.close(code, reason);
                             resolve();
                         });
                     }),

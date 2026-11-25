@@ -315,9 +315,10 @@ export class CliEventSocketManager {
     }
 
     /**
-     * Broadcast a disconnect event to all connected clients and close sockets.
+     * Broadcast a disconnect event to all connected clients and close sockets (with `code`: 1000 on shutdown,
+     * 1012 on a restart), shell sessions included.
      */
-    async broadcastDisconnect(): Promise<void> {
+    async broadcastDisconnect(code = 1000, reason = 'Server shutting down'): Promise<void> {
         logger.info('Broadcasting disconnect to %d clients', this._clients.size);
         const message = JSON.stringify({ type: 'disconnect' });
 
@@ -328,7 +329,7 @@ export class CliEventSocketManager {
                 promises.push(
                     new Promise<void>((resolve) => {
                         ws.send(message, () => {
-                            ws.close(1000, 'Server shutting down');
+                            ws.close(code, reason);
                             resolve();
                         });
                     }),
@@ -337,7 +338,8 @@ export class CliEventSocketManager {
         }
 
         await Promise.all(promises);
-        this._shellManager.dispose();
+        if (code === 1000) this._shellManager.dispose();
+        else this._shellManager.dispose(code, reason);
         this._sessionBound.dispose();
         this._clients.clear();
         this._clientMeta.clear();

@@ -262,3 +262,32 @@ export { Logger, createLogger } from './utils/logger';
 // Server factory
 export { getCliCaller, runAsCliCaller } from './auth/cli-caller';
 export { createCliServer, CliServerOptions, CliServerResult, CliServerMcp, MountablePlugin } from './create-cli-server';
+
+// Restart: the pending list, the modes and the graceful shutdown
+export {
+    CliServerRestart,
+    CliServerRestartOptions,
+    CliServerRestartContext,
+    CliServerRestartRuntime,
+    CliServerRestartServices,
+    DEFAULT_RESTART_EXIT_CODE,
+    DEFAULT_RESTART_DRAIN_TIMEOUT_MS,
+    RESTART_NOT_SUPPORTED,
+    detectSupervisor,
+    createRestartController,
+} from './restart';
+export {
+    CLI_SERVER_RESTART_PERMISSION,
+    CLI_SERVER_RESTART_REQUIRED_EVENT,
+    CLI_SERVER_RESTARTING_EVENT,
+    CLI_SERVER_RESTART_AUDIT_EVENT,
+    CLI_SERVER_RESTART_CLOSE_CODE,
+    CliServerRestartMode,
+    CliServerSupervisor,
+    CliRestartRequirement,
+    CliRestartRequirementInput,
+    CliServerRestartStatus,
+    CliServerRestartRequest,
+    CliServerRestartError,
+    ICliServerRestart,
+} from '@qodalis/cli-server-abstractions';

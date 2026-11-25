@@ -578,10 +578,10 @@ export class CliShellSessionManager {
             .catch((err) => logger.error('Shell audit failed: %s', err?.message ?? err));
     }
 
-    /** Closes every open shell (server shutdown). */
-    dispose(): void {
+    /** Closes every open shell (server shutdown: 1001; a restart passes 1012). */
+    dispose(code = 1001, reason = 'server shutdown'): void {
         for (const s of [...this._sessions]) {
-            this.end(s, 1001, 'server shutdown', 'server shutdown');
+            this.end(s, code, reason, reason);
         }
         if (this._checkTimer) clearInterval(this._checkTimer);
         this._checkTimer = undefined;

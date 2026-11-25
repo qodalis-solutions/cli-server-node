@@ -27,6 +27,7 @@ import {
     type ICliConfigProvider,
     type ICliConfigService,
     type ICliEventBus,
+    type ICliServerRestart,
 } from '@qodalis/cli-server-abstractions';
 import { CliConfigRegistry, DEFAULT_CONFIG_PROVIDER_ORDER } from './cli-config-registry';
 import { createLogger } from '../utils/logger';
@@ -41,6 +42,8 @@ export interface CliConfigServiceOptions {
     audit?: () => CliConfigAuditSink | undefined;
     /** The event bus `config:changed` is published on, read on every change. */
     eventBus?: () => ICliEventBus | undefined;
+    /** The restart service: a change to a `requiresRestart` entry is marked pending (`config:<provider>.<section>.<key>`). */
+    restart?: () => ICliServerRestart | undefined;
 }
 
 /** One change of an audit entry: secrets as `***` (or null when unset). */
@@ -120,6 +123,9 @@ function auditValue(view: CliConfigEntryView | undefined, raw: CliConfigValue | 
  * tools all go through it.
  */
 export class CliConfigService implements ICliConfigService {
+    /** The value of each `requiresRestart` entry changed so far, as it was at start (by pending id). */
+    private readonly startValues = new Map<string, string>();
+
     constructor(
         readonly registry: CliConfigRegistry,
         private readonly options: CliConfigServiceOptions = {},
@@ -270,6 +276,7 @@ export class CliConfigService implements ICliConfigService {
             const raw = (changes as Record<string, CliConfigValue>)[key];
             return { key, old: auditValue(old, undefined, 'old'), new: now || raw !== null ? auditValue(now ?? old, raw, 'new') : null };
         });
+        this.trackRestart(provider, sectionId, result.applied, before, after);
         const storeKind = this.describeProviderStore(provider)?.kind;
         await this.audit(provider.id, sectionId, result.version, auditChanges, context, storeKind);
         await this.options.eventBus?.()?.publish(
@@ -292,6 +299,36 @@ export class CliConfigService implements ICliConfigService {
             requiresRestart: result.requiresRestart,
             version: result.version,
         };
+    }
+
+    /**
+     * Marks a changed `requiresRestart` entry as waiting for a restart, and clears it when its value is set
+     * back to what it was at start (a secret, whose value is never seen, stays marked).
+     */
+    private trackRestart(
+        provider: ICliConfigProvider,
+        sectionId: string,
+        applied: readonly string[],
+        before: CliConfigSectionView,
+        after: CliConfigSectionView,
+    ): void {
+        const restart = this.options.restart?.();
+        if (!restart) return;
+        for (const key of applied) {
+            const old = before.entries.find((e) => e.key === key);
+            const now = after.entries.find((e) => e.key === key);
+            if (!old?.requiresRestart && !now?.requiresRestart) continue;
+            const id = `config:${provider.id}.${sectionId}.${key}`;
+            const sensitive = !!(old?.sensitive || now?.sensitive);
+            if (!this.startValues.has(id)) this.startValues.set(id, JSON.stringify(old?.value ?? null));
+            const unchanged = !sensitive && JSON.stringify(now?.value ?? null) === this.startValues.get(id);
+            try {
+                if (unchanged) restart.clearRequired(id);
+                else restart.markRequired({ id, source: 'config', description: `${provider.title}: ${(now ?? old)?.label ?? key} changed` });
+            } catch (err) {
+                logger.error('Marking a restart failed: %s', (err as Error)?.message ?? err);
+            }
+        }
     }
 
     private async audit(
