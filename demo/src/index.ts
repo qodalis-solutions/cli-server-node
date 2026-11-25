@@ -7,11 +7,7 @@ import {
     CliStoredConfigProvider,
     JsonFileConfigStore,
 } from '@qodalis/cli-server-node';
-import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
-import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
-import { CliTimeCommandProcessor } from './processors/cli-time-command-processor';
-import { CliHelloCommandProcessor } from './processors/cli-hello-command-processor';
-import { CliMathCommandProcessor } from './processors/cli-math-command-processor';
+import { DemoModule } from './demo-module';
 import { WeatherModule } from '@qodalis/cli-server-plugin-weather';
 import { SqlDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-sql';
 import { PostgresDataExplorerProvider } from '@qodalis/cli-server-plugin-data-explorer-postgres';
@@ -112,11 +108,7 @@ const { app, registry, builder, executor, eventSocketManager, logSocketManager, 
     configure: (builder) => {
         builder.addConfigProvider(demoConfig);
         builder
-            .addProcessor(new CliEchoCommandProcessor())
-            .addProcessor(new CliStatusCommandProcessor())
-            .addProcessor(new CliTimeCommandProcessor())
-            .addProcessor(new CliHelloCommandProcessor())
-            .addProcessor(new CliMathCommandProcessor())
+            .addModule(new DemoModule())
             .addProcessor(new CliSystemCommandProcessor())
             .addProcessor(new CliHttpCommandProcessor())
             .addProcessor(new CliHashCommandProcessor())
