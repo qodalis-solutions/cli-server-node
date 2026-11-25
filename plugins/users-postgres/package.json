@@ -37,5 +37,13 @@
     "devDependencies": {
         "@types/pg": "^8.0.0",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "users-postgres",
+        "autoInstall": false,
+        "autoInstallReason": "the users plugin's stores in PostgreSQL: passed to CliUsersBuilder in code",
+        "title": "Users on PostgreSQL",
+        "icon": "🐘"
     }
 }

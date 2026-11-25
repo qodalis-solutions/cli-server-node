@@ -45,5 +45,13 @@
     "devDependencies": {
         "@types/express": "^4.17.21",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "databases",
+        "autoInstall": false,
+        "autoInstallReason": "registers the host's databases (connection pools) and their migrations: set up in code (CliDatabasesBuilder)",
+        "title": "Databases",
+        "icon": "🗄️"
     }
 }

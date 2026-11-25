@@ -43,5 +43,13 @@
     "devDependencies": {
         "@types/express": "^4.17.21",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "users",
+        "autoInstall": false,
+        "autoInstallReason": "replaces the server's sign-in (an auth provider for every route and socket): set up in code (CliUsersBuilder, mountPlugin)",
+        "title": "Users",
+        "icon": "👥"
     }
 }

@@ -36,5 +36,13 @@
     "devDependencies": {
         "@types/express": "^4.17.21",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "data-explorer",
+        "autoInstall": false,
+        "autoInstallReason": "part of the server: install a source instead (data-explorer-postgres, -mysql, -mssql, -mongo, -redis, -elasticsearch, -sql)",
+        "title": "Data explorer",
+        "icon": "🔍"
     }
 }

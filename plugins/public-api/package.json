@@ -38,5 +38,13 @@
     "devDependencies": {
         "@types/express": "^4.17.21",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "public-api",
+        "autoInstall": false,
+        "autoInstallReason": "publishes the host's own API routes with tokens and quotas, and needs the users plugin: set up in code",
+        "title": "Public API",
+        "icon": "🌐"
     }
 }
