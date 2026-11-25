@@ -230,12 +230,22 @@ export class CliBuilder {
     }
 
     /**
-     * Keeps writable settings in `store` (default in memory, lost on restart): a
-     * `JsonFileConfigStore`, or the databases plugin's `CliDatabaseConfigStore`. Set it in
-     * `configure`, before the server is created.
+     * Keeps writable settings in `store`: a `JsonFileConfigStore` (a file, or a section of the
+     * app's settings file), the databases plugin's `CliDatabaseConfigStore`, the config-redis
+     * plugin's `CliRedisConfigStore`, ...
+     *
+     * - Without `providerId`: the default store, for every provider without a store of its own
+     *   (in memory, lost on restart, unless set). Set it in `configure`, before the server is created.
+     * - With `providerId`: the store of that provider only, winning over its own store. Set it
+     *   before the provider is registered (in `configure` for plugins mounted later).
+     *
+     * ```ts
+     * builder.setConfigStore(new JsonFileConfigStore('config.json'));
+     * builder.setConfigStore(new CliRedisConfigStore({ url: process.env.REDIS_URL }), 'jobs');
+     * ```
      */
-    setConfigStore(store: ICliConfigStore): CliBuilder {
-        this.configRegistry.setStore(store);
+    setConfigStore(store: ICliConfigStore, providerId?: string): CliBuilder {
+        this.configRegistry.setStore(store, providerId);
         return this;
     }
 

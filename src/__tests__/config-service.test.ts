@@ -82,9 +82,9 @@ describe('CliConfigRegistry', () => {
         expect(r.providers.map((p) => p.id)).toEqual(['first', 'alpha', 'zeta', 'last']);
     });
 
-    it('the store: in memory by default, set before start, attached to stored providers (also those added later)', async () => {
+    it('the default store: in memory by default, set before start, attached to stored providers (also those added later)', async () => {
         const r = new CliConfigRegistry();
-        expect(r.store.source).toBe('runtime');
+        expect(r.defaultStore.source).toBe('runtime');
         const store = new InMemoryConfigStore();
         await store.write('app', 'main', { limit: 9 });
         await store.write('custom', 'custom', { a: 1 });
@@ -365,6 +365,7 @@ describe('CliConfigService: audit and event', () => {
             provider: 'app',
             section: 'main',
             version: '1',
+            store: 'memory',
             via: 'api',
             changes: [
                 { key: 'limit', old: 5, new: 8 },
@@ -412,7 +413,7 @@ describe('CliConfigService: audit and event', () => {
         expect(events).toHaveLength(1);
         expect(events[0].type).toBe('config:changed');
         expect(events[0].audience).toEqual({ permission: 'config:read' });
-        expect(events[0].data).toEqual({ provider: 'app', section: 'main', keys: ['apiKey', 'limit'], version: '1', requiresRestart: false, user: 'ann' });
+        expect(events[0].data).toEqual({ provider: 'app', section: 'main', keys: ['apiKey', 'limit'], version: '1', requiresRestart: false, store: 'memory', user: 'ann' });
         expect(JSON.stringify(events)).not.toContain('shh');
     });
 

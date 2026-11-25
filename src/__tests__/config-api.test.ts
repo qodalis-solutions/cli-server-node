@@ -76,10 +76,10 @@ describe('config API on an open server (static admin)', () => {
         const ids = res.body.providers.map((p: any) => p.id);
         expect(ids).toEqual(['server', 'auth', 'host', 'cors', 'mcp', 'jobs', 'logs', 'billing', 'custom']);
         const billingView = res.body.providers.find((p: any) => p.id === 'billing');
-        expect(Object.keys(res.body).sort()).toEqual(['providers', 'store']);
-        expect(res.body.store).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
-        expect(Object.keys(billingView).sort()).toEqual(['description', 'id', 'order', 'sections', 'storage', 'title', 'writable']);
-        expect(billingView.storage).toEqual({ kind: 'store', description: 'Changes are saved to the config store', sources: [] });
+        expect(Object.keys(res.body).sort()).toEqual(['defaultStore', 'providers']);
+        expect(res.body.defaultStore).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
+        expect(Object.keys(billingView).sort()).toEqual(['description', 'id', 'order', 'sections', 'storage', 'store', 'title', 'writable']);
+        expect(billingView.storage).toEqual({ kind: 'store', description: 'Changes are saved to its config store', sources: [] });
         const storage = Object.fromEntries(res.body.providers.map((p: any) => [p.id, p.storage]));
         expect(storage.server).toEqual({ kind: 'runtime', description: 'Read from the running server process', sources: [] });
         expect(storage.host).toEqual({ kind: 'options', description: 'Server options and environment variables', sources: ['Server options', 'Environment variables'] });

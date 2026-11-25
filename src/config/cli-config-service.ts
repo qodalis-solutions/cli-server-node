@@ -115,8 +115,9 @@ function auditValue(view: CliConfigEntryView | undefined, raw: CliConfigValue | 
 
 /**
  * The server's config providers, read and changed with permissions, validation, conflicts,
- * secrets masked, audit (`config.update`) and events (`config:changed`): the HTTP API (admin
- * plugin), the `config` command and the MCP tools all go through it.
+ * secrets masked, audit (`config.update`) and events (`config:changed`), each stored provider
+ * with the store it saves to: the HTTP API (admin plugin), the `config` command and the MCP
+ * tools all go through it.
  */
 export class CliConfigService implements ICliConfigService {
     constructor(
@@ -151,6 +152,7 @@ export class CliConfigService implements ICliConfigService {
     private async view(provider: ICliConfigProvider, context: CliConfigContext): Promise<CliConfigProviderView> {
         const writer = isCliConfigWriter(provider);
         const sections = await provider.getSections(context);
+        const store = this.describeProviderStore(provider);
         return {
             id: provider.id,
             title: provider.title,
@@ -158,13 +160,20 @@ export class CliConfigService implements ICliConfigService {
             order: provider.order ?? DEFAULT_CONFIG_PROVIDER_ORDER,
             writable: writer && context.hasPermission(CliConfigPermissions.Write),
             storage: cliConfigProviderStorageOf(provider),
+            ...(store ? { store } : {}),
             sections: (sections ?? []).map((s) => toCliConfigSectionView(s, writer)),
         };
     }
 
-    /** Where writable settings are saved: the store's own description (`custom` when it has none). */
-    describeStore(): CliConfigStoreDescription {
-        return describeCliConfigStore(this.registry.store);
+    /** The store providers use unless they have their own: its own description (`custom` when it has none). */
+    describeDefaultStore(): CliConfigStoreDescription {
+        return describeCliConfigStore(this.registry.defaultStore);
+    }
+
+    /** The store a provider's changes are saved to; undefined for a provider without one (read-only, or saving itself). */
+    describeProviderStore(provider: ICliConfigProvider | string): CliConfigStoreDescription | undefined {
+        const store = this.registry.storeOf(provider);
+        return store ? describeCliConfigStore(store) : undefined;
     }
 
     async list(context: CliConfigContext): Promise<CliConfigProviderView[]> {
@@ -261,7 +270,8 @@ export class CliConfigService implements ICliConfigService {
             const raw = (changes as Record<string, CliConfigValue>)[key];
             return { key, old: auditValue(old, undefined, 'old'), new: now || raw !== null ? auditValue(now ?? old, raw, 'new') : null };
         });
-        await this.audit(provider.id, sectionId, result.version, auditChanges, context);
+        const storeKind = this.describeProviderStore(provider)?.kind;
+        await this.audit(provider.id, sectionId, result.version, auditChanges, context, storeKind);
         await this.options.eventBus?.()?.publish(
             CLI_CONFIG_CHANGED_EVENT,
             {
@@ -270,6 +280,7 @@ export class CliConfigService implements ICliConfigService {
                 keys: [...result.applied],
                 version: result.version,
                 requiresRestart: result.requiresRestart,
+                ...(storeKind ? { store: storeKind } : {}),
                 ...(context.caller?.userName ? { user: context.caller.userName } : {}),
             },
             { permission: CliConfigPermissions.Read },
@@ -289,6 +300,7 @@ export class CliConfigService implements ICliConfigService {
         version: string,
         changes: CliConfigAuditChange[],
         context: CliConfigContext,
+        storeKind: string | undefined,
     ): Promise<void> {
         const sink = this.options.audit?.();
         if (!sink) return;
@@ -306,6 +318,7 @@ export class CliConfigService implements ICliConfigService {
                     provider: providerId,
                     section: sectionId,
                     version,
+                    ...(storeKind ? { store: storeKind } : {}),
                     ...(context.via ? { via: context.via } : {}),
                     changes,
                 },

@@ -80,10 +80,11 @@ describe('config command (open server)', () => {
 
     it('config / config list: providers and sections', async () => {
         const { text } = await run(cli, 'config list');
-        expect(text.split('\n')[0]).toBe('Store: In memory, changes are lost on restart');
+        expect(text.split('\n')[0]).toBe('Default store: In memory, changes are lost on restart');
         expect(text).toContain('server  Server  (read-only)');
         expect(text).toContain('host  Host  (read-only; from Server options, Environment variables)');
-        expect(text).toMatch(/app {2}App\n {2}main +7 setting\(s\) {2}version 0\n {2}main\.extra +1 setting\(s\) {2}version 0/);
+        expect(text).toMatch(/app {2}App {2}· In memory\n {2}main +7 setting\(s\) {2}version 0\n {2}main\.extra +1 setting\(s\) {2}version 0/);
+        expect(text).toContain('custom  Custom  · In memory');
         expect((await run(cli, 'config')).text).toBe(text);
     });
 
@@ -198,7 +199,7 @@ describe('config list: where changes are saved', () => {
     it('a JSON file outside the app: its name only, kept across restarts', async () => {
         const cli = createCliServer({ config: { store: new JsonFileConfigStore(path.join(dir, 'qcli-demo-config.json')) } });
         const { text } = await run(cli, 'config list');
-        expect(text.split('\n')[0]).toBe('Store: JSON file (qcli-demo-config.json), kept across restarts');
+        expect(text.split('\n')[0]).toBe('Default store: JSON file (qcli-demo-config.json), kept across restarts');
         expect(text).not.toContain(dir);
     });
 
@@ -209,7 +210,7 @@ describe('config list: where changes are saved', () => {
         const store = new VaultStore();
         (store as { describe?: unknown }).describe = undefined;
         const cli = createCliServer({ config: { store } });
-        expect((await run(cli, 'config list')).text.split('\n')[0]).toBe('Store: Custom store (VaultStore), kept across restarts');
+        expect((await run(cli, 'config list')).text.split('\n')[0]).toBe('Default store: Custom store (VaultStore), kept across restarts');
     });
 });
 

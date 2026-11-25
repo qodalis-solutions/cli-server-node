@@ -198,7 +198,7 @@ export interface CliServerOptions {
      * catalog, the event bus and installed plugins stay.
      */
     cliRoutes?: boolean;
-    /** Config providers: the store of writable settings, what the `host` provider shows, the `config` command. */
+    /** Config providers: the stores of writable settings (default and per provider), what the `host` provider shows, the `config` command. */
     config?: CliServerConfigOptions;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
@@ -206,8 +206,17 @@ export interface CliServerOptions {
 
 /** The `config` option of `createCliServer`. */
 export interface CliServerConfigOptions {
-    /** Where writable settings are kept (default in memory); same as `builder.setConfigStore`. */
+    /**
+     * The default store: where the writable settings of every provider without its own store are
+     * kept (default in memory); same as `builder.setConfigStore(store)`.
+     */
     store?: ICliConfigStore;
+    /**
+     * A store per provider id, winning over the provider's own and the default store:
+     * `{ jobs: redisStore, users: databaseStore }`; same as `builder.setConfigStore(store, id)`.
+     * A store may be given to several providers.
+     */
+    stores?: Record<string, ICliConfigStore>;
     /** Which environment variables the `host` provider lists (default `QCLI_*`, NODE_ENV, PORT, HOST, TZ, LANG; `allow` adds names), secrets masked. */
     environment?: CliHostEnvironmentOptions;
     /** Register the `config` command (default true). */
@@ -328,6 +337,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
     if (options.config?.store) builder.setConfigStore(options.config.store);
+    for (const [providerId, store] of Object.entries(options.config?.stores ?? {})) builder.setConfigStore(store, providerId);
 
     // Server-wide auth gate (no-op until an auth provider is installed)
     let serverAuth: ICliServerAuth | undefined;

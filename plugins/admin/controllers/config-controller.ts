@@ -38,7 +38,7 @@ function sendError(res: Response, err: unknown): void {
 /**
  * The config API over the server's config providers (`builder.config`):
  *
- * - `GET /` — `{ store, providers: [...] }`: where changes are saved, and the providers the caller may see (`config:read`)
+ * - `GET /` — `{ defaultStore, providers: [...] }`: the store providers use unless they have their own, and the providers the caller may see (`config:read`), each stored one with its `store`
  * - `GET /:provider` — one provider
  * - `PATCH /:provider/:section` — `{ changes, version? }` (`config:write`): 200 with the section,
  *   400 `{ error, errors }` per key, 403, 404, 409 `{ error, version }` when the version is stale
@@ -58,7 +58,7 @@ export function createConfigController(getService: () => ICliConfigService | und
         try {
             res.setHeader('Cache-Control', 'no-store');
             const providers = await s.list(configContextOf(req));
-            res.json({ store: s.describeStore(), providers });
+            res.json({ defaultStore: s.describeDefaultStore(), providers });
         } catch (err) {
             sendError(res, err);
         }

@@ -56,10 +56,10 @@ describe('config MCP tools (open server)', () => {
         expect(tools.map((t: any) => t.name).filter((n: string) => n.startsWith('config'))).toEqual(['config_list', 'config_get', 'config_set']);
     });
 
-    it('config_list: the store, providers (with where they read from) and section summaries', async () => {
+    it('config_list: the default store, providers (with where they read from) and section summaries', async () => {
         const res = await call(cli, 'config_list');
         expect(res.result.isError).toBe(false);
-        expect(res.result.structuredContent.store).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
+        expect(res.result.structuredContent.defaultStore).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
         const providers = res.result.structuredContent.providers;
         expect(providers.map((p: any) => p.id)).toEqual(['server', 'host', 'cors', 'mcp', 'app', 'custom']);
         expect(providers.find((p: any) => p.id === 'app')).toEqual({
@@ -67,9 +67,12 @@ describe('config MCP tools (open server)', () => {
             title: 'App',
             description: '',
             writable: true,
-            storage: { kind: 'store', description: 'Changes are saved to the config store', sources: [] },
+            storage: { kind: 'store', description: 'Changes are saved to its config store', sources: [] },
+            store: { kind: 'memory', title: 'In memory', detail: '', persistent: false },
             sections: [{ id: 'main', title: 'main', mutable: true, version: '0', keys: 2 }],
         });
+        // Read-only providers have no store
+        expect(providers.find((p: any) => p.id === 'server').store).toBeUndefined();
     });
 
     it('config_get: a provider, a section, an entry; unknown ones are errors', async () => {
