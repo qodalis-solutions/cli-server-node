@@ -54,7 +54,7 @@ process.on('SIGINT', async () => {
 
 Point the web terminal at `http://localhost:8047` and type `greet Alice`.
 
-Run the standalone server instead (built-in processors plus the weather module):
+Run the standalone server instead (the built-in `http` command plus the weather module):
 
 ```bash
 npx -p @qodalis/cli-server-node qodalis-cli-server
@@ -586,7 +586,7 @@ class MyCommand extends CliCommandProcessor {
 
 ## Permission catalog and host tokens
 
-The server keeps a catalog of the permissions it knows: `{ name, description, group, surface }`, `surface` being `cli` (the CLI's routes) or `host` (your application's routes). Core registers the 11 permissions its route policy checks (`commands:execute`, `shell:execute`, `files:read`, `files:write`, `data:query`, `jobs:read`, `jobs:manage`, `logs:read`, `admin:access`, `audit:read`, `audit:clear`), the users plugin its 12 when mounted, and you add the permissions your own routes check:
+The server keeps a catalog of the permissions it knows: `{ name, description, group, surface }`, `surface` being `cli` (the CLI's routes) or `host` (your application's routes). Core registers the permissions its route policy and commands check (`commands:execute`, `shell:execute`, `http:request`, `files:read`, `files:write`, `data:query`, `jobs:read`, `jobs:manage`, `logs:read`, `admin:access`, `audit:read`, `audit:clear`), the users plugin its 12 when mounted, and you add the permissions your own routes check:
 
 ```typescript
 const cli = createCliServer({
@@ -997,16 +997,18 @@ and audit (`adduser`, `token`, `link approve`, `audit`, ..., `@qodalis/cli-users
 
 ## Built-in processors
 
-| Command | Description |
-|---|---|
-| `echo` | Echoes input text |
-| `status` | Server status (uptime, OS) |
-| `system` | System information (memory, CPU, uptime) |
-| `http` | HTTP `get` / `post` requests |
-| `hash` | MD5, SHA1, SHA256, SHA512 |
-| `base64` | `encode` / `decode` |
+| Command | Description | Permission |
+|---|---|---|
+| `http` | HTTP `get` / `post` requests sent from the server (module `core`) | `http:request` |
 
-All are exported (`CliEchoCommandProcessor`, `CliStatusCommandProcessor`, ...) and registered by the standalone server.
+Hosts opt in: `builder.addProcessor(new CliHttpCommandProcessor())` (the standalone server adds it). `http:request` is in
+core's permission catalog (group Commands); on a protected server the command and its sub-commands are refused without it.
+
+The example commands `echo`, `status`, `time`, `hello`, `math`, `system`, `hash` and `base64` live in the demo app
+([demo/src/demo-module.ts](demo/src/demo-module.ts)), registered as the `demo` module.
+
+A command added with `addModule` is listed by `GET /api/v1/qcli/commands` under the module's name (`module`) unless it
+names a module itself, so the dashboard's Plugins page groups it with its module.
 
 ## Docker
 
@@ -1034,7 +1036,7 @@ cd demo && npm install && npm start   # full demo: all plugins, users (root / ad
 
 | Path | Contents |
 |---|---|
-| `src/` | Server factory, controllers, services, MCP, built-in processors, standalone entry (`server.ts`) |
+| `src/` | Server factory, controllers, services, MCP, the built-in `http` command, standalone entry (`server.ts`) |
 | `packages/abstractions/` | `@qodalis/cli-server-abstractions` |
 | `plugins/` | Plugin packages (users, admin, jobs, filesystem, data explorer, aws, weather) |
 | `demo/` | Demo server with custom processors and every plugin |
