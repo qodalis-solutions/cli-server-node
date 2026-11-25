@@ -10,12 +10,18 @@ import {
 import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
 import { weatherInstalledPlugin } from './package-info';
 
-/** Extract the location from a command's args or value, defaulting to 'London'. */
-function getLocation(command: CliProcessCommand): string {
+/** The place used when a command names none. */
+export const DEFAULT_WEATHER_LOCATION = 'London';
+
+/** Where to read the place when a command names none (the module's `defaultLocation`). */
+type DefaultLocation = () => string;
+
+/** Extract the location from a command's args or value, defaulting to `fallback()` (London). */
+function getLocation(command: CliProcessCommand, fallback: DefaultLocation = () => DEFAULT_WEATHER_LOCATION): string {
     if (command.args?.location) return String(command.args.location);
     const location = getPositionalText(command);
     if (location) return location;
-    return 'London';
+    return fallback().trim() || DEFAULT_WEATHER_LOCATION;
 }
 
 /** Fetch raw weather JSON from wttr.in for the given location. */
@@ -96,8 +102,12 @@ class WeatherCurrentProcessor extends CliCommandProcessor {
     parameters = [locationParam];
     acceptsValue = true;
 
+    constructor(private readonly fallback?: DefaultLocation) {
+        super();
+    }
+
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        return formatCurrentWeather(getLocation(command));
+        return formatCurrentWeather(getLocation(command, this.fallback));
     }
 }
 
@@ -112,8 +122,12 @@ class WeatherForecastProcessor extends CliCommandProcessor {
     parameters = [locationParam];
     acceptsValue = true;
 
+    constructor(private readonly fallback?: DefaultLocation) {
+        super();
+    }
+
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        return formatForecast(getLocation(command));
+        return formatForecast(getLocation(command, this.fallback));
     }
 }
 
@@ -131,13 +145,15 @@ class CliWeatherCommandProcessor extends CliCommandProcessor {
         'Weather from wttr.in, fetched by the server. Give the place as the value or with --location; the default is London.';
     parameters = [locationParam];
     acceptsValue = true;
-    processors: ICliCommandProcessor[] = [
-        new WeatherCurrentProcessor(),
-        new WeatherForecastProcessor(),
-    ];
+    processors: ICliCommandProcessor[];
+
+    constructor(private readonly fallback?: DefaultLocation) {
+        super();
+        this.processors = [new WeatherCurrentProcessor(fallback), new WeatherForecastProcessor(fallback)];
+    }
 
     async handleAsync(command: CliProcessCommand): Promise<string> {
-        return formatCurrentWeather(getLocation(command));
+        return formatCurrentWeather(getLocation(command, this.fallback));
     }
 }
 
@@ -150,5 +166,11 @@ export class WeatherModule extends CliModule {
     version = '1.0.0';
     description = 'Provides weather information commands';
     icon = '🌤️';
-    processors: ICliCommandProcessor[] = [new CliWeatherCommandProcessor()];
+    processors: ICliCommandProcessor[];
+
+    /** `defaultLocation`: the place when a command names none (read on every command; default London). */
+    constructor(options: { defaultLocation?: () => string } = {}) {
+        super();
+        this.processors = [new CliWeatherCommandProcessor(options.defaultLocation)];
+    }
 }

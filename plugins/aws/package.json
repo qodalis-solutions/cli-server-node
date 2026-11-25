@@ -48,5 +48,12 @@
         "aws-sdk-client-mock": "^4.0.0",
         "typescript": "^5.0.0",
         "vitest": "^4.1.12"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "aws",
+        "entry": "./dist/plugin.js",
+        "title": "AWS",
+        "icon": "☁️"
     }
 }

@@ -31,5 +31,16 @@
     },
     "devDependencies": {
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "weather",
+        "entry": "./dist/plugin.js",
+        "title": "Weather",
+        "icon": "🌤️",
+        "platforms": {
+            "python": "qodalis-cli-server-plugin-weather",
+            "dotnet": "Qodalis.Cli.Plugin.Weather"
+        }
     }
 }

@@ -40,5 +40,12 @@
     "devDependencies": {
         "@types/express": "^4.17.21",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "audit",
+        "entry": "./dist/plugin.js",
+        "title": "Audit",
+        "icon": "📋"
     }
 }
