@@ -18,6 +18,8 @@ export interface CliInstalledPlugin {
     description?: string;
     /** One emoji or an image URL shown for the package; undefined = none (the dashboard shows a default). */
     icon?: string;
+    /** `marketplace` for a package installed at runtime (`<dataDir>/server-plugins`); absent for the host's own. */
+    source?: 'marketplace';
 }
 
 /**

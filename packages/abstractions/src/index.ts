@@ -109,3 +109,20 @@ export {
     CliServerRestartError,
     ICliServerRestart,
 } from './restart';
+export {
+    CLI_SERVER_PLUGIN_KIND,
+    CLI_SERVER_PLUGINS_DIR,
+    CLI_SERVER_PLUGINS_FILE,
+    CLI_PLUGINS_INSTALL_PERMISSION,
+    CliServerPluginManifest,
+    CliPluginLogger,
+    CliPluginBuilder,
+    CliPluginSettingsOptions,
+    CliPluginContext,
+    CliPluginEntryResult,
+    CliPluginEntry,
+    CliServerPluginRecord,
+    CliServerPluginStatus,
+    CliServerPluginState,
+    ICliServerPlugins,
+} from './plugin-entry';
