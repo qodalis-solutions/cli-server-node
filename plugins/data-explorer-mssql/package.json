@@ -20,5 +20,12 @@
     },
     "devDependencies": {
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "data-explorer-mssql",
+        "entry": "./dist/plugin.js",
+        "title": "Data explorer: SQL Server",
+        "icon": "🗄️"
     }
 }

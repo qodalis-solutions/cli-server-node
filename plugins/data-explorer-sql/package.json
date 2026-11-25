@@ -35,5 +35,12 @@
     "devDependencies": {
         "@types/better-sqlite3": "^7.0.0",
         "typescript": "^5.6.0"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "data-explorer-sql",
+        "entry": "./dist/plugin.js",
+        "title": "Data explorer: SQL (SQLite, PostgreSQL, MySQL)",
+        "icon": "🧮"
     }
 }
