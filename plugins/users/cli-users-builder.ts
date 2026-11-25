@@ -1,5 +1,5 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
-import type { CliDashboardModulePage, ICliConfigProvider, ICliEventBus } from '@qodalis/cli-server-abstractions';
+import type { CliDashboardModulePage, ICliConfigProvider, ICliConfigStore, ICliEventBus } from '@qodalis/cli-server-abstractions';
 import { createUsersConfigProvider } from './users-config-provider';
 import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { AuthAdapter, TokenUsageProvider, User, UsersBroadcastFn, UsersModuleOptions } from './models';
@@ -124,6 +124,7 @@ export class CliUsersBuilder {
     private options: UsersModuleOptions = {};
     private dashboardDir?: string | false;
     private usersDashboardDir?: string | false;
+    private configStore?: ICliConfigStore;
 
     /** Merge raw options (`UsersModuleOptions`). */
     setOptions(options: UsersModuleOptions): this {
@@ -332,6 +333,15 @@ export class CliUsersBuilder {
         return this;
     }
 
+    /**
+     * Keeps the `users` config provider's changes in `store` (its own store) instead of the server's default
+     * one; the host's store for the provider's id (`config.stores`, `builder.setConfigStore(store, id)`) still wins.
+     */
+    setConfigStore(store: ICliConfigStore | undefined): this {
+        this.configStore = store;
+        return this;
+    }
+
     /** Interval of the background expired-session sweep (default 5 minutes). */
     setCleanupInterval(ms: number): this {
         this.options.cleanupIntervalMs = ms;
@@ -537,7 +547,7 @@ export class CliUsersBuilder {
                     apiTokensWithExternalAuth,
                     usersReadOnly,
                     groupsReadOnly,
-                }),
+                }).setStore(this.configStore),
             ],
         };
     }

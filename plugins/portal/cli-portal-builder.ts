@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
-import type { CliInstalledPlugin, ICliConfigProvider, ICliModule } from '@qodalis/cli-server-abstractions';
+import type { CliInstalledPlugin, ICliConfigProvider, ICliConfigStore, ICliModule } from '@qodalis/cli-server-abstractions';
 import {
     PortalLink,
     PortalSection,
@@ -91,6 +91,7 @@ export class CliPortalBuilder {
     private readonly footerLinks: PortalLink[] = [];
     private readonly sections: Array<PortalSection & { pageCount?: number }> = [];
     private siteDir?: string;
+    private configStore?: ICliConfigStore;
 
     /** The mount (default `/qcli/portal`); `/` mounts the portal at the root, next to the host's routes. */
     setPath(path: string): this {
@@ -132,6 +133,15 @@ export class CliPortalBuilder {
     /** The site's directory (the one holding `index.html`), instead of the resolved one. */
     setSiteDir(dir: string): this {
         this.siteDir = dir;
+        return this;
+    }
+
+    /**
+     * Keeps the `portal` config provider's changes in `store` (its own store) instead of the server's default
+     * one; the host's store for the provider's id (`config.stores`, `builder.setConfigStore(store, id)`) still wins.
+     */
+    setConfigStore(store: ICliConfigStore | undefined): this {
+        this.configStore = store;
         return this;
     }
 
@@ -211,7 +221,7 @@ export class CliPortalBuilder {
                     path: mount,
                     siteFound: site !== null,
                     sections: this.sections.map((s) => s.kind),
-                }),
+                }).setStore(this.configStore),
             ],
             module: {
                 name: 'portal',

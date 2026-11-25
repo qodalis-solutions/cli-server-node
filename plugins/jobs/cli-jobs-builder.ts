@@ -1,6 +1,7 @@
 import {
     ICliJob,
     ICliConfigProvider,
+    ICliConfigStore,
     CliJobOptions,
     ICliJobStorageProvider,
     CliInstalledPlugin,
@@ -57,6 +58,7 @@ export class CliJobsBuilder {
     private _storageProvider?: ICliJobStorageProvider;
     private readonly _options: CliJobsOptions;
     private _dashboardDir?: string | false;
+    private _configStore?: ICliConfigStore;
 
     /**
      * @param options The plugin's options, e.g. the history retention:
@@ -90,6 +92,15 @@ export class CliJobsBuilder {
      */
     setStorageProvider(provider: ICliJobStorageProvider): CliJobsBuilder {
         this._storageProvider = provider;
+        return this;
+    }
+
+    /**
+     * Keeps the `jobs` config provider's changes in `store` (its own store) instead of the server's default
+     * one; the host's store for the provider's id (`config.stores`, `builder.setConfigStore(store, id)`) still wins.
+     */
+    setConfigStore(store: ICliConfigStore | undefined): CliJobsBuilder {
+        this._configStore = store;
         return this;
     }
 
@@ -130,7 +141,7 @@ export class CliJobsBuilder {
             scheduler,
             installedPlugin: jobsInstalledPlugin,
             dashboardPages: page ? [page] : [],
-            configProviders: [createJobsConfigProvider(scheduler)],
+            configProviders: [createJobsConfigProvider(scheduler).setStore(this._configStore)],
             setEventBus: (eventBus) => {
                 if (!explicitBus) scheduler.setEventBus(eventBus);
             },

@@ -1,5 +1,5 @@
 import { Router, RequestHandler, static as expressStatic } from 'express';
-import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus, ICliConfigProvider, CliConfigPermissions } from '@qodalis/cli-server-abstractions';
+import { ICliModule, ICliCommandProcessor, ICliProcessorFilter, ICliEventBus, ICliConfigProvider, ICliConfigStore, CliConfigPermissions } from '@qodalis/cli-server-abstractions';
 import { createAuthMiddleware } from './auth/auth-middleware';
 import { createAuthController } from './auth/auth-controller';
 import { AdminAuthProvider } from './auth/auth-provider';
@@ -104,6 +104,7 @@ export class CliAdminBuilder {
     private _authProvider?: AdminAuthProvider;
     private _theme: AdminThemeDocument = validateAdminTheme(undefined);
     private _branding?: AdminBrandingDocument;
+    private _configStore?: ICliConfigStore;
 
     /**
      * Set the dashboard's color scheme: the mode (`dark`, `light` or `system`)
@@ -182,6 +183,15 @@ export class CliAdminBuilder {
     setJwtSecret(secret: string): CliAdminBuilder {
         this._jwtSecret = secret;
         this._config.setJwtSecret(secret);
+        return this;
+    }
+
+    /**
+     * Keeps the `logs` config (log buffer size and level) provider's changes in `store` (its own store) instead of the server's default
+     * one; the host's store for the provider's id (`config.stores`, `builder.setConfigStore(store, id)`) still wins.
+     */
+    setConfigStore(store: ICliConfigStore | undefined): CliAdminBuilder {
+        this._configStore = store;
         return this;
     }
 
@@ -299,7 +309,7 @@ export class CliAdminBuilder {
         const authMode = () => (this._authProvider ? (isExternal() ? 'external' : 'users') : 'password') as 'password' | 'users' | 'external';
         const configProviders: ICliConfigProvider[] = [
             createAdminAuthConfigProvider(this._config, authMode, () => !!this._jwtSecret || !!process.env.QCLI_ADMIN_JWT_SECRET),
-            createLogsConfigProvider(logBuffer),
+            createLogsConfigProvider(logBuffer).setStore(this._configStore),
         ];
         for (const provider of configProviders) {
             if (builder.addConfigProvider && !builder.configProviders?.some((p) => p.id === provider.id)) {
