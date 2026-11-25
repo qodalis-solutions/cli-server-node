@@ -78,6 +78,7 @@ Plugin authors who only need the base types can depend on [`@qodalis/cli-server-
 - Background jobs, admin dashboard, users, groups, permissions and API tokens as plugins
 - Remote PTY shell with explicit access modes, limits and process-tree cleanup
 - MCP endpoint that exposes commands, files, data and jobs as tools to AI clients
+- Config providers: the server's, its plugins' and the host's settings, viewed and changed from the dashboard, the `config` command and MCP, validated, audited and kept in memory, a JSON file or a database
 - Origin checks, CORS allow-list and trusted-proxy handling
 
 ## Writing commands
@@ -202,12 +203,13 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `enableShell` | `false` | Accept remote shell sessions (see [Remote shell](#remote-shell)) |
 | `shell` | none | Shell access mode, limits, timeouts, `cwd`, `env` |
 | `auth` | none | Auth provider protecting the whole server (for example `usersPlugin.serverAuth`) |
-| `mcp` | off | `true` or `{ tools, exclude, token, instructions, enabled }` (see [MCP](#mcp-endpoint)) |
+| `mcp` | off | `true` or `{ tools, exclude, token, instructions, readOnly, enabled }` (see [MCP](#mcp-endpoint)) |
+| `config` | in memory | `{ store, environment, command }`: the store of writable settings, the environment variables the `host` provider lists, the `config` command (default on); see [Config providers](#config-providers) |
 | `cliRoutes` | `true` | `false` serves none of the CLI's routes and sockets (`/api/qcli/*`, `/api/v1/qcli/*`, `/api/cli/*`, `basePath`, MCP, `/ws/*`): for a service that only hosts its own routes (see the users plugin's [guard-only mode](plugins/users/README.md#guard-only-mode)). `mountPlugin` then mounts only plugins with `cliRoutes: false` and logs `[qcli] CLI routes are turned off; <prefix> is not mounted` for the others (the admin dashboard is not served either); a guard-only users plugin is accepted only there (`guard-only needs cliRoutes: false`); the catalog, events and installed plugins stay |
 | `maxTableRows` | `200` | Most rows an unpaged table returns; larger tables are cut and marked `truncated` (0 = no limit, see [Paging](#paging)) |
 | `configure` | none | `(builder) => ...` to register processors, modules, storage and data sources |
 
-`configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider`, `addPermissions` (all chainable; see [Permission catalog and host tokens](#permission-catalog-and-host-tokens)). `builder.permissions` is the server's permission catalog.
+`configure` receives a `CliBuilder`: `addProcessor`, `addModule`, `setFileStorageProvider`, `addFileSystem`, `addDataExplorerProvider`, `addMcpToolProvider`, `addPermissions`, `addConfigProvider`, `setConfigStore`, `setConfigAuditStore` (all chainable; see [Permission catalog and host tokens](#permission-catalog-and-host-tokens)). `builder.permissions` is the server's permission catalog.
 
 `createCliServer` returns:
 
@@ -221,6 +223,7 @@ The table output carries the page: `{ "type": "table", "headers": [...], "rows":
 | `mountPlugin(plugin)` | Mounts a plugin's routes (its `publicRoutes` stay public on a protected server: `"METHOD /path"`, or for a plugin with `cliRoutes: false` also `"GET /prefix/*"` for every GET/HEAD under a prefix. A host-route plugin may declare only paths under its own prefix, never a bare `/*` or a non-GET prefix (`invalid public route: <entry>` at mount); its public requests are answered by that plugin alone, never by a host or CLI route; on a protected server they are answered inside the auth gate, before middleware added to the app after `createCliServer`) (and dashboard, MCP providers, server auth); its `prefix` and `dashboardPrefix` then count as CLI routes, where host tokens are refused, unless the plugin serves host routes (`cliRoutes: false`: public-api, docs, portal) |
 | `setAuth(auth)` | Installs or removes the server auth provider |
 | `mcp` | `{ enabled, path, addProvider(provider) }` |
+| `config` | The configuration service (`builder.config`): `list`, `get`, `update` and `ready()` (see [Config providers](#config-providers)) |
 
 Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass the Origin, CORS and CSRF checks. With `trustProxy` set to n hops, the client IP is the `X-Forwarded-For` entry at index `len - n`; set it to the exact number of proxies you run, otherwise clients can spoof their address.
 
@@ -241,6 +244,7 @@ Same-origin requests (such as the admin dashboard at `/qcli/admin`) always pass 
 | GET | `/api/qcli/data-explorer/sources`, `schema` | Data sources and their schema (when sources are registered) |
 | POST | `/api/qcli/data-explorer/execute` | Run a query against a source |
 | POST | `/api/qcli/mcp` | MCP endpoint (when `mcp` is enabled) |
+| GET, PATCH | `/api/v1/qcli/config[/{provider}[/{section}]]` | Config providers (admin plugin, see [Config providers](#config-providers)) |
 | WS | `/ws/v1/qcli/events` | Server-push events ([Server events](#server-events)) |
 | WS | `/ws/v1/qcli/logs` | Server log stream |
 | WS | `/ws/v1/qcli/shell` | Interactive PTY shell (when `enableShell` is on) |
@@ -255,7 +259,7 @@ Every WebSocket is also served without the version (`/ws/qcli/events`, ...). Plu
 | [`@qodalis/cli-server-plugin-users-postgres`](plugins/users-postgres/README.md) | PostgreSQL stores for the users plugin (users, groups, passwords, sessions, API tokens, audit), with versioned migrations |
 | [`@qodalis/cli-server-plugin-databases`](plugins/databases/README.md) | The server's relational databases (PostgreSQL, MySQL, SQL Server, SQLite): size, load and largest tables, and versioned migrations applied under a lock, run and tracked from the dashboard, the terminal (`databases`), MCP and the API |
 | [`@qodalis/cli-server-plugin-audit`](plugins/audit/README.md) | The audit log: its entries, in-memory store and `GET/DELETE /api/v1/qcli/audit` |
-| [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration, logs) |
+| [`@qodalis/cli-server-plugin-admin`](plugins/admin/README.md) | Admin dashboard at `/qcli/admin` (status, configuration through the [config providers](#config-providers), logs) |
 | [`@qodalis/cli-server-plugin-public-api`](plugins/public-api/README.md) | Your public REST API: a host-token guard with per-account daily and per-minute quotas, usage per token, your OpenAPI document and Swagger UI at `/qcli/api` |
 | [`@qodalis/cli-server-plugin-docs`](plugins/docs/README.md) | Markdown guides from folders or code (front matter, variables), served as JSON at `/qcli/docs` |
 | [`@qodalis/cli-server-plugin-portal`](plugins/portal/README.md) | The documentation portal (guides and API reference with code samples) at `/qcli/portal` |
@@ -393,6 +397,7 @@ a handler that throws is logged and never fails the action that published.
 | `command:executed` | command (the processor name only), success, durationMs, userId | `audit:read` | `/execute`, `/execute/stream`, MCP command tools |
 | `audit:recorded` | the audit entry as `GET /audit` returns it | `audit:read` | audit plugin store |
 | `log:entry` | the log entry | `logs:read` | admin plugin (with `eventBus`) |
+| `config:changed` | provider, section, keys, version, requiresRestart, user | `config:read` | config service (API, `config` command, MCP `config_set`) |
 
 `user:updated` covers profile, password, enabled/disabled and group membership changes; `session:closed` covers
 sign-out, expiry and kicks. The control messages `connected`, `disconnect` and `session-kicked` are unchanged.
@@ -627,6 +632,12 @@ const { mcp } = createCliServer({
 | `fs_list`, `fs_stat`, `fs_read` / `fs_write`, `fs_mkdir`, `fs_delete` | file storage configured | `files:read` / `files:write` |
 | `data_sources`, `data_schema`, `data_query` | data sources registered | `data:query` |
 | `jobs_list`, `jobs_get`, `jobs_history` / `jobs_trigger`, `jobs_pause`, `jobs_resume`, `jobs_stop`, `jobs_cancel`, `jobs_delete_runs` | jobs plugin mounted | `jobs:read` / `jobs:manage` |
+| `config_list`, `config_get` / `config_set` | always (the `config` command is served by them, not as command tools) | `config:read` / `config:write` |
+
+`readOnly: true` lists and accepts only tools annotated `readOnlyHint: true` (like the MCP client's `QCLI_READ_ONLY`):
+`config_set`, `fs_write` and command tools are then refused with `Tool <name> is not available: the MCP endpoint is
+read-only`. The allow-list, deny-list, instructions and `readOnly` can change at runtime through the `mcp` config
+provider.
 
 Command tools run through the same executor as `/execute`; outputs are rendered as text, `isError` is `exitCode != 0`. Add your own tools with `mcp.addProvider(provider)`, `builder.addMcpToolProvider(provider)` or a plugin's `mcpProviders` (use `mcpObjectSchema` to build the input schema). An `Origin` header, when present, must be allowed or same-origin.
 
@@ -648,6 +659,290 @@ claude mcp add qcli -e QCLI_URL=http://localhost:8047 -e QCLI_TOKEN=<token> -- n
 | `404` | MCP is not enabled or the URL is not `{basePath}/mcp` |
 | `405` | Only `POST` is accepted |
 | Tool missing from `tools/list` | Missing permission, filtered by `tools`/`exclude`, or the feature is not enabled |
+
+## Config providers
+
+The server's configuration is read and changed through **config providers** that the server, its plugins and the
+host application register: the admin dashboard's Config page, the `config` command and the `config_*` MCP tools all
+show what they return. The .NET and Python servers implement the same contract and JSON
+(cli-server-dashboard#61).
+
+A provider has sections; a section has entries (settings). A provider is read-only unless it also implements the
+writer; each entry says whether it can change (`mutable`) and whether a change needs a restart. Writable settings are
+kept in the server's **config store** (in memory by default, a JSON file or a database) and applied again at startup.
+
+### The contract
+
+In `@qodalis/cli-server-abstractions` (re-exported by the server):
+
+```typescript
+type CliConfigEntryType = 'string' | 'number' | 'boolean' | 'string[]' | 'enum' | 'secret' | 'json' | 'duration' | 'url';
+type CliConfigSource = 'default' | 'file' | 'environment' | 'database' | 'runtime';
+
+interface CliConfigEntry {
+    key: string;
+    label?: string;              // default: key
+    description?: string;
+    type: CliConfigEntryType;
+    value?: CliConfigValue;      // JSON; a duration is a string such as '30m'
+    default?: CliConfigValue;
+    source?: CliConfigSource;    // default 'default'
+    mutable?: boolean;
+    requiresRestart?: boolean;
+    sensitive?: boolean;         // every 'secret' is sensitive: its value is never returned
+    isSet?: boolean;             // a sensitive entry whose value the provider leaves out
+    validation?: { min?: number; max?: number; pattern?: string; options?: string[]; required?: boolean };
+    editor?: string;             // a hint for a richer input: 'tags', 'origins', 'textarea', 'cron', 'code', ...
+}
+
+interface CliConfigSection {
+    id: string;
+    title?: string;
+    description?: string;
+    entries: CliConfigEntry[];
+    version?: string;            // writable sections: a change against an older version gets 409
+    allowCustomKeys?: boolean;   // free key/value section (the custom provider)
+}
+
+interface ICliConfigProvider {
+    readonly id: string;                    // lower case: letters, digits, _ and -
+    readonly title: string;
+    readonly description?: string;
+    readonly order?: number;                // default 100
+    readonly requiredPermission?: string;   // needed besides config:read / config:write
+    getSections(context: CliConfigContext): CliConfigSection[] | Promise<CliConfigSection[]>;
+}
+
+interface ICliConfigWriter {               // optional, on the same object
+    validate(sectionId: string, changes: Record<string, CliConfigValue>, context: CliConfigContext): CliConfigErrors | Promise<CliConfigErrors>;
+    update(sectionId: string, changes: Record<string, CliConfigValue>, expectedVersion: string | undefined,
+           context: CliConfigContext): Promise<{ applied: string[]; requiresRestart: boolean; version: string }>;
+}
+
+interface CliConfigContext {
+    caller?: { userId?: string; userName?: string; permissions?: readonly string[] };
+    hasPermission(permission: string): boolean;   // always true on a server without authentication
+    via?: 'api' | 'terminal' | 'mcp';
+}
+
+type CliConfigErrors = Record<string, string>;   // key -> message
+```
+
+`null` in `changes` resets a setting to its default (clears a secret, removes a free key). Before calling the
+writer the server checks the permissions, that each key exists (or the section allows custom keys) and is mutable,
+and the value's type and rules; then the writer's `validate`, then `update`. A writer throws
+`CliConfigConflictError(currentVersion)` for a stale version and `CliConfigValidationError(errors)` for late errors.
+
+Validation, the same on every server:
+
+| Type | Value | `min` / `max` | `pattern` | `options` |
+|---|---|---|---|---|
+| `string`, `secret` | string | length | the value | allowed values |
+| `url` | absolute URL (`scheme://...`) | length | the value | |
+| `number` | finite number | value | | |
+| `boolean` | `true` / `false` | | | |
+| `enum` | one of `options` | | | required |
+| `string[]` | array of strings | item count | each item | each item |
+| `duration` | `<integer><ms\|s\|m\|h\|d>` (`500ms`, `30s`, `15m`, `12h`, `7d`) | milliseconds | | |
+| `json` | any JSON value | | | |
+
+`required` refuses `''` and `[]`, and `null` when there is no default.
+
+### Registering providers
+
+```typescript
+import { CliStoredConfigProvider, JsonFileConfigStore } from '@qodalis/cli-server-node';
+
+createCliServer({
+    configure: (builder) => {
+        builder.setConfigStore(new JsonFileConfigStore('./data/config.json'));
+        builder.addConfigProvider(new CliStoredConfigProvider({
+            id: 'billing',
+            title: 'Billing',
+            sections: [{
+                id: 'invoices',
+                title: 'Invoices',
+                settings: [
+                    { key: 'dueDays', type: 'number', default: 30, validation: { min: 1, max: 90 }, apply: (v) => (billing.dueDays = v as number) },
+                    { key: 'apiKey', type: 'secret', apply: (v) => billing.setKey(v as string | null) },
+                    { key: 'region', type: 'string', mutable: false, value: () => billing.region },
+                ],
+            }],
+        }));
+    },
+});
+```
+
+`CliStoredConfigProvider` describes settings in code: the server attaches its store when the provider is
+registered and calls `apply` with every stored value, then after each change (with the default after a reset).
+`provider.value(section, key)` reads a setting, secrets included, for the host's own code. Any object implementing
+`ICliConfigProvider` (and `ICliConfigWriter`) works too. Modules bring providers in `configProviders`
+(`builder.addModule`), plugin results in `configProviders` (`mountPlugin`). A provider registered under a built-in id
+replaces the built-in one.
+
+### Stores
+
+| Store | Source | Where |
+|---|---|---|
+| `InMemoryConfigStore` (default) | `runtime` | memory: changes apply at once and are lost on restart |
+| `JsonFileConfigStore(path)` | `file` | one JSON file, rewritten on every change (temp file + rename, mode 0600) |
+| `CliDatabaseConfigStore({ connection })` (databases plugin) | `database` | table `QcliConfig` (PostgreSQL, MySQL, SQL Server, SQLite), one row per section, changes in a transaction with the row locked; migration source `qcli-config` |
+
+A store keeps only the values changed from their defaults, with a version per section. Set it with
+`builder.setConfigStore(store)` or `createCliServer({ config: { store } })`, before the server is created. Stored
+values are applied while the server starts; `await server.config.ready()` before listening (a database store loads
+asynchronously). Implement `ICliConfigStore` (`read(provider, section)`, `write(provider, section, changes,
+expectedVersion?)`) to keep them elsewhere. Secrets are stored as given: keep the file or table readable by the
+server only.
+
+### Built-in providers
+
+| Provider | Order | Sections and settings | Writable |
+|---|---|---|---|
+| `server` | 0 | `runtime`: platform, platformVersion, version, nodeEnv, pid, hostname, os, startedAt, uptime | no |
+| `auth` (admin plugin) | 10 | `admin`: mode (`password`, `users`, `external`), username, defaultCredentials, jwtSecretConfigured, signInUrl | no |
+| `host` | 20 | `options`: basePath, cliRoutes, enableShell, shellAuth, trustProxy, maxTableRows, protected; `environment`: the environment variables, secrets masked | no |
+| `cors` | 30 | `cors`: mode (read-only), allowedOrigins | allowedOrigins: CORS (in `origins` mode), WebSocket upgrades, the MCP endpoint and CSRF checks follow it at once |
+| `mcp` | 40 | `mcp`: enabled, path (read-only), tools, exclude, instructions, readOnly | when MCP is on |
+| `filesystem` | 50 | `filesystem`: storage, allowedPaths (read-only), maxUploadBytes | maxUploadBytes |
+| `jobs` (jobs plugin) | 60 | `history`: maxAge, maxRunsPerJob, failedMaxAge, failedMaxRunsPerJob, pruneInterval (read-only) | the retention defaults (the next prune applies them) |
+| `users` (users plugin) | 70 | `sessions`: sessionTimeout, maxSessionLifetime; `security`: maxLoginAttempts, lockout, minPasswordLength; `access`: protectServer, signIn, allowNonExpiringTokens, apiTokensWithExternalAuth, usersReadOnly, groupsReadOnly (read-only) | sessions and security |
+| `logs` (admin plugin) | 80 | `buffer`: capacity (100-100000), minLevel | yes |
+| `custom` | 1000 | `custom`: free keys (the admin plugin's former `custom` section) | yes |
+
+The `host` provider lists every environment variable but `npm_*`; a variable is a secret (value never returned,
+`isSet` only) when its name contains SECRET, PASSWORD, PASSWD, TOKEN, KEY (as a word: `API_KEY`, `KEY_ID`),
+PRIVATE, CREDENTIAL, AUTH, DSN, CONNECTION STRING, COOKIE, SALT, SIGNATURE or CERT, or its value is a URL with
+credentials. Narrow it with `createCliServer({ config: { environment: { include: ['QCLI_*', 'PORT'], exclude: [], secrets: ['MY_*'] } } })`.
+The filesystem roots stay read-only on purpose: widening what the server may read is a deployment decision.
+
+### API
+
+Served by the admin plugin (`/api/v1/qcli/config`, behind the dashboard's sign-in; on a protected server the route
+also needs `config:read` for GET and `config:write` for PATCH). It replaces the former `GET/PUT /api/v1/qcli/config`.
+
+| Method | Path | Answer |
+|---|---|---|
+| GET | `/api/v1/qcli/config` | `{ "providers": [provider, ...] }`: the providers the caller may see, by `order` then id |
+| GET | `/api/v1/qcli/config/{provider}` | one provider |
+| PATCH | `/api/v1/qcli/config/{provider}/{section}` | body `{ "changes": { "key": value }, "version": "3" }` (`version` optional) |
+
+```json
+{
+  "providers": [
+    {
+      "id": "cors",
+      "title": "CORS",
+      "description": "Origins allowed to call the server from a browser and to open its WebSockets",
+      "order": 30,
+      "writable": true,
+      "sections": [
+        {
+          "id": "cors",
+          "title": "CORS",
+          "description": "",
+          "mutable": true,
+          "version": "2",
+          "allowCustomKeys": false,
+          "entries": [
+            {
+              "key": "allowedOrigins", "label": "Allowed origins", "description": "Exact origins ...",
+              "type": "string[]", "value": ["https://app.example"], "default": [], "source": "database",
+              "mutable": true, "requiresRestart": false, "sensitive": false, "editor": "origins"
+            },
+            {
+              "key": "apiKey", "label": "apiKey", "description": "", "type": "secret", "value": null, "default": null,
+              "source": "runtime", "mutable": true, "requiresRestart": false, "sensitive": true, "isSet": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Every entry has all of `key`, `label`, `description`, `type`, `value`, `default`, `source`, `mutable`,
+`requiresRestart` and `sensitive`; `validation` and `editor` when set; `isSet` for sensitive entries, whose `value`
+and `default` are always `null`. A section's `version` is `null` when it is read-only. A provider's `writable` is
+true when it implements the writer and the caller holds `config:write`.
+
+| PATCH answer | Body |
+|---|---|
+| 200 | `{ "provider": "cors", "section": { ...as above }, "applied": ["allowedOrigins"], "requiresRestart": false, "version": "3" }` |
+| 400 | `{ "error": "validation failed", "errors": { "allowedOrigins": "'x' is not an origin (...)" } }`; also `changes must be a non-empty object`, `version must be a string`, `config provider server is read-only`, `config section users.access is read-only` |
+| 403 | `{ "error": "forbidden: missing permission config:write" }` (or the provider's `requiredPermission`) |
+| 404 | `{ "error": "unknown config provider: x" }`, `{ "error": "unknown config section: cors.x" }` |
+| 409 | `{ "error": "version conflict", "version": "4" }` |
+
+Per-key messages: `unknown setting`, `read-only`, `invalid key: use letters, digits, _, - and .`, and the
+validation messages (`must be a number`, `must be at least 1`, `must be one of: a, b`, `is required`, ...).
+
+### Permissions, audit, events, MCP
+
+- **Permissions** (core's catalog, group `Config`): `config:read` to see the providers (secrets stay hidden),
+  `config:write` to change them, plus a provider's own `requiredPermission` for both. On a server without
+  authentication everything is allowed (the API still needs the dashboard's sign-in).
+- **Audit**: every change writes `config.update` to the auth provider's audit log (the users plugin's), or to
+  `builder.setConfigAuditStore(store)`: `username`/`actor` the caller (`anonymous` without one), `target`
+  `config:<provider>.<section>`, `details` `<provider>.<section>: key1, key2`, `properties`
+  `{ provider, section, version, via, changes: [{ key, old, new }] }` with secrets as `***` (`null` when unset).
+- **Event**: `config:changed` `{ provider, section, keys, version, requiresRestart, user }`, audience `config:read`,
+  never values: open dashboards reload the provider.
+- **MCP** (when `mcp` is on): `config_list` (providers and section summaries) and `config_get` (`provider`,
+  `section?`, `key?`), read-only, need `config:read`; `config_set` (`provider`, `section`, `changes`, `version?`)
+  needs `config:write` and is not read-only, so the MCP client's `QCLI_READ_ONLY` and the endpoint's own
+  `mcp: { readOnly: true }` hide and refuse it. Errors come back as `isError` with `{ error, errors?, version? }`.
+
+## Terminal commands
+
+The server registers `config` (leave it out with `createCliServer({ config: { command: false } })`); plugins add
+theirs (`databases`, ...). Paths are `<provider>.<section>.<key>`: the provider id has no dots, the section is the
+longest section id that matches, the rest is the key.
+
+| Command | Permission | Does |
+|---|---|---|
+| `config`, `config list` | `config:read` | Providers and their sections (setting count, version) |
+| `config get <provider>[.<section>[.<key>]]` | `config:read` | A provider, a section, or one setting with its default, source, rules and version |
+| `config set <provider>.<section>.<key> <value> [--version v]` | `config:write` | Changes a setting; a stale `--version` is refused |
+| `config reset <provider>.<section>.<key> [--version v]` | `config:write` | Back to the default (clears a secret, removes a free key) |
+
+Values are read as the setting's type: numbers, `true`/`false`/`yes`/`no`/`on`/`off`, lists as `a,b,c` or a JSON
+array, `json` as JSON; a new key of the custom section as JSON when it parses, else as text. Validation errors are
+printed per key; secrets are accepted and never printed (`(set)` / `(not set)`).
+
+```text
+$ config list
+server  Server  (read-only)
+  runtime            9 setting(s)
+cors  CORS
+  cors               2 setting(s)  version 0
+custom  Custom
+  custom             0 setting(s)  version 0
+
+$ config get cors.cors
+cors.cors  CORS  (version 0)
+  mode            origins  [enum, default, read-only]
+  allowedOrigins  []  [string[], default]
+
+$ config set cors.cors.allowedOrigins https://app.example,http://localhost:*
+Updated cors.cors.allowedOrigins = ["https://app.example","http://localhost:*"] (version 1)
+
+$ config set users.sessions.sessionTimeout 10s
+Error: validation failed
+  sessionTimeout: must be at least 1m
+
+$ config set cors.cors.allowedOrigins https://other.example --version 0
+Error: version conflict (current version 1)
+
+$ config set custom.custom.stripeKey sk_live_123
+Updated custom.custom.stripeKey = sk_live_123 (version 1)
+
+$ config reset cors.cors.allowedOrigins
+Reset cors.cors.allowedOrigins = [] (version 2)
+```
+
+(A free key of the `custom` section is not a secret: keep secrets in a provider that declares them `secret`.)
 
 ## Built-in processors
 

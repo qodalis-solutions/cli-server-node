@@ -102,6 +102,25 @@ to here with the SQL each run executes. It is `@qodalis/cli-dashboard-module-dat
 at `/qcli/databases`; the plugin registers it as a dashboard extension when mounted, with cards on the dashboard's Overview (`widgets: ["overview"]`). `setDashboardDir(dir)` serves
 another build, `setDashboardDir(false)` leaves the page out.
 
+## Config store
+
+`CliDatabaseConfigStore` keeps the server's writable [config settings](../../README.md#config-providers) in a
+table of one of these databases (`QcliConfig`: `Provider`, `Section`, `Version`, `Data` as JSON, `UpdatedAt`; one row
+per section). A change runs in a transaction with the row locked, so servers sharing the database never lose one, and
+a stale version is refused. The table is created by the migration source `qcli-config` when the store is created.
+
+```ts
+import { CliDatabaseConfigStore, postgresConnection } from '@qodalis/cli-server-plugin-databases';
+
+const configStore = new CliDatabaseConfigStore({ connection: postgresConnection(pool), tablePrefix: 'Qcli' });
+const server = createCliServer({ config: { store: configStore } });
+await server.config.ready();   // stored settings applied
+// Show its migration with the others
+new CliDatabasesBuilder().addDatabase('main', { connection: configStore.connection }).addSource('main', configStore.migrationSource);
+```
+
+Options: `connection`, `tablePrefix`, `schema`, `tables: { Config }`.
+
 ## Helpers for store authors
 
 `tableExists`, `columnExists`, `renameTable`, `renameColumn` and `adoptLegacyTable(db, legacy, table, columns)` (renames a

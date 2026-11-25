@@ -97,6 +97,22 @@ WebSockets take a single-use ticket: `POST /sessions/ws-ticket` → `201 { ticke
 
 While a user has `mustChangePassword`, only `GET/DELETE /sessions/current` and `PUT /users/{self}/password` work; everything else answers `403 { "error": "password change required" }`.
 
+## Settings at runtime
+
+The plugin result carries the `users` [config provider](../../README.md#config-providers) (`configProviders`,
+registered by `mountPlugin`):
+
+| Section | Settings | Writable |
+|---|---|---|
+| `sessions` | `sessionTimeout` (1m-30d), `maxSessionLifetime` (1m-365d) | yes |
+| `security` | `maxLoginAttempts` (1-100), `lockout` (1s-1d), `minPasswordLength` (1-1024) | yes |
+| `access` | `protectServer`, `signIn` (`users`, `external`, `guard-only`), `allowNonExpiringTokens`, `apiTokensWithExternalAuth`, `usersReadOnly`, `groupsReadOnly` | no (set in code) |
+
+Changes apply at once (the auth service reads them on every sign-in, request and password change) and are kept in the
+server's config store. Config changes are audited as `config.update` in the plugin's audit log (`target`
+`config:<provider>.<section>`, `properties.changes` with old and new values, secrets as `***`); grant `config:read`
+and `config:write` through groups (`admin` has them through `*`).
+
 ## Permissions
 
 Groups carry `permissions` (`resource:action`, `*` wildcards, case-insensitive — same semantics as `cliPermissionMatches` in `@qodalis/cli-core`). A user's effective permissions are the union of their groups' permissions; group names are case-insensitive. Built-in permissions: `users:read|create|update|delete`, `groups:read|create|update|delete`, `sessions:read|revoke`, `audit:read|clear`, `tokens:read|revoke`.

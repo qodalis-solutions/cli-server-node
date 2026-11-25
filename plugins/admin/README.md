@@ -96,10 +96,22 @@ The built-in plugins list themselves when added (`mountPlugin` for users, admin 
 
 When the users plugin is installed, pass `setAuthProvider(usersPlugin.serverAuth)`: the dashboard then logs in with users credentials, its token is a users session token, and every admin route requires `admin:access`. The static credentials below are only used when the users plugin is absent.
 
+The Config page shows the server's [config providers](../../README.md#config-providers) (`builder.config`): the
+server's built-in ones, the plugins' and the host's. The former hardcoded sections are providers now: `server`
+(core), `auth` and `custom` (core, on the server's config store). The plugin adds two providers when built:
+
+- `auth` (read-only): `admin.mode` (`password`, `users`, `external`), `username`, `defaultCredentials`, `jwtSecretConfigured`, `signInUrl` (never a password or the secret);
+- `logs`: `buffer.capacity` (entries kept, 100-100000) and `buffer.minLevel` (`DEBUG`, `INFO`, `WARN`, `ERROR`), changed at runtime.
+
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/config` | Return structured config sections (server, auth, custom) |
-| PUT | `/config` | Update mutable (custom) settings |
+| GET | `/config` | `{ providers: [...] }`: the providers the caller may see (`config:read`), secrets masked |
+| GET | `/config/{provider}` | One provider (404 unknown, 403 without its `requiredPermission`) |
+| PATCH | `/config/{provider}/{section}` | `{ changes, version? }` (`config:write`): 200 with the section, 400 `{ error, errors }` per key, 409 `{ error, version }` for a stale version |
+
+The former `PUT /config` is gone. With the static credentials the admin holds every permission; with the users
+plugin the session's permissions apply (`config:read`, `config:write`, and the server's gate checks them too:
+`routePermissions` of the plugin result). The plugin result's `configProviders` lists `auth` and `logs`.
 
 ### Logs
 

@@ -128,6 +128,19 @@ Job info (`GET /`, `GET /:id`, MCP `jobs_list` / `jobs_get`) carries the limits 
 { "maxAge": "30d", "maxRunsPerJob": 50, "failedMaxAge": "90d", "failedMaxRunsPerJob": null, "overridden": true, "keepAll": false }
 ```
 
+### Changing the retention at runtime
+
+The plugin result carries the `jobs` [config provider](../../README.md#config-providers) (`configProviders`, registered
+by `mountPlugin`): section `history` with `maxAge`, `maxRunsPerJob`, `failedMaxAge`, `failedMaxRunsPerJob`
+(durations such as `30d`, counts >= 1; empty keeps every run) and `pruneInterval` (read-only). A change applies to the
+next prune (`scheduler.setHistoryDefaults(limits)`, which also registers and starts `jobs:prune-history` when no
+retention was set before) and is kept in the server's config store, so it survives a restart with a file or database
+store. Jobs with their own `history` options keep them.
+
+```text
+config set jobs.history.maxAge 30d
+```
+
 ## Concurrent runs
 
 A **run** holds one of the job's `maxConcurrentRuns` slots from its start until it ends, its retries and the delays
