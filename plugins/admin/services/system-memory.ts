@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 
@@ -37,10 +38,40 @@ function readCgroupUsage(): number | undefined {
     return undefined;
 }
 
-/** The readers of this process: `os`, `process.constrainedMemory()` and the cgroup files. */
+/**
+ * Available RAM on macOS from `vm_stat`: free plus inactive pages, as psutil and Activity Monitor count it
+ * (`os.freemem()` there counts free pages only, so the machine would look almost full). Cached briefly.
+ */
+let darwinCache: { at: number; bytes: number | undefined } | undefined;
+export function parseVmStat(output: string): number | undefined {
+    const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
+    const pages = (name: string) => Number(new RegExp(`${name}:\\s+(\\d+)`).exec(output)?.[1]);
+    const free = pages('Pages free');
+    const inactive = pages('Pages inactive');
+    if (![pageSize, free, inactive].every(Number.isFinite)) return undefined;
+    return (free + inactive) * pageSize;
+}
+
+function readAvailable(): number | undefined {
+    // Elsewhere `os.freemem()` is right (on Linux it is MemAvailable)
+    if (process.platform !== 'darwin') return os.freemem();
+    const now = Date.now();
+    if (!darwinCache || now - darwinCache.at > 5_000) {
+        let bytes: number | undefined;
+        try {
+            bytes = parseVmStat(execFileSync('vm_stat', { encoding: 'utf8', timeout: 1_000 }));
+        } catch {
+            bytes = undefined;
+        }
+        darwinCache = { at: now, bytes };
+    }
+    return darwinCache.bytes ?? os.freemem();
+}
+
+/** The readers of this process: `os`, `vm_stat` on macOS, `process.constrainedMemory()` and the cgroup files. */
 export const defaultSystemMemoryReaders: SystemMemoryReaders = {
     totalBytes: () => os.totalmem(),
-    availableBytes: () => os.freemem(),
+    availableBytes: readAvailable,
     limitBytes: () => (typeof process.constrainedMemory === 'function' ? process.constrainedMemory() : undefined),
     cgroupUsageBytes: readCgroupUsage,
 };

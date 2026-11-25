@@ -34,7 +34,7 @@ export {
     StatusHistorySummary,
     StatusRange,
 } from './services/status-sampler';
-export { readSystemMemory, defaultSystemMemoryReaders, SystemMemory, SystemMemoryReaders } from './services/system-memory';
+export { readSystemMemory, parseVmStat, defaultSystemMemoryReaders, SystemMemory, SystemMemoryReaders } from './services/system-memory';
 export { ModuleRegistry, ModuleInfo, IRegistryLike, IBuilderLike } from './services/module-registry';
 export { AdminConfig, AdminCredentials } from './services/admin-config';
 export { createAdminAuthConfigProvider, createLogsConfigProvider, AdminSignInMode } from './services/admin-config-providers';

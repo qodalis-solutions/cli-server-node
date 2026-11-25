@@ -3,7 +3,7 @@
  * below the installed RAM with the cgroup's usage, null for what cannot be read, and the `admin status` Memory line.
  */
 import { describe, it, expect } from 'vitest';
-import { formatMemoryLine, formatMemorySize, readSystemMemory, SystemMemoryReaders } from '../../plugins/admin/index';
+import { formatMemoryLine, formatMemorySize, parseVmStat, readSystemMemory, SystemMemoryReaders } from '../../plugins/admin/index';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -76,5 +76,24 @@ describe('formatMemoryLine', () => {
         expect(formatMemorySize(1023)).toBe('1023 MB');
         expect(formatMemorySize(1024)).toBe('1 GB');
         expect(formatMemorySize(1536)).toBe('1.5 GB');
+    });
+});
+
+describe('parseVmStat (macOS)', () => {
+    const output = [
+        'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+        'Pages free:                               10000.',
+        'Pages active:                            900000.',
+        'Pages inactive:                           50000.',
+        'Pages speculative:                         2000.',
+    ].join('\n');
+
+    it('counts free and inactive pages as available, like psutil and Activity Monitor', () => {
+        expect(parseVmStat(output)).toBe((10000 + 50000) * 16384);
+    });
+
+    it('is undefined when the output cannot be read', () => {
+        expect(parseVmStat('')).toBeUndefined();
+        expect(parseVmStat('Pages free: 12.')).toBeUndefined();
     });
 });
