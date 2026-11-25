@@ -1,3 +1,4 @@
+import { AwsPermissions } from '../permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -67,6 +68,7 @@ class SqsListProcessor extends CliCommandProcessor {
 /** Sub-processor that sends a message to an SQS queue. */
 class SqsSendProcessor extends CliCommandProcessor {
     command = 'send';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Send a message to an SQS queue';
     valueRequired = true;
     parameters = [
@@ -170,6 +172,7 @@ class SqsReceiveProcessor extends CliCommandProcessor {
 /** Sub-processor that purges all messages from an SQS queue, with optional dry-run support. */
 class SqsPurgeProcessor extends CliCommandProcessor {
     command = 'purge';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Purge all messages from an SQS queue';
     valueRequired = true;
     parameters = [

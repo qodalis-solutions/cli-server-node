@@ -1,3 +1,4 @@
+import { AwsPermissions } from '../permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -138,6 +139,7 @@ class S3LsProcessor extends CliCommandProcessor {
 /** Sub-processor that copies objects between S3 locations (S3-to-S3 only). */
 class S3CpProcessor extends CliCommandProcessor {
     command = 'cp';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Copy objects between S3 locations (S3-to-S3 only)';
     valueRequired = true;
     parameters = [
@@ -200,6 +202,7 @@ class S3CpProcessor extends CliCommandProcessor {
 /** Sub-processor that deletes an S3 object, with optional dry-run support. */
 class S3RmProcessor extends CliCommandProcessor {
     command = 'rm';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Delete an S3 object';
     valueRequired = true;
     parameters = [
@@ -256,6 +259,7 @@ class S3RmProcessor extends CliCommandProcessor {
 /** Sub-processor that creates a new S3 bucket. */
 class S3MbProcessor extends CliCommandProcessor {
     command = 'mb';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Create an S3 bucket';
     valueRequired = true;
     parameters = [
@@ -294,6 +298,7 @@ class S3MbProcessor extends CliCommandProcessor {
 /** Sub-processor that deletes an S3 bucket, with optional dry-run support. */
 class S3RbProcessor extends CliCommandProcessor {
     command = 'rb';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Delete an S3 bucket';
     valueRequired = true;
     parameters = [

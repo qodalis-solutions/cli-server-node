@@ -52,7 +52,8 @@ export async function runCommand(cli: CliServerResult, line: string, token?: str
     const req = request(cli.app).post(`${V1}/execute`);
     if (token) req.set('Authorization', `Bearer ${token}`);
     const res = await req.send({ command, chainCommands, rawCommand: line, value: positionals.join(' ') || undefined, positionals, args });
-    const text = (res.body?.outputs ?? []).map((o: any) => (typeof o.value === 'string' ? o.value : JSON.stringify(o.value))).join('\n');
+    // text outputs as they are, structured ones (tables, key-value, json) as JSON
+    const text = (res.body?.outputs ?? []).map((o: any) => (typeof o.value === 'string' ? o.value : JSON.stringify(o))).join('\n');
     return { status: res.status, text, exitCode: res.body?.exitCode, body: res.body };
 }
 

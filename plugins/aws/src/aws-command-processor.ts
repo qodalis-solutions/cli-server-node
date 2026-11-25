@@ -1,3 +1,4 @@
+import { AwsPermissions } from './permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -32,6 +33,7 @@ import * as os from 'os';
 /** Sub-processor that sets AWS credentials, region, and profile via `aws configure set`. */
 class AwsConfigureSetProcessor extends CliCommandProcessor {
     command = 'set';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Set AWS credentials and region';
     parameters = [
         new CliCommandParameterDescriptor('key', 'AWS access key ID', false, 'string', ['-k']),
@@ -232,6 +234,8 @@ class AwsStatusProcessor extends CliCommandProcessor {
 export class AwsCommandProcessor extends CliCommandProcessor {
     command = 'aws';
     description = 'AWS cloud resource management';
+    /** Every sub-command; the changing ones also need `aws:write`. */
+    requiredPermissions = [AwsPermissions.Read];
     processors: ICliCommandProcessor[];
 
     private readonly configService: AwsConfigService;

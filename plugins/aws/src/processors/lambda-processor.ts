@@ -1,3 +1,4 @@
+import { AwsPermissions } from '../permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -74,6 +75,7 @@ class LambdaListProcessor extends CliCommandProcessor {
 /** Sub-processor that invokes a Lambda function with an optional JSON payload. */
 class LambdaInvokeProcessor extends CliCommandProcessor {
     command = 'invoke';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Invoke a Lambda function';
     valueRequired = true;
     parameters = [

@@ -1,3 +1,4 @@
+import { AwsPermissions } from '../permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -67,6 +68,7 @@ class SnsTopicsProcessor extends CliCommandProcessor {
 /** Sub-processor that publishes a message to an SNS topic. */
 class SnsPublishProcessor extends CliCommandProcessor {
     command = 'publish';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Publish a message to an SNS topic';
     valueRequired = true;
     parameters = [

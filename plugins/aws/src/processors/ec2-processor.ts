@@ -1,3 +1,4 @@
+import { AwsPermissions } from '../permissions';
 import {
     CliCommandProcessor,
     CliCommandParameterDescriptor,
@@ -146,6 +147,7 @@ class Ec2DescribeProcessor extends CliCommandProcessor {
 /** Sub-processor that starts an EC2 instance. */
 class Ec2StartProcessor extends CliCommandProcessor {
     command = 'start';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Start an EC2 instance';
     valueRequired = true;
     parameters = [
@@ -184,6 +186,7 @@ class Ec2StartProcessor extends CliCommandProcessor {
 /** Sub-processor that stops an EC2 instance, with optional dry-run support. */
 class Ec2StopProcessor extends CliCommandProcessor {
     command = 'stop';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Stop an EC2 instance';
     valueRequired = true;
     parameters = [
@@ -229,6 +232,7 @@ class Ec2StopProcessor extends CliCommandProcessor {
 /** Sub-processor that reboots an EC2 instance, with optional dry-run support. */
 class Ec2RebootProcessor extends CliCommandProcessor {
     command = 'reboot';
+    requiredPermissions = [AwsPermissions.Write];
     description = 'Reboot an EC2 instance';
     valueRequired = true;
     parameters = [
