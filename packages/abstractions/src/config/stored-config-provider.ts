@@ -62,17 +62,26 @@ export interface CliStoredConfigProviderOptions {
     order?: number;
     requiredPermission?: string;
     sections: CliConfigSectionDefinition[];
+    /**
+     * The store this provider's changes are kept in. The host's store for this id
+     * (`config.stores`, `builder.setConfigStore(store, id)`) still wins; without either the
+     * server's default store is used (in memory unless the host sets one).
+     */
+    store?: ICliConfigStore;
 }
 
 /**
  * A provider of settings described in code, whose changes are kept in an
- * {@link ICliConfigStore}: the server attaches its store when the provider is registered
- * (`builder.setConfigStore`, in memory by default) and the stored values are applied then.
- * Built-in providers and plugins use it; a host can too:
+ * {@link ICliConfigStore}: the server attaches a store when the provider is registered and the
+ * stored values are applied then. Which store: the host's store for this provider's id
+ * (`config.stores`, `builder.setConfigStore(store, id)`), else the provider's own (`store`
+ * option, {@link setStore}), else the server's default store (`builder.setConfigStore(store)`),
+ * else in memory. Built-in providers and plugins use it; a host can too:
  *
  * ```ts
  * builder.addConfigProvider(new CliStoredConfigProvider({
  *     id: 'billing', title: 'Billing',
+ *     store: new JsonFileConfigStore('config/app.json', { section: 'qcli' }),
  *     sections: [{ id: 'invoices', settings: [
  *         { key: 'dueDays', type: 'number', default: 30, validation: { min: 1, max: 90 }, apply: (v) => (billing.dueDays = v as number) },
  *         { key: 'apiKey', type: 'secret' },
@@ -89,7 +98,9 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
     /** Changes are saved to the config store. */
     readonly storage: CliConfigProviderStorage = { ...CLI_CONFIG_STORE_STORAGE };
     private readonly sections: CliConfigSectionDefinition[];
-    private store?: ICliConfigStore;
+    private _ownStore?: ICliConfigStore;
+    private _attached?: ICliConfigStore;
+    private _fallback?: ICliConfigStore;
     private readonly cache = new Map<string, CliConfigStoredSection>();
     private loading?: Promise<void>;
 
@@ -112,14 +123,32 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
             }
         }
         this.sections = options.sections;
+        this._ownStore = options.store;
+    }
+
+    /** The provider's own store (the `store` option or {@link setStore}); the host's store for this id still wins. */
+    get ownStore(): ICliConfigStore | undefined {
+        return this._ownStore;
+    }
+
+    /** The store its changes are kept in: the one the server attached, else its own; undefined before either. */
+    get store(): ICliConfigStore | undefined {
+        return this._attached ?? this._ownStore;
+    }
+
+    /** Sets the provider's own store (as the `store` option); before the provider is registered. */
+    setStore(store: ICliConfigStore | undefined): this {
+        if (this._attached) throw new Error(`the config store of ${this.id} must be set before the provider is registered`);
+        this._ownStore = store;
+        return this;
     }
 
     /**
      * Uses `store` and applies the values stored there. Called by the server when the provider is
-     * registered; without it the provider keeps its changes in memory.
+     * registered, with the store it resolved; without it the provider uses its own store, else memory.
      */
     attachStore(store: ICliConfigStore): Promise<void> {
-        this.store = store;
+        this._attached = store;
         this.cache.clear();
         this.loading = (async () => {
             for (const section of this.sections) {
@@ -141,10 +170,7 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
     }
 
     private ensureStore(): ICliConfigStore {
-        if (!this.store) {
-            this.store = new InMemoryConfigStore();
-        }
-        return this.store;
+        return this._attached ?? this._ownStore ?? (this._fallback ??= new InMemoryConfigStore());
     }
 
     private async stored(sectionId: string): Promise<CliConfigStoredSection> {
@@ -277,16 +303,19 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
 }
 
 /**
- * The `custom` provider: one free key/value section (`custom`) on the server's config store,
- * for the host's own settings (today's admin `custom` section). Values are strings, numbers,
- * booleans, string lists or JSON.
+ * The `custom` provider: one free key/value section (`custom`) for the host's own settings
+ * (today's admin `custom` section), in its own `store` or the server's default one. Values are
+ * strings, numbers, booleans, string lists or JSON.
  */
-export function createCustomConfigProvider(options: { id?: string; title?: string; description?: string; order?: number } = {}): CliStoredConfigProvider {
+export function createCustomConfigProvider(
+    options: { id?: string; title?: string; description?: string; order?: number; store?: ICliConfigStore } = {},
+): CliStoredConfigProvider {
     return new CliStoredConfigProvider({
         id: options.id ?? 'custom',
         title: options.title ?? 'Custom',
         description: options.description ?? 'Free settings of the host application, kept in the config store',
         order: options.order ?? 1000,
+        ...(options.store ? { store: options.store } : {}),
         sections: [{ id: 'custom', title: 'Custom settings', settings: [], allowCustomKeys: true }],
     });
 }

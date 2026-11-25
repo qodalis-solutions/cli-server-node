@@ -51,9 +51,11 @@ export {
     CliConfigStoredSection,
     InMemoryConfigStore,
     JsonFileConfigStore,
+    JsonFileConfigStoreOptions,
     applyCliConfigChanges,
     describeCliConfigStore,
     describeCliConfigStoreLine,
+    describeCliConfigStoreName,
     CLI_CONFIG_STORE_STORAGE,
 } from './config-store';
 export {

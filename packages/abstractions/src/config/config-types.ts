@@ -16,26 +16,31 @@ export const CLI_CONFIG_ENTRY_TYPES: readonly CliConfigEntryType[] = ['string', 
  */
 export type CliConfigSource = 'default' | 'file' | 'environment' | 'database' | 'runtime';
 
-/** What kind of store keeps the writable settings: in `memory` (lost on restart), a JSON `file`, a `database`, or a `custom` store. */
-export type CliConfigStoreKind = 'memory' | 'file' | 'database' | 'custom';
+/**
+ * What kind of store keeps the writable settings: in `memory` (lost on restart), a JSON `file`,
+ * a `database`, `redis`, or a `custom` store.
+ */
+export type CliConfigStoreKind = 'memory' | 'file' | 'database' | 'redis' | 'custom';
 
 /**
- * Where changes are saved (`store` of `GET /api/v1/qcli/config`): what a store says about itself
- * (`ICliConfigStore.describe`). `detail` names the file (relative to the app) or the database and
- * table, never credentials or a connection string.
+ * Where changes are saved: what a store says about itself (`ICliConfigStore.describe`), as each
+ * stored provider's `store` and the top-level `defaultStore` of `GET /api/v1/qcli/config`.
+ * `detail` names the file (relative to the app), the database and table, or the Redis host and
+ * key prefix, never credentials or a connection string.
  */
 export interface CliConfigStoreDescription {
     kind: CliConfigStoreKind;
     /** `In memory`, `JSON file`, `Database`, ... */
     title: string;
-    /** `qcli-demo-config.json`, `PostgreSQL database qcli, table QcliConfig`; `''` when nothing to add. */
+    /** `qcli-demo-config.json`, `PostgreSQL database qcli, table QcliConfig`, `cache:6379/0, prefix qcli:config`; `''` when nothing to add. */
     detail: string;
     /** Changes are kept across restarts. */
     persistent: boolean;
 }
 
 /**
- * Where a provider's settings come from: `store` (changes are saved to the config store),
+ * Where a provider's settings come from: `store` (changes are saved to its config store, the
+ * provider view's `store`),
  * `runtime` (the running process), `options` (the options the server was created with),
  * `environment` (environment variables), `configuration` (the host's configuration, such as
  * .NET's IConfiguration) or `custom`.
@@ -264,12 +269,20 @@ export interface CliConfigProviderView {
     writable: boolean;
     /** Where its settings come from (`sources` always present). */
     storage: Required<CliConfigProviderStorage>;
+    /**
+     * The store its changes are saved to (providers whose storage is `store`: every
+     * `CliStoredConfigProvider`); each provider may have its own. Absent for other providers.
+     */
+    store?: CliConfigStoreDescription;
     sections: CliConfigSectionView[];
 }
 
-/** The body of `GET /api/v1/qcli/config`: where changes are saved, and the providers. */
+/**
+ * The body of `GET /api/v1/qcli/config`: the store providers use unless they have their own
+ * (`defaultStore`), and the providers, each stored one with its `store`.
+ */
 export interface CliConfigListView {
-    store: CliConfigStoreDescription;
+    defaultStore: CliConfigStoreDescription;
     providers: CliConfigProviderView[];
 }
 
@@ -327,8 +340,8 @@ export function isCliConfigError(err: unknown): err is CliConfigError {
 export interface ICliConfigService {
     /** The providers the caller may see (`config:read` and each one's `requiredPermission`), sorted. Throws 403 without `config:read`. */
     list(context: CliConfigContext): Promise<CliConfigProviderView[]>;
-    /** Where writable settings are saved (the config store's own description). */
-    describeStore(): CliConfigStoreDescription;
+    /** The store providers use unless they have their own (its own description). */
+    describeDefaultStore(): CliConfigStoreDescription;
     /** One provider. Throws {@link CliConfigError} 403 / 404. */
     get(providerId: string, context: CliConfigContext): Promise<CliConfigProviderView>;
     /** Changes a section. Throws {@link CliConfigError} 400 / 403 / 404 / 409. */
