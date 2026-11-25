@@ -143,10 +143,11 @@ describe('config command (open server)', () => {
         expect((await run(cli, 'config set app.main.limit')).text).toContain('usage: config set');
     });
 
-    it('set --version: refused when stale, with the current version', async () => {
+    it('set --expected-version: refused when stale, with the current version (--version from raw API callers too)', async () => {
         const current = (await cli.config.get('app', { hasPermission: () => true })).sections[0].version!;
+        expect((await run(cli, 'config set app.main.limit 3 --expected-version 0')).text).toBe(`Error: version conflict (current version ${current})`);
         expect((await run(cli, 'config set app.main.limit 3 --version 0')).text).toBe(`Error: version conflict (current version ${current})`);
-        expect((await run(cli, `config set app.main.limit 3 --version ${current}`)).text).toBe(`Updated app.main.limit = 3 (version ${Number(current) + 1})`);
+        expect((await run(cli, `config set app.main.limit 3 --expected-version ${current}`)).text).toBe(`Updated app.main.limit = 3 (version ${Number(current) + 1})`);
     });
 
     it('secrets are accepted, never printed', async () => {
@@ -166,7 +167,7 @@ describe('config command (open server)', () => {
         expect((await run(cli, 'config set custom.custom.retries 3')).text).toBe('Updated custom.custom.retries = 3 (version 2)');
         expect((await run(cli, 'config get custom.custom.retries')).text).toContain('Type          number');
         expect((await run(cli, 'config reset custom.custom.motd')).text).toBe('Reset custom.custom.motd (version 3)');
-        expect((await run(cli, 'config reset app.main.limit --version 0')).text).toMatch(/^Error: version conflict/);
+        expect((await run(cli, 'config reset app.main.limit --expected-version 0')).text).toMatch(/^Error: version conflict/);
         expect((await run(cli, 'config reset')).text).toContain('usage: config reset');
     });
 

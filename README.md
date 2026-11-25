@@ -904,8 +904,8 @@ longest section id that matches, the rest is the key.
 |---|---|---|
 | `config`, `config list` | `config:read` | Providers and their sections (setting count, version) |
 | `config get <provider>[.<section>[.<key>]]` | `config:read` | A provider, a section, or one setting with its default, source, rules and version |
-| `config set <provider>.<section>.<key> <value> [--version v]` | `config:write` | Changes a setting; a stale `--version` is refused |
-| `config reset <provider>.<section>.<key> [--version v]` | `config:write` | Back to the default (clears a secret, removes a free key) |
+| `config set <provider>.<section>.<key> <value> [--expected-version v]` | `config:write` | Changes a setting; a stale `--expected-version` is refused (not `--version`: the web CLI answers that flag itself) |
+| `config reset <provider>.<section>.<key> [--expected-version v]` | `config:write` | Back to the default (clears a secret, removes a free key) |
 
 Values are read as the setting's type: numbers, `true`/`false`/`yes`/`no`/`on`/`off`, lists as `a,b,c` or a JSON
 array, `json` as JSON; a new key of the custom section as JSON when it parses, else as text. Validation errors are
@@ -932,7 +932,7 @@ $ config set users.sessions.sessionTimeout 10s
 Error: validation failed
   sessionTimeout: must be at least 1m
 
-$ config set cors.cors.allowedOrigins https://other.example --version 0
+$ config set cors.cors.allowedOrigins https://other.example --expected-version 0
 Error: version conflict (current version 1)
 
 $ config set custom.custom.stripeKey sk_live_123

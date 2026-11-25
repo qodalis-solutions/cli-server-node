@@ -16,7 +16,16 @@ import {
     type ICliConfigService,
 } from '@qodalis/cli-server-abstractions';
 
-const versionParam = new CliCommandParameterDescriptor('version', 'The section version the change is based on (refused when stale)', false, 'string');
+/**
+ * `--expected-version`: the section version a change is based on. Not `--version`: the web CLI answers that global
+ * flag itself (it prints the command's version), so it would never reach the server; raw API callers may still send it.
+ */
+const expectedVersionParam = new CliCommandParameterDescriptor('expected-version', 'The section version the change is based on (refused when stale)', false, 'string');
+
+function expectedVersionOf(command: CliProcessCommand): string | undefined {
+    const value = command.args?.['expected-version'] ?? command.args?.version;
+    return value !== undefined && value !== null && value !== true ? String(value) : undefined;
+}
 
 /** The caller of the command (protected servers), as a config context. */
 function contextOf() {
@@ -165,14 +174,14 @@ class ConfigGetProcessor extends CliCommandProcessor {
 
 class ConfigSetProcessor extends CliCommandProcessor {
     command = 'set';
-    description = 'Changes a setting: config set <provider>.<section>.<key> <value> [--version v]';
+    description = 'Changes a setting: config set <provider>.<section>.<key> <value> [--expected-version v]';
     acceptsValue = true;
     valueRequired = true;
     requiredPermissions = [CliConfigPermissions.Write];
-    parameters = [versionParam];
+    parameters = [expectedVersionParam];
     examples = [
         { command: 'config set cors.cors.allowedOrigins https://app.example.com,http://localhost:*', description: 'A list: comma-separated or a JSON array' },
-        { command: 'config set mcp.mcp.readOnly true --version 3', description: 'Refused when the section changed since version 3' },
+        { command: 'config set mcp.mcp.readOnly true --expected-version 3', description: 'Refused when the section changed since version 3' },
         { command: 'config set custom.custom.motd "Hello there"', description: 'A free key of the custom provider' },
     ];
 
@@ -183,7 +192,7 @@ class ConfigSetProcessor extends CliCommandProcessor {
     async handleAsync(command: CliProcessCommand): Promise<string> {
         try {
             const [path, ...words] = getPositionals(command);
-            if (!path || words.length === 0) return 'Error: usage: config set <provider>.<section>.<key> <value> [--version v]';
+            if (!path || words.length === 0) return 'Error: usage: config set <provider>.<section>.<key> <value> [--expected-version v]';
             const { provider, section, key } = await resolvePath(this.service, path);
             if (!section || !key) return 'Error: name a setting: <provider>.<section>.<key>';
             const text = words.join(' ');
@@ -203,7 +212,7 @@ class ConfigSetProcessor extends CliCommandProcessor {
             } catch (err) {
                 return `Error: validation failed\n  ${key}: ${(err as Error).message}`;
             }
-            const version = command.args?.version !== undefined ? String(command.args.version) : undefined;
+            const version = expectedVersionOf(command);
             const result = await this.service.update(provider.id, section.id, { changes: { [key]: value }, ...(version ? { version } : {}) }, contextOf());
             const updated = result.section.entries.find((e) => e.key === key);
             const shown = updated ? formatConfigValue(updated) : '';
@@ -223,7 +232,7 @@ class ConfigResetProcessor extends CliCommandProcessor {
     acceptsValue = true;
     valueRequired = true;
     requiredPermissions = [CliConfigPermissions.Write];
-    parameters = [versionParam];
+    parameters = [expectedVersionParam];
     examples = [{ command: 'config reset cors.cors.allowedOrigins', description: 'Back to the origins the server was started with' }];
 
     constructor(private readonly service: ICliConfigService) {
@@ -236,7 +245,7 @@ class ConfigResetProcessor extends CliCommandProcessor {
             if (!path) return 'Error: usage: config reset <provider>.<section>.<key>';
             const { provider, section, key } = await resolvePath(this.service, path);
             if (!section || !key) return 'Error: name a setting: <provider>.<section>.<key>';
-            const version = command.args?.version !== undefined ? String(command.args.version) : undefined;
+            const version = expectedVersionOf(command);
             const result = await this.service.update(provider.id, section.id, { changes: { [key]: null }, ...(version ? { version } : {}) }, contextOf());
             const updated = result.section.entries.find((e) => e.key === key);
             return [
@@ -251,7 +260,7 @@ class ConfigResetProcessor extends CliCommandProcessor {
 
 /**
  * `config`: the server's configuration from the terminal. `list`, `get <provider>[.<section>[.<key>]]`,
- * `set <provider>.<section>.<key> <value> [--version v]`, `reset <provider>.<section>.<key>`.
+ * `set <provider>.<section>.<key> <value> [--expected-version v]`, `reset <provider>.<section>.<key>`.
  * `config:read` for the command, `config:write` for set and reset; secrets are accepted, never printed.
  */
 export class CliConfigCommandProcessor extends CliCommandProcessor {
