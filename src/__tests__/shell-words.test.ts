@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { splitShellWords, getPositionals, getPositionalText, quoteShellWord, CliProcessCommand } from '../abstractions';
-import { CliBase64CommandProcessor } from '../processors/cli-base64-command-processor';
-import { CliHashCommandProcessor } from '../processors/cli-hash-command-processor';
+import { CliBase64CommandProcessor } from '../../demo/src/processors/cli-base64-command-processor';
+import { CliHashCommandProcessor } from '../../demo/src/processors/cli-hash-command-processor';
 import { buildCliCommand } from '../mcp/providers/commands-provider';
 
 function cmd(value: string | undefined, positionals?: string[], chain: string[] = []): CliProcessCommand {

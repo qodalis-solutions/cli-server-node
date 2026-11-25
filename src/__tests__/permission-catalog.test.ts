@@ -10,6 +10,7 @@ import type { ICliServerAuth } from '../auth/cli-server-auth';
 const CORE_NAMES = [
     'commands:execute',
     'shell:execute',
+    'http:request',
     'files:read',
     'files:write',
     'data:query',

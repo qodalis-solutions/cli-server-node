@@ -33,10 +33,10 @@ describe('GET /permissions', () => {
         const root = await login(cli.app, 'root', ROOT_PASS);
         const res = await request(cli.app).get(`${BASE}/permissions`).set(auth(root.token));
         expect(res.status).toBe(200);
-        expect(res.body).toHaveLength(26);
+        expect(res.body).toHaveLength(27);
         expect(res.body[0]).toEqual({ name: 'commands:execute', description: 'Run commands on the server', group: 'Commands', surface: 'cli' });
-        expect(res.body[13]).toEqual({ name: 'users:read', description: 'See users and their permissions', group: 'Users', surface: 'cli' });
-        expect(res.body[25]).toEqual({ name: 'rates:read', description: 'Official exchange rates', group: 'Rates', surface: 'host' });
+        expect(res.body[14]).toEqual({ name: 'users:read', description: 'See users and their permissions', group: 'Users', surface: 'cli' });
+        expect(res.body[26]).toEqual({ name: 'rates:read', description: 'Official exchange rates', group: 'Rates', surface: 'host' });
         for (const entry of res.body) {
             expect(Object.keys(entry)).toEqual(['name', 'description', 'group', 'surface']);
         }
@@ -70,9 +70,9 @@ describe('GET /permissions', () => {
         expect(names((await request(cli.app).get(`${BASE}/permissions`).set(auth(bob.token))).body)).toEqual(['users:read']);
         const all = await request(cli.app).get(`${BASE}/permissions?all=true`).set(auth(bob.token));
         expect(all.status).toBe(200);
-        expect(all.body).toHaveLength(26);
+        expect(all.body).toHaveLength(27);
         const rootAll = await request(cli.app).get(`${BASE}/permissions?all=true`).set(auth((await login(cli.app, 'root', ROOT_PASS)).token));
-        expect(rootAll.body).toHaveLength(26);
+        expect(rootAll.body).toHaveLength(27);
     });
 
     it('?all=<other> → 400; anonymous → 401', async () => {
@@ -111,7 +111,7 @@ describe('GET /permissions', () => {
         const { cli, plugin } = await startServer();
         cli.setAuth(undefined);
         cli.setAuth(plugin.serverAuth);
-        expect(cli.builder.permissions.all()).toHaveLength(26);
+        expect(cli.builder.permissions.all()).toHaveLength(27);
         expect(plugin.authService.permissionCatalog()).toBe(cli.builder.permissions);
     });
 
@@ -135,7 +135,7 @@ describe('GET /permissions', () => {
         cli.setAuth(undefined);
         expect(() => cli.setAuth(plugin.serverAuth)).not.toThrow();
         expect(() => plugin.serverAuth.attachToServer({ broadcast: () => undefined, permissions: cli.builder.permissions })).not.toThrow();
-        expect(cli.builder.permissions.all()).toHaveLength(26);
+        expect(cli.builder.permissions.all()).toHaveLength(27);
         expect(cli.builder.permissions.find('users:read')?.surface).toBe('cli');
     });
 });

@@ -7,7 +7,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
+import { CliEchoCommandProcessor } from '../../demo/src/processors/cli-echo-command-processor';
 import { CliUsersBuilder, UsersModuleOptions, UsersPluginResult } from '../../plugins/users/index';
 import { BASE, ROOT_PASS, auth, login } from './users-test-helpers';
 

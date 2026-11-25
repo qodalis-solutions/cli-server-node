@@ -8,7 +8,7 @@ import request from 'supertest';
 import { WebSocket } from 'ws';
 import { AddressInfo } from 'net';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
+import { CliEchoCommandProcessor } from '../../demo/src/processors/cli-echo-command-processor';
 import { CliUsersBuilder, UsersPluginResult, hashToken, InMemoryApiTokenStore } from '../../plugins/users/index';
 import type { ApiToken, ICliApiTokenStore } from '../../plugins/users/index';
 import { BASE, ROOT_PASS, auth, createGroup, createTestServer, createUser, login } from './users-test-helpers';

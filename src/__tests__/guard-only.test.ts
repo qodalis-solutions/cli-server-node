@@ -9,7 +9,7 @@ import { Router } from 'express';
 import request from 'supertest';
 import { WebSocket } from 'ws';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliEchoCommandProcessor } from '../processors/cli-echo-command-processor';
+import { CliEchoCommandProcessor } from '../../demo/src/processors/cli-echo-command-processor';
 import {
     CliUsersBuilder,
     InMemoryApiTokenStore,

@@ -4,7 +4,7 @@ import { createCliServer } from '../create-cli-server';
 import { CliCommandProcessor, CliCommandParameterDescriptor, CliProcessCommand, ICliCommandProcessor } from '../abstractions';
 import { CliCommandRegistry } from '../services/cli-command-registry';
 import { processorPermissions } from '../auth/cli-server-auth-gate';
-import { CliHashCommandProcessor } from '../processors/cli-hash-command-processor';
+import { CliHashCommandProcessor } from '../../demo/src/processors/cli-hash-command-processor';
 import { commandInputSchema } from '../mcp/providers/commands-provider';
 import { validateMcpArguments } from '../mcp/mcp-schema';
 

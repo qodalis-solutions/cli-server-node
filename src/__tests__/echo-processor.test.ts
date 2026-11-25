@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { CliEchoCommandProcessor, joinShellWords } from '../processors/cli-echo-command-processor';
+import { CliEchoCommandProcessor } from '../../demo/src/processors/cli-echo-command-processor';
+import { joinShellWords } from '../abstractions';
 import { CliProcessCommand } from '../abstractions';
 
 function echo(value: string | undefined): Promise<string> {

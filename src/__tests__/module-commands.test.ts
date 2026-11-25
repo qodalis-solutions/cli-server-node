@@ -1,6 +1,6 @@
 /**
  * GET /commands lists a command added by a module under the module's name (`module`), unless the command names a
- * module itself: the aws module, the demo's own commands (demo module) and the built-in commands (core).
+ * module itself: the aws module, the demo's own commands (demo module) and the built-in http command (core).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
@@ -11,7 +11,7 @@ import { CliBuilder } from '../extensions/cli-builder';
 import { ICliCommandProcessor } from '../abstractions';
 import { DefaultLibraryAuthor } from '../abstractions/cli-command-author';
 import { CliCommandRegistry } from '../services/cli-command-registry';
-import { CliBase64CommandProcessor, CliHashCommandProcessor, CliHttpCommandProcessor, CliSystemCommandProcessor } from '../processors';
+import { CliHttpCommandProcessor } from '../processors';
 import { DemoModule } from '../../demo/src/demo-module';
 
 const disposables: Array<() => void> = [];
@@ -91,21 +91,13 @@ describe('module of the listed commands', () => {
 
         const list = await modules(cli);
 
-        for (const command of ['echo', 'status', 'time', 'hello', 'math']) expect(list[command]).toBe('demo');
+        for (const command of ['echo', 'status', 'time', 'hello', 'math', 'system', 'hash', 'base64']) expect(list[command]).toBe('demo');
         expect(cli.builder.modules.map((m) => m.name)).toContain('demo');
     });
 
-    it('the built-in system, http, hash and base64 commands are listed under core', async () => {
-        const cli = start((b) =>
-            b
-                .addProcessor(new CliSystemCommandProcessor())
-                .addProcessor(new CliHttpCommandProcessor())
-                .addProcessor(new CliHashCommandProcessor())
-                .addProcessor(new CliBase64CommandProcessor()),
-        );
+    it('the built-in http command is listed under core', async () => {
+        const cli = start((b) => b.addProcessor(new CliHttpCommandProcessor()));
 
-        const list = await modules(cli);
-
-        for (const command of ['system', 'http', 'hash', 'base64']) expect(list[command]).toBe('core');
+        expect((await modules(cli)).http).toBe('core');
     });
 });
