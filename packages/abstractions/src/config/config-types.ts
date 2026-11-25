@@ -12,9 +12,24 @@ export const CLI_CONFIG_ENTRY_TYPES: readonly CliConfigEntryType[] = ['string', 
 
 /**
  * Where a setting's current value comes from: its `default`, a configuration `file`, an
- * `environment` variable, the `database`, or a change made at `runtime` (kept in memory).
+ * `environment` variable, the `database`, a change made at `runtime` (kept in memory), or the
+ * host's `code` (the options a plugin was added with: `builder.addPlugin(entry, options)`).
  */
-export type CliConfigSource = 'default' | 'file' | 'environment' | 'database' | 'runtime';
+export type CliConfigSource = 'default' | 'file' | 'environment' | 'database' | 'runtime' | 'code';
+
+/**
+ * Who decided a setting's current value, for the dashboard: the host's `code` (a plugin's code options, an
+ * environment variable), a saved `setting` (config API, `config set`, the dashboard), or the `default`. A saved
+ * setting wins over the code's value, which wins over the default.
+ */
+export type CliConfigOrigin = 'code' | 'setting' | 'default';
+
+/** The origin of an entry that does not state one: from its `source`. */
+export function cliConfigOriginOf(source: CliConfigSource | undefined): CliConfigOrigin {
+    if (!source || source === 'default') return 'default';
+    if (source === 'code' || source === 'environment') return 'code';
+    return 'setting';
+}
 
 /**
  * What kind of store keeps the writable settings: in `memory` (lost on restart), a JSON `file`,
@@ -88,6 +103,8 @@ export interface CliConfigEntry {
     /** The value the setting has when nothing sets it (`null` when none). */
     default?: CliConfigValue;
     source?: CliConfigSource;
+    /** Who decided the value (default: from `source`, {@link cliConfigOriginOf}). */
+    origin?: CliConfigOrigin;
     /** The setting can be changed (`PATCH`, `config set`, `config_set`). */
     mutable?: boolean;
     /** A change takes effect only after the server restarts. */
@@ -97,6 +114,8 @@ export interface CliConfigEntry {
     /** For a sensitive entry whose `value` the provider leaves out: whether one is set. */
     isSet?: boolean;
     validation?: CliConfigValidation;
+    /** A plugin needs a value to run (without one it loads as `needs-configuration`). */
+    required?: boolean;
     /** A hint for a richer input: `tags`, `cron`, `code`, `origins`, `textarea`, ... */
     editor?: string;
 }
@@ -237,12 +256,16 @@ export interface CliConfigEntryView {
     /** `null` for a sensitive entry. */
     default: CliConfigValue;
     source: CliConfigSource;
+    /** `code`, `setting` or `default`: who decided the value (a secret's too, its value never returned). */
+    origin: CliConfigOrigin;
     mutable: boolean;
     requiresRestart: boolean;
     sensitive: boolean;
     /** Sensitive entries only. */
     isSet?: boolean;
     validation?: CliConfigValidation;
+    /** Present (true) when a plugin needs a value to run. */
+    required?: boolean;
     editor?: string;
 }
 

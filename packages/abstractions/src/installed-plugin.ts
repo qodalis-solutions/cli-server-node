@@ -19,7 +19,13 @@ export interface CliInstalledPlugin {
     /** One emoji or an image URL shown for the package; undefined = none (the dashboard shows a default). */
     icon?: string;
     /** `marketplace` for a package installed at runtime (`<dataDir>/server-plugins`); absent for the host's own. */
-    source?: 'marketplace';
+    source?: 'marketplace' | 'code';
+    /** `needs-configuration`: added (in code or from the marketplace) but waiting for required settings. */
+    status?: 'needs-configuration';
+    /** Those settings (`<section>.<key>`) or the reason. */
+    missing?: string[];
+    /** The id of the plugin's settings provider (`config get <id>`, the dashboard's Config page). */
+    settings?: string;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
     type CliConfigEntry,
     type CliConfigEntryType,
     type CliConfigErrors,
+    type CliConfigOrigin,
     type CliConfigProviderStorage,
     type CliConfigSection,
     type CliConfigSource,
@@ -25,7 +26,10 @@ export interface CliConfigSettingDefinition {
     type: CliConfigEntryType;
     /** The value when nothing is stored (what the host configured); `null` when none. */
     default?: CliConfigValue;
-    /** Where `default` comes from (e.g. `environment` when the host read it from a variable); default `default`. */
+    /**
+     * Where `default` comes from (e.g. `environment` when the host read it from a variable, `code` for a plugin's code
+     * options); default `default`. A stored value shows the store's source and origin `setting`.
+     */
     source?: CliConfigSource;
     /** Can be changed (default true). A read-only setting shows `value()` (or `default`). */
     mutable?: boolean;
@@ -33,6 +37,11 @@ export interface CliConfigSettingDefinition {
     /** Never returned; every `secret` is sensitive. */
     sensitive?: boolean;
     validation?: CliConfigValidation;
+    /**
+     * The plugin needs a value to run: without one (`null`, `''`, `[]`) it loads as `needs-configuration`
+     * ({@link CliStoredConfigProvider.missingRequired}). Unlike `validation.required`, the value may still be reset.
+     */
+    required?: boolean;
     editor?: string;
     /** The live value of a read-only setting (read on every `getSections`). */
     value?: () => CliConfigValue;
@@ -203,6 +212,37 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
         return undefined;
     }
 
+    /**
+     * Who decided a setting's effective value: `setting` (stored), `code` (its default comes from the host's code or
+     * environment), else `default`; undefined for an unknown key.
+     */
+    origin(sectionId: string, key: string): CliConfigOrigin | undefined {
+        const section = this.section(sectionId);
+        const setting = section?.settings.find((s) => s.key === key);
+        const stored = this.cache.get(sectionId)?.values;
+        const isStored = !!stored && Object.prototype.hasOwnProperty.call(stored, key);
+        if (!setting) return section?.allowCustomKeys && isStored ? 'setting' : undefined;
+        if (setting.mutable !== false && isStored) return 'setting';
+        return setting.source === 'code' || setting.source === 'environment' ? 'code' : 'default';
+    }
+
+    /**
+     * The settings marked `required` (or `validation.required`) whose effective value is empty (`null`, `''` or `[]`), as
+     * `<section>.<key>`: what a plugin needs before it can run (its state `needs-configuration`).
+     */
+    missingRequired(): string[] {
+        const missing: string[] = [];
+        for (const section of this.sections) {
+            for (const setting of section.settings) {
+                if (setting.required !== true && setting.validation?.required !== true) continue;
+                const value = this.value(section.id, setting.key);
+                const empty = value === null || value === undefined || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && value.length === 0);
+                if (empty) missing.push(`${section.id}.${setting.key}`);
+            }
+        }
+        return missing;
+    }
+
     async getSections(_context?: CliConfigContext): Promise<CliConfigSection[]> {
         const result: CliConfigSection[] = [];
         for (const section of this.sections) {
@@ -222,10 +262,12 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
                         ? { value: null, default: null, isSet: value !== null && value !== undefined && value !== '' }
                         : { value: cloneCliConfigValue(value), default: cloneCliConfigValue(setting.default ?? null) }),
                     source: overridden ? source : (setting.source ?? 'default'),
+                    origin: overridden ? ('setting' as const) : setting.source === 'code' || setting.source === 'environment' ? ('code' as const) : ('default' as const),
                     mutable,
                     requiresRestart: setting.requiresRestart === true,
                     sensitive,
                     ...(setting.validation ? { validation: { ...setting.validation } } : {}),
+                    ...(setting.required ? { required: true } : {}),
                     ...(setting.editor ? { editor: setting.editor } : {}),
                 };
             });
@@ -239,6 +281,7 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
                         value: cloneCliConfigValue(value),
                         default: null,
                         source,
+                        origin: 'setting',
                         mutable: true,
                     });
                 }

@@ -2,6 +2,8 @@ export {
     CliConfigEntryType,
     CLI_CONFIG_ENTRY_TYPES,
     CliConfigSource,
+    CliConfigOrigin,
+    cliConfigOriginOf,
     CliConfigStoreKind,
     CliConfigStoreDescription,
     CliConfigStorageKind,
