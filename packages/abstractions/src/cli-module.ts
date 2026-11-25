@@ -26,6 +26,12 @@ export interface ICliModule {
 
     /** Config providers the module brings (its settings), registered with the module (`builder.addModule`). */
     configProviders?: ICliConfigProvider[];
+
+    /**
+     * Permissions its commands require (`requiredPermissions`), added to the server's permission catalog with the
+     * module (`builder.addModule`, surface `cli`); a name already in the catalog is left as registered.
+     */
+    permissions?: Array<{ name: string; description: string; group: string }>;
 }
 
 /**

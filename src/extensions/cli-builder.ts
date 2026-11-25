@@ -196,6 +196,12 @@ export class CliBuilder {
         for (const provider of module.configProviders ?? []) {
             this.addConfigProvider(provider);
         }
+        if (module.permissions?.length) {
+            // A name already in the catalog (the host's, or the module added twice) stays as registered
+            const known = new Set(this.permissions.all().map((p) => p.name.toLowerCase()));
+            const fresh = module.permissions.filter((p) => typeof p?.name !== 'string' || !known.has(p.name.toLowerCase()));
+            if (fresh.length) this.addPermissions(fresh, 'cli');
+        }
         return this;
     }
 
