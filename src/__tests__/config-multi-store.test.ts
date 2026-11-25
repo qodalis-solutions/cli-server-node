@@ -33,6 +33,8 @@ import { CliConfigService } from '../config/cli-config-service';
 import { CliEventBus } from '../services/cli-event-bus';
 import { createCliServer, CliServerResult } from '../create-cli-server';
 import { CliAdminBuilder, CliAdminPluginResult } from '../../plugins/admin';
+import { CliUsersBuilder } from '../../plugins/users/index';
+import { CliPortalBuilder } from '@qodalis/cli-server-plugin-portal';
 
 const V1 = '/api/v1/qcli';
 const all = cliConfigContext(undefined, 'api');
@@ -497,5 +499,31 @@ describe('createCliServer config.stores and builder.setConfigStore(store, id) ar
         const own = new NamedStore('own');
         const custom = createCustomConfigProvider({ id: 'extra', store: own });
         expect(custom.ownStore).toBe(own);
+    });
+});
+
+describe('the plugin builders give their provider its own store', () => {
+    it('jobs, users, portal and admin (logs): setConfigStore sets the provider own store; none by default', () => {
+        const store = new NamedStore('plugin');
+        const jobs = new CliJobsBuilder().setConfigStore(store).build();
+        const users = new CliUsersBuilder().setDefaultAdminPassword('rootpass1').setConfigStore(store).build();
+        const portal = new CliPortalBuilder().setConfigStore(store).build();
+        const own = (providers: ICliConfigProvider[] | undefined, id: string) => (providers ?? []).find((p) => p.id === id) as CliStoredConfigProvider;
+        expect(own(jobs.configProviders, 'jobs').ownStore).toBe(store);
+        expect(own(users.configProviders, 'users').ownStore).toBe(store);
+        expect(own(portal.configProviders, 'portal').ownStore).toBe(store);
+        users.dispose();
+        expect(own(new CliJobsBuilder().build().configProviders, 'jobs').ownStore).toBeUndefined();
+
+        const cli = createCliServer({});
+        const admin = new CliAdminBuilder()
+            .setCredentials('admin', 'adminpass')
+            .setJwtSecret('jwt-secret-for-tests')
+            .setConfigStore(store)
+            .build({ registry: cli.registry, eventSocketManager: cli.eventSocketManager, builder: cli.builder, broadcastFn: () => {} });
+        admin.logBuffer.restoreConsole();
+        expect(cli.config.describeProviderStore('logs')!.title).toBe('plugin');
+        expect(cli.config.describeProviderStore('auth')).toBeUndefined();
+        admin.dispose();
     });
 });
