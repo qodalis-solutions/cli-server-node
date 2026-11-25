@@ -74,7 +74,7 @@ describe('config API on an open server (static admin)', () => {
         const res = await request(app).get(`${V1}/config`).set(bearer(token)).expect(200);
         expect(res.headers['cache-control']).toBe('no-store');
         const ids = res.body.providers.map((p: any) => p.id);
-        expect(ids).toEqual(['server', 'auth', 'host', 'cors', 'mcp', 'jobs', 'logs', 'billing', 'custom']);
+        expect(ids).toEqual(['server', 'auth', 'host', 'cors', 'mcp', 'jobs', 'logs', 'dashboard-plugins', 'billing', 'custom']);
         const billingView = res.body.providers.find((p: any) => p.id === 'billing');
         expect(Object.keys(res.body).sort()).toEqual(['defaultStore', 'providers']);
         expect(res.body.defaultStore).toEqual({ kind: 'memory', title: 'In memory', detail: '', persistent: false });
@@ -84,7 +84,7 @@ describe('config API on an open server (static admin)', () => {
         expect(storage.server).toEqual({ kind: 'runtime', description: 'Read from the running server process', sources: [] });
         expect(storage.host).toEqual({ kind: 'options', description: 'Server options and environment variables', sources: ['Server options', 'Environment variables'] });
         expect(storage.auth).toMatchObject({ kind: 'options', sources: [] });
-        for (const id of ['cors', 'mcp', 'jobs', 'logs', 'custom']) expect(storage[id].kind).toBe('store');
+        for (const id of ['cors', 'mcp', 'jobs', 'logs', 'dashboard-plugins', 'custom']) expect(storage[id].kind).toBe('store');
         expect(billingView).toMatchObject({ title: 'Billing', description: '', order: 100, writable: true });
         const section = billingView.sections[0];
         expect(Object.keys(section).sort()).toEqual(['allowCustomKeys', 'description', 'entries', 'id', 'mutable', 'title', 'version']);

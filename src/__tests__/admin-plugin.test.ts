@@ -244,12 +244,12 @@ describe('Admin Plugins', () => {
 // ---------------------------------------------------------------------------
 
 describe('Admin Config', () => {
-    it('GET /config — returns the providers: the plugin brings auth and logs', async () => {
+    it('GET /config — returns the providers: the plugin brings auth, logs and dashboard-plugins', async () => {
         const res = await authed(request(app).get('/api/v1/qcli/config')).expect(200);
 
         expect(Array.isArray(res.body.providers)).toBe(true);
         const ids = res.body.providers.map((p: any) => p.id);
-        expect(ids).toEqual(['auth', 'logs']);
+        expect(ids).toEqual(['auth', 'logs', 'dashboard-plugins']);
 
         const auth = res.body.providers[0];
         expect(auth.writable).toBe(false);

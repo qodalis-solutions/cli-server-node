@@ -406,6 +406,8 @@ describe('a server with providers in several stores', () => {
             cors: { kind: 'file', title: 'JSON file', detail: 'app.json, section qcli', persistent: true },
             mcp: { kind: 'file', title: 'JSON file', detail: 'app.json, section qcli', persistent: true },
             logs: { kind: 'custom', title: 'logs-store', detail: 'logs-store-detail', persistent: true },
+            // the dashboard plugins' settings: no store of their own, the default one
+            'dashboard-plugins': { kind: 'file', title: 'JSON file', detail: 'app.json, section qcli', persistent: true },
             jobs: { kind: 'database', title: 'Database', detail: 'SQLite database qcli-demo.sqlite, table QcliConfig', persistent: true },
             billing: { kind: 'redis', title: 'Redis', detail: 'Redis-detail', persistent: true },
             custom: { kind: 'redis', title: 'Redis', detail: 'Redis-detail', persistent: true },
@@ -482,6 +484,7 @@ describe('a server with providers in several stores', () => {
             'mcp  MCP  · JSON file (app.json, section qcli)',
             'jobs  Jobs  · Database (SQLite database qcli-demo.sqlite, table QcliConfig)',
             'logs  Logs  · logs-store (logs-store-detail)',
+            'dashboard-plugins  Dashboard plugins  · JSON file (app.json, section qcli)',
             'billing  Billing  · Redis (Redis-detail)',
             'custom  Custom  · Redis (Redis-detail)',
         ]);
