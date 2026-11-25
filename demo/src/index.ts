@@ -4,6 +4,8 @@ import {
     CliHttpCommandProcessor,
     CliHashCommandProcessor,
     CliBase64CommandProcessor,
+    CliStoredConfigProvider,
+    JsonFileConfigStore,
 } from '@qodalis/cli-server-node';
 import { CliEchoCommandProcessor } from './processors/cli-echo-command-processor';
 import { CliStatusCommandProcessor } from './processors/cli-status-command-processor';
@@ -52,8 +54,44 @@ const allowedOrigins = process.env.QCLI_ALLOWED_ORIGINS
           'http://127.0.0.1:*',
       ];
 
-const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin } = createCliServer({
+// Config providers: settings changed from the dashboard's Config page, `config set` or MCP `config_set` are kept in
+// a JSON file (QCLI_DEMO_CONFIG) and applied again at the next start.
+const configStore = new JsonFileConfigStore(process.env.QCLI_DEMO_CONFIG ?? path.join(os.tmpdir(), 'qcli-demo-config.json'));
+
+// A host app's own settings: what the demo's greeting says, and a secret it never shows
+const greeting = { text: 'Hello from the Qodalis CLI demo', apiKey: null as string | null };
+const demoConfig = new CliStoredConfigProvider({
+    id: 'demo',
+    title: 'Demo app',
+    description: "The demo host application's own settings",
+    sections: [
+        {
+            id: 'greeting',
+            title: 'Greeting',
+            settings: [
+                {
+                    key: 'text',
+                    label: 'Greeting',
+                    type: 'string',
+                    default: greeting.text,
+                    validation: { required: true, max: 120 },
+                    apply: (v) => (greeting.text = String(v)),
+                },
+                {
+                    key: 'apiKey',
+                    label: 'Partner API key',
+                    description: 'Never shown, only whether it is set',
+                    type: 'secret',
+                    apply: (v) => (greeting.apiKey = (v as string | null) ?? null),
+                },
+            ],
+        },
+    ],
+});
+
+const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin, config } = createCliServer({
     allowedOrigins,
+    config: { store: configStore },
     // The demo exposes the interactive shell. The users plugin is mounted below, so
     // the shell runs in "users" mode: a WS ticket from a session holding
     // shell:execute (root has '*'). Without the users plugin, set shell.token
@@ -72,6 +110,7 @@ const { app, registry, builder, executor, eventSocketManager, logSocketManager, 
         instructions: 'Qodalis CLI demo server: each tool runs one CLI command.',
     },
     configure: (builder) => {
+        builder.addConfigProvider(demoConfig);
         builder
             .addProcessor(new CliEchoCommandProcessor())
             .addProcessor(new CliStatusCommandProcessor())
@@ -369,6 +408,9 @@ mountPlugin(databasesPlugin);
 // Public API (host tokens, quotas, OpenAPI + Swagger UI), guides and the portal
 // -----------------------------------------------------------
 addPublicApi({ app, builder, mountPlugin }, usersPlugin);
+
+// Stored settings are applied once loaded (immediate for the file store; await it with a database store)
+config.ready().catch((err) => console.error('[demo] config store failed:', err));
 
 const server = app.listen(port, () => {
     console.log(`CLI demo server (Node.js) listening on http://localhost:${port}`);
