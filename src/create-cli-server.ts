@@ -1,4 +1,4 @@
-import express, { Express, Router } from 'express';
+import express, { Express, NextFunction, Request, Response, Router } from 'express';
 import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventBus, CliEventSocketManager, CliLogSocketManager } from './services';
 import { withFileStorageEvents } from './filesystem/file-storage-events';
@@ -113,6 +113,12 @@ export interface MountablePlugin {
      * files are served at its prefix (outside the API, so the dashboard loads them without a token).
      */
     dashboardPages?: CliDashboardModulePage[];
+    /**
+     * Further files the plugin serves outside the API (no sign-in), each handler at its `prefix`; a handler calls
+     * `next()` for what it does not serve. The admin plugin serves its marketplace dashboard plugins this way
+     * (`/qcli/modules/<id>/extension.js`), so pages installed at runtime need no new route.
+     */
+    assetRoutes?: Array<{ prefix: string; handler: (req: Request, res: Response, next: NextFunction) => void }>;
     /** Receives the server's event bus when mounted (the jobs and audit plugins publish their events on it). */
     setEventBus?(eventBus: ICliEventBus): void;
     /**
@@ -689,6 +695,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             }
             for (const page of pages) {
                 app.use(page.prefix, page.handler);
+            }
+            for (const route of plugin.assetRoutes ?? []) {
+                app.use(route.prefix, route.handler);
             }
         }
         if (isJobScheduler(plugin.scheduler)) {

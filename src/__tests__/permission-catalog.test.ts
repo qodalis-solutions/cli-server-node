@@ -18,6 +18,7 @@ const CORE_NAMES = [
     'jobs:manage',
     'logs:read',
     'admin:access',
+    'dashboard:install',
     'config:read',
     'config:write',
     'audit:read',

@@ -77,15 +77,22 @@ export class CliBuilder {
      * audited (`config.update`) and published (`config:changed`).
      */
     readonly config: CliConfigService = new CliConfigService(this.configRegistry, {
-        audit: () => {
-            if (this._configAuditStore) {
-                const store = this._configAuditStore;
-                return (entry) => store.log(entry);
-            }
-            return this._configAudit?.();
-        },
+        audit: () => this.auditSink,
         eventBus: () => this._configEventBus?.(),
     });
+
+    /**
+     * Where the server's own changes are audited (`config.update`, the admin plugin's `dashboard.plugin.*`):
+     * the store set with `setConfigAuditStore`, else the auth provider's log (the users plugin's). Undefined
+     * when there is neither.
+     */
+    get auditSink(): ((entry: AuditEntry) => Promise<void>) | undefined {
+        if (this._configAuditStore) {
+            const store = this._configAuditStore;
+            return (entry) => store.log(entry);
+        }
+        return this._configAudit?.();
+    }
 
     constructor(registry: CliCommandRegistry) {
         this._registry = registry;
@@ -147,6 +154,18 @@ export class CliBuilder {
         }
         this._dashboardExtensions.push(valid);
         return this;
+    }
+
+    /**
+     * Removes a dashboard extension at runtime (the admin plugin's marketplace plugins); the list
+     * (`GET /api/v1/qcli/dashboard/extensions`) reads the registry on every request. False when no
+     * extension has that id.
+     */
+    removeDashboardExtension(id: string): boolean {
+        const index = this._dashboardExtensions.findIndex((e) => e.id === id);
+        if (index < 0) return false;
+        this._dashboardExtensions.splice(index, 1);
+        return true;
     }
 
     /**
