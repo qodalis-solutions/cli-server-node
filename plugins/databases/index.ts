@@ -28,3 +28,4 @@ export { DatabasesMcpToolProvider, DatabasesMcpTool } from './mcp';
 export { DATABASES_DASHBOARD_PREFIX, DATABASES_DASHBOARD_MODULE, databasesDashboardPage } from './dashboard-page';
 export { databasesInstalledPlugin, DATABASES_PLUGIN_ID } from './package-info';
 export { CliDatabaseStats, CliDatabaseTableStats, collectDatabaseStats, databaseSize } from './stats';
+export { CliDatabaseConfigStore, CliDatabaseConfigStoreOptions, configStoreMigrations } from './config-store';
