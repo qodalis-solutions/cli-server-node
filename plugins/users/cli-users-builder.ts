@@ -1,5 +1,6 @@
 import { Router, json, Request, Response, NextFunction, RequestHandler } from 'express';
-import type { CliDashboardModulePage, ICliEventBus } from '@qodalis/cli-server-abstractions';
+import type { CliDashboardModulePage, ICliConfigProvider, ICliEventBus } from '@qodalis/cli-server-abstractions';
+import { createUsersConfigProvider } from './users-config-provider';
 import { CliAuditBuilder, CliAuditGuard, CliAuditPluginResult, ICliAuditStore } from '@qodalis/cli-server-plugin-audit';
 import { AuthAdapter, TokenUsageProvider, User, UsersBroadcastFn, UsersModuleOptions } from './models';
 import {
@@ -63,6 +64,8 @@ export interface UsersPluginResult {
      * builds; none in guard-only mode.
      */
     dashboardPages: CliDashboardModulePage[];
+    /** The `users` config provider (sessions, lockout, passwords), registered by `mountPlugin`. */
+    configProviders: ICliConfigProvider[];
     apiTokenStore: ICliApiTokenStore;
     /**
      * API tokens the host creates, lists and revokes for its users (same rules as the
@@ -526,6 +529,16 @@ export class CliUsersBuilder {
             installedPlugin: usersInstalledPlugin,
             installedPlugins: [auditPlugin.installedPlugin],
             dashboardPages: guardOnly ? [] : [...usersPages, ...(tokensPage ? [tokensPage] : []), ...(auditPlugin.dashboardPages ?? [])],
+            configProviders: [
+                createUsersConfigProvider(authService, {
+                    protectServer,
+                    signIn: guardOnly ? 'guard-only' : externalAuth ? 'external' : 'users',
+                    allowNonExpiringTokens: authService.allowNonExpiringTokens,
+                    apiTokensWithExternalAuth,
+                    usersReadOnly,
+                    groupsReadOnly,
+                }),
+            ],
         };
     }
 }

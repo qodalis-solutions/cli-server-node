@@ -80,3 +80,4 @@ export {
 export { createPermissionsController } from './controllers/permissions-controller';
 export { HttpError } from './errors';
 export { ACCOUNT_DASHBOARD_MODULE, TOKENS_DASHBOARD_MODULE, USERS_DASHBOARD_MODULE, tokensDashboardPage, usersDashboardPages } from './dashboard-page';
+export { createUsersConfigProvider, UsersConfigFacts } from './users-config-provider';

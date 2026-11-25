@@ -151,11 +151,12 @@ interface TicketEntry {
  * by id; the live user is resolved on every request.
  */
 export class AuthService {
-    readonly sessionTimeoutMs: number;
-    readonly maxLoginAttempts: number;
-    readonly lockoutMs: number;
-    readonly minPasswordLength: number;
-    readonly maxSessionLifetimeMs: number;
+    /** Read on every use: the `users` config provider changes it (and the four below) at runtime. */
+    sessionTimeoutMs: number;
+    maxLoginAttempts: number;
+    lockoutMs: number;
+    minPasswordLength: number;
+    maxSessionLifetimeMs: number;
     readonly allowNonExpiringTokens: boolean;
     /** Users signed in by the host's auth adapter (no session) may create API tokens. */
     readonly apiTokensWithExternalAuth: boolean;
