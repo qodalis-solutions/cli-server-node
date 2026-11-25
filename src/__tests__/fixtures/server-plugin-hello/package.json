@@ -1,0 +1,16 @@
+{
+    "name": "@acme/cli-server-plugin-hello",
+    "version": "1.2.0",
+    "description": "A tiny server plugin installed at runtime (loader tests)",
+    "main": "lib/plugin.js",
+    "peerDependencies": {
+        "@qodalis/cli-server-abstractions": "^1.0.0-beta.3"
+    },
+    "qodalis": {
+        "kind": "server",
+        "plugin": "hello",
+        "entry": "./lib/plugin.js",
+        "title": "Hello",
+        "icon": "👋"
+    }
+}
