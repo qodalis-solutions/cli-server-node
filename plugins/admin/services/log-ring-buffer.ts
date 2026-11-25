@@ -279,11 +279,14 @@ export class LogRingBuffer {
         };
 
         console.error = (...args: unknown[]) => {
+            const message = args.map(String).join(' ');
+            // Node prints its process warnings (deprecations, experimental features) through console.error
+            const nodeWarning = isNodeWarning(message);
             this.push({
                 timestamp: new Date().toISOString(),
-                level: 'ERROR',
-                message: args.map(String).join(' '),
-                source: 'console',
+                level: nodeWarning ? 'WARN' : 'ERROR',
+                message,
+                source: nodeWarning ? 'node' : 'console',
             });
             this._origError!.apply(console, args);
         };
@@ -297,4 +300,9 @@ export class LogRingBuffer {
         if (this._origWarn) console.warn = this._origWarn;
         if (this._origError) console.error = this._origError;
     }
+}
+
+/** `(node:1234) [DEP0205] DeprecationWarning: …`, `(node:1234) ExperimentalWarning: …`: a warning Node printed itself. */
+export function isNodeWarning(message: string): boolean {
+    return /^\(node:\d+\) (?:\[[A-Z0-9_]+\] )?[A-Za-z]*Warning:/.test(message);
 }

@@ -23,6 +23,7 @@ export {
     LOG_BUFFER_MIN_CAPACITY,
     LOG_BUFFER_MAX_CAPACITY,
     logEntryFilter,
+    isNodeWarning,
 } from './services/log-ring-buffer';
 export {
     StatusSampler,
