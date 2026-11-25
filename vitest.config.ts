@@ -32,6 +32,10 @@ export default defineConfig({
                 __dirname,
                 'plugins/databases/index.ts',
             ),
+            '@qodalis/cli-server-plugin-config-redis': path.resolve(
+                __dirname,
+                'plugins/config-redis/index.ts',
+            ),
             '@qodalis/cli-server-plugin-filesystem-s3': path.resolve(
                 __dirname,
                 'plugins/filesystem-s3/index.ts',

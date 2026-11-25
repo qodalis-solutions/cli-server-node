@@ -64,6 +64,7 @@ jobs:
           cd ../audit && npx tsc
           cd ../users && npx tsc
           cd ../users-postgres && npx tsc
+          cd ../config-redis && npx tsc
           cd ../public-api && npx tsc
           cd ../docs && npx tsc
           cd ../data-explorer && npx tsc

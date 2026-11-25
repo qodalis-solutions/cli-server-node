@@ -50,6 +50,7 @@ jobs:
           cd ../audit && npx tsc
           cd ../users && npx tsc
           cd ../users-postgres && npx tsc
+          cd ../config-redis && npx tsc
           cd ../public-api && npx tsc
           cd ../docs && npx tsc
           cd ../data-explorer && npx tsc
@@ -128,6 +129,7 @@ jobs:
           publish_pkg plugins/users
           publish_pkg plugins/databases
           publish_pkg plugins/users-postgres
+          publish_pkg plugins/config-redis
           publish_pkg plugins/admin
           publish_pkg plugins/public-api
           publish_pkg plugins/docs
