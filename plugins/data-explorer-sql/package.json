@@ -40,7 +40,94 @@
         "kind": "server",
         "plugin": "data-explorer-sql",
         "entry": "./dist/plugin.js",
+        "order": 70,
         "title": "Data explorer: SQL (SQLite, PostgreSQL, MySQL)",
-        "icon": "🧮"
+        "icon": "🧮",
+        "config": {
+            "entries": [
+                {
+                    "key": "name",
+                    "label": "Source name",
+                    "description": "Shown in the data explorer",
+                    "type": "string",
+                    "default": "sql",
+                    "validation": {
+                        "required": true,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "description",
+                    "label": "Description",
+                    "type": "string",
+                    "default": "SQL (SQLite, PostgreSQL, MySQL) database",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "connectionString",
+                    "label": "Connection string",
+                    "description": "For postgres and mysql, e.g. postgres://user:password@host:5432/database (kept as a secret, never returned)",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "type",
+                    "label": "Engine",
+                    "description": "sqlite, postgres or mysql",
+                    "type": "enum",
+                    "default": "sqlite",
+                    "validation": {
+                        "options": [
+                            "sqlite",
+                            "postgres",
+                            "mysql"
+                        ]
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "filename",
+                    "label": "SQLite file",
+                    "description": "The SQLite database file (relative paths from the plugin's data directory)",
+                    "type": "string",
+                    "default": "data.db",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Queries may only read",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "timeoutMs",
+                    "label": "Timeout (ms)",
+                    "type": "number",
+                    "default": 30000,
+                    "validation": {
+                        "min": 1000,
+                        "max": 600000
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "maxRows",
+                    "label": "Rows at most",
+                    "type": "number",
+                    "default": 1000,
+                    "validation": {
+                        "min": 1,
+                        "max": 100000
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

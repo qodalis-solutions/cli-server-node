@@ -11,3 +11,5 @@ export {
 export { DocsPage, DocsPageSummary, DocsPageView, DEFAULT_DOCS_GROUP, parsePage, isValidSlug, comparePages, replaceVariables, docsPageList, docsPageView } from './docs-pages';
 export { CliDocsCommandProcessor } from './docs-command';
 export { docsInstalledPlugin, DOCS_PLUGIN_ID } from './package-info';
+/** The plugin's entry point (`builder.addPlugin(docsPluginEntry, options)`; what the marketplace loads). */
+export * as docsPluginEntry from './plugin';

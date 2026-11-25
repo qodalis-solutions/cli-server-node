@@ -174,3 +174,5 @@ export class WeatherModule extends CliModule {
         this.processors = [new CliWeatherCommandProcessor(options.defaultLocation)];
     }
 }
+/** The plugin's entry point (`builder.addPlugin(weatherPluginEntry, options)`; what the marketplace loads). */
+export * as weatherPluginEntry from './plugin';

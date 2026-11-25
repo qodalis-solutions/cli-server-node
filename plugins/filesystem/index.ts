@@ -14,3 +14,5 @@ export { FileSystemModule } from './filesystem-module';
 export { CliInstalledPlugin, CLI_INSTALLED_PLUGIN, readInstalledPlugin } from '@qodalis/cli-server-abstractions';
 export { filesystemInstalledPlugin } from './package-info';
 export { FILESYSTEM_DASHBOARD_MODULE, filesystemDashboardPage } from './dashboard-page';
+/** The plugin's entry point (`builder.addPlugin(filesystemPluginEntry, options)`; what the marketplace loads). */
+export * as filesystemPluginEntry from './plugin';

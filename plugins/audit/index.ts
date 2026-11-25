@@ -17,3 +17,5 @@ export { auditInstalledPlugin, AUDIT_PLUGIN_ID } from './package-info';
 export { AuditEntry, AuditMetadata, AuditQueryOptions, ICliAuditStore, pruneAudit } from '@qodalis/cli-server-abstractions';
 export { publishAuditEntries } from './cli-audit-event-store';
 export { AUDIT_DASHBOARD_MODULE, auditDashboardPage } from './dashboard-page';
+/** The plugin's entry point (`builder.addPlugin(auditPluginEntry, options)`; what the marketplace loads). */
+export * as auditPluginEntry from './plugin';

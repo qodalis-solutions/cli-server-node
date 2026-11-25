@@ -54,6 +54,43 @@
         "plugin": "aws",
         "entry": "./dist/plugin.js",
         "title": "AWS",
-        "icon": "☁️"
+        "icon": "☁️",
+        "config": {
+            "entries": [
+                {
+                    "key": "region",
+                    "label": "Region",
+                    "description": "e.g. eu-north-1; empty: the default chain",
+                    "type": "string",
+                    "default": "",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "profile",
+                    "label": "Profile",
+                    "description": "A profile of the shared AWS config; empty: none",
+                    "type": "string",
+                    "default": "",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "accessKeyId",
+                    "label": "Access key id",
+                    "description": "Empty: the AWS default credential chain",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "secretAccessKey",
+                    "label": "Secret access key",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                }
+            ]
+        }
     }
 }

@@ -39,6 +39,31 @@
         "plugin": "filesystem-json",
         "entry": "./dist/plugin.js",
         "title": "Filesystem JSON",
-        "icon": "🗂️"
+        "icon": "🗂️",
+        "config": {
+            "entries": [
+                {
+                    "key": "file",
+                    "label": "JSON file",
+                    "description": "The file the tree is kept in (relative paths from the plugin's data directory)",
+                    "type": "string",
+                    "default": "files.json",
+                    "validation": {
+                        "required": true,
+                        "max": 500
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Uploads, new folders and deletes are refused",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

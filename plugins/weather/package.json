@@ -41,6 +41,22 @@
         "platforms": {
             "python": "qodalis-cli-server-plugin-weather",
             "dotnet": "Qodalis.Cli.Plugin.Weather"
+        },
+        "config": {
+            "entries": [
+                {
+                    "key": "defaultLocation",
+                    "label": "Default location",
+                    "description": "The place when a command names none",
+                    "type": "string",
+                    "default": "London",
+                    "validation": {
+                        "required": true,
+                        "max": 100
+                    },
+                    "required": true
+                }
+            ]
         }
     }
 }

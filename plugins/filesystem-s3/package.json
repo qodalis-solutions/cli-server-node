@@ -41,6 +41,70 @@
         "plugin": "filesystem-s3",
         "entry": "./dist/plugin.js",
         "title": "Filesystem S3",
-        "icon": "🪣"
+        "icon": "🪣",
+        "config": {
+            "entries": [
+                {
+                    "key": "bucket",
+                    "label": "Bucket",
+                    "type": "string",
+                    "default": "",
+                    "validation": {
+                        "max": 63
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "region",
+                    "label": "Region",
+                    "type": "string",
+                    "default": "us-east-1",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "prefix",
+                    "label": "Key prefix",
+                    "description": "Prepended to every path",
+                    "type": "string",
+                    "default": "",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "endpoint",
+                    "label": "Endpoint",
+                    "description": "An S3-compatible service (MinIO); empty: AWS",
+                    "type": "string",
+                    "default": "",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "accessKeyId",
+                    "label": "Access key id",
+                    "description": "Empty: the AWS default credential chain",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "secretAccessKey",
+                    "label": "Secret access key",
+                    "type": "secret",
+                    "default": null,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Uploads, new folders and deletes are refused",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                }
+            ],
+            "needsConfiguration": true
+        }
     }
 }

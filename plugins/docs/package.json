@@ -43,6 +43,60 @@
         "plugin": "docs",
         "entry": "./dist/plugin.js",
         "title": "Docs",
-        "icon": "📖"
+        "icon": "📖",
+        "config": {
+            "entries": [
+                {
+                    "key": "folder",
+                    "label": "Folder",
+                    "description": "The Markdown files (relative paths from the plugin's data directory)",
+                    "type": "string",
+                    "default": "pages",
+                    "validation": {
+                        "required": true,
+                        "max": 500
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "basePath",
+                    "label": "Path",
+                    "description": "Where the guides are served",
+                    "type": "string",
+                    "default": "/qcli/docs",
+                    "validation": {
+                        "required": true,
+                        "pattern": "^(/[A-Za-z0-9._~-]+)+$"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "title",
+                    "label": "Title",
+                    "type": "string",
+                    "default": "Guides",
+                    "validation": {
+                        "required": true,
+                        "max": 100
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "name",
+                    "label": "Name",
+                    "type": "string",
+                    "default": "Documentation",
+                    "validation": {
+                        "required": true,
+                        "max": 100
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

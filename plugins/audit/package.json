@@ -46,6 +46,22 @@
         "plugin": "audit",
         "entry": "./dist/plugin.js",
         "title": "Audit",
-        "icon": "📋"
+        "icon": "📋",
+        "config": {
+            "entries": [
+                {
+                    "key": "maxEntries",
+                    "label": "Entries kept",
+                    "description": "The oldest are dropped beyond it",
+                    "type": "number",
+                    "default": 1000,
+                    "validation": {
+                        "min": 100,
+                        "max": 1000000
+                    },
+                    "requiresRestart": true
+                }
+            ]
+        }
     }
 }

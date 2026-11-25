@@ -4,35 +4,43 @@
  * connection as settings (the connection string a `secret` setting: kept server-side, never returned). Read-only
  * by default. Nothing is added until it is configured (then a restart).
  */
-import type { CliPluginContext, CliPluginEntryResult, DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
+import type { CliConfigSettingDefinition, CliPluginContext, CliPluginEntryInfo, CliPluginEntryResult, DataExplorerLanguage, DataExplorerOutputFormat } from '@qodalis/cli-server-abstractions';
 import { PostgresDataExplorerProvider } from './postgres-data-explorer-provider';
 
+/** The plugin, for `builder.addPlugin(entry, options)` (the marketplace's record says it for an installed copy). */
+export const plugin: CliPluginEntryInfo = { id: 'data-explorer-postgres', package: '@qodalis/cli-server-plugin-data-explorer-postgres', title: 'Data explorer: PostgreSQL', icon: '🐘' };
+
+/** Loads after the data explorer's own entry (`CLI_PLUGIN_LOAD_ORDER.SOURCE`). */
+export const order = 70;
+
+/** Its settings (also `qodalis.config` of its package.json; code options of the same keys are their defaults). */
+export const settings: CliConfigSettingDefinition[] = [
+    { key: 'name', label: 'Source name', description: 'Shown in the data explorer', type: 'string', default: 'postgres', requiresRestart: true, validation: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' } },
+    { key: 'description', label: 'Description', type: 'string', default: 'PostgreSQL database', requiresRestart: true },
+    { key: 'connectionString', label: 'Connection string', description: 'e.g. postgres://user:password@host:5432/database (kept as a secret, never returned)', type: 'secret', required: true, requiresRestart: true },
+    { key: 'readOnly', label: 'Read-only', description: 'Queries may only read', type: 'boolean', default: true, requiresRestart: true },
+    { key: 'timeoutMs', label: 'Timeout (ms)', type: 'number', default: 30000, requiresRestart: true, validation: { min: 1000, max: 600000 } },
+    { key: 'maxRows', label: 'Rows at most', type: 'number', default: 1000, requiresRestart: true, validation: { min: 1, max: 100000 } },
+];
+
 export async function createPlugin(context: CliPluginContext): Promise<CliPluginEntryResult> {
-    const settings = await context.settings({
+    const provider = await context.settings({
         title: 'Data explorer: PostgreSQL',
         description: 'A PostgreSQL source of the data explorer',
-        settings: [
-            { key: 'name', label: 'Source name', description: 'Shown in the data explorer', type: 'string', default: 'postgres', requiresRestart: true, validation: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' } },
-            { key: 'description', label: 'Description', type: 'string', default: 'PostgreSQL database', requiresRestart: true },
-            { key: 'connectionString', label: 'Connection string', description: 'e.g. postgres://user:password@host:5432/database (kept as a secret, never returned)', type: 'secret', requiresRestart: true },
-            { key: 'readOnly', label: 'Read-only', description: 'Queries may only read', type: 'boolean', default: true, requiresRestart: true },
-            { key: 'timeoutMs', label: 'Timeout (ms)', type: 'number', default: 30000, requiresRestart: true, validation: { min: 1000, max: 600000 } },
-            { key: 'maxRows', label: 'Rows at most', type: 'number', default: 1000, requiresRestart: true, validation: { min: 1, max: 100000 } },
-        ],
+        settings,
     });
-    const text = (key: string) => String(settings.value('settings', key) ?? '').trim();
+    const text = (key: string) => String(provider.value('settings', key) ?? '').trim();
     const secret = text;
     if (!secret('connectionString')) {
-        context.logger.warn('not configured: config set data-explorer-postgres.settings.<key> <value> (connectionString), then restart');
-        return;
+        return context.needsConfiguration(provider.missingRequired());
     }
     context.builder.addDataExplorerProvider(new PostgresDataExplorerProvider({ connectionString: secret('connectionString') }), {
         name: text('name') || 'postgres',
         description: text('description') || 'PostgreSQL database',
         language: 'sql' as DataExplorerLanguage,
         defaultOutputFormat: 'table' as DataExplorerOutputFormat,
-        readOnly: settings.value('settings', 'readOnly') !== false,
-        timeout: Number(settings.value('settings', 'timeoutMs') ?? 30000),
-        maxRows: Number(settings.value('settings', 'maxRows') ?? 1000),
+        readOnly: provider.value('settings', 'readOnly') !== false,
+        timeout: Number(provider.value('settings', 'timeoutMs') ?? 30000),
+        maxRows: Number(provider.value('settings', 'maxRows') ?? 1000),
     });
 }

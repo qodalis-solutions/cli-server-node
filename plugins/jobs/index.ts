@@ -16,3 +16,5 @@ export {
 } from './cli-jobs-stats';
 export { JOBS_DASHBOARD_MODULE, jobsDashboardPage } from './dashboard-page';
 export { createJobsConfigProvider } from './jobs-config-provider';
+/** The plugin's entry point (`builder.addPlugin(jobsPluginEntry, options)`; what the marketplace loads). */
+export * as jobsPluginEntry from './plugin';

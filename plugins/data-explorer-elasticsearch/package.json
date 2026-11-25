@@ -38,7 +38,73 @@
         "kind": "server",
         "plugin": "data-explorer-elasticsearch",
         "entry": "./dist/plugin.js",
+        "order": 70,
         "title": "Data explorer: Elasticsearch",
-        "icon": "🔎"
+        "icon": "🔎",
+        "config": {
+            "entries": [
+                {
+                    "key": "name",
+                    "label": "Source name",
+                    "description": "Shown in the data explorer",
+                    "type": "string",
+                    "default": "elasticsearch",
+                    "validation": {
+                        "required": true,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "description",
+                    "label": "Description",
+                    "type": "string",
+                    "default": "Elasticsearch database",
+                    "requiresRestart": true
+                },
+                {
+                    "key": "node",
+                    "label": "Node URL",
+                    "description": "e.g. https://user:password@host:9200 (kept as a secret, never returned)",
+                    "type": "secret",
+                    "default": null,
+                    "required": true,
+                    "requiresRestart": true,
+                    "sensitive": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Queries may only read",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "timeoutMs",
+                    "label": "Timeout (ms)",
+                    "type": "number",
+                    "default": 30000,
+                    "validation": {
+                        "min": 1000,
+                        "max": 600000
+                    },
+                    "requiresRestart": true
+                },
+                {
+                    "key": "maxRows",
+                    "label": "Rows at most",
+                    "type": "number",
+                    "default": 1000,
+                    "validation": {
+                        "min": 1,
+                        "max": 100000
+                    },
+                    "requiresRestart": true
+                }
+            ],
+            "needsConfiguration": true
+        }
     }
 }

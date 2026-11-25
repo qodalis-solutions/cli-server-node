@@ -42,6 +42,31 @@
         "plugin": "filesystem",
         "entry": "./dist/plugin.js",
         "title": "Filesystem",
-        "icon": "📁"
+        "icon": "📁",
+        "config": {
+            "entries": [
+                {
+                    "key": "roots",
+                    "label": "Folders",
+                    "description": "Absolute paths served (and everything below them); none: the filesystem API serves nothing",
+                    "type": "string[]",
+                    "default": [],
+                    "validation": {
+                        "pattern": "^(/|[A-Za-z]:[\\\\/]).*"
+                    },
+                    "required": true,
+                    "requiresRestart": true
+                },
+                {
+                    "key": "readOnly",
+                    "label": "Read-only",
+                    "description": "Only list, read and download: uploads, new folders and deletes are refused",
+                    "type": "boolean",
+                    "default": true,
+                    "requiresRestart": true
+                }
+            ],
+            "needsConfiguration": true
+        }
     }
 }
