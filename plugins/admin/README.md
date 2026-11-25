@@ -422,7 +422,7 @@ invalid value.
 
 The plugin brings the `admin` command (registered by `mountPlugin`). It reads the same services as the admin routes.
 On a protected server every sub-command needs `admin:access`; `admin logs` also needs `logs:read`, `admin dashboard
-install|update|remove` also `dashboard:install`. Server settings are
+install|update|remove` also `dashboard:install`, `admin restart` (but not `admin restart status`) `server:restart`. Server settings are
 the core [`config`](../../README.md#terminal-commands) command. Lists take `--json` (the payload of the matching route).
 
 | Command | Permission | Does |
@@ -438,6 +438,8 @@ the core [`config`](../../README.md#terminal-commands) command. Lists take `--js
 | `admin dashboard install <name>[@version]` | `admin:access`, `dashboard:install` | Installs the newest version this dashboard runs, or the one given, with the API's checks (`POST /dashboard/marketplace/installed`) |
 | `admin dashboard update <name>` | `admin:access`, `dashboard:install` | Updates to the newest version (`PUT /dashboard/marketplace/installed/{name}`) |
 | `admin dashboard remove <name>` | `admin:access`, `dashboard:install` | Removes the page and its files (`DELETE /dashboard/marketplace/installed/{name}`) |
+| `admin restart [--yes] [--reason <text>]` | `admin:access`, `server:restart` | Without `--yes` (server commands cannot ask): the changes waiting for a restart and how to confirm; with it, restarts the server like `POST /server/restart` (audited with `via: command`) |
+| `admin restart status [--json]` | `admin:access` | Start time, restart mode and supervisor (or why it cannot restart), the pending changes (`GET /server/restart`) |
 
 On a server without the users plugin, `/execute` is open, and so are these commands. To follow the log live, use
 `server logs` of the web CLI plugin `@qodalis/cli-server-logs` (the `/ws/v1/qcli/logs` socket, `logs:read`).
@@ -495,6 +497,20 @@ Removed @qodalis/cli-dashboard-module-jobs@1.1.0 (the page jobs).
 
 $ admin dashboard install @acme/cli-dashboard-tickets
 Error: publisher not verified
+
+$ admin restart
+1 change(s) take effect after a restart:
+  - CORS: Mode changed (config, since 2026-11-25 10:04:05)
+Restart mode: self (starts itself again)
+Run admin restart --yes [--reason "<why>"] to restart the server now.
+
+$ admin restart --yes --reason "apply CORS"
+Restarting the server to apply 1 pending change(s) (self mode). The connection drops and comes back once it runs again.
+
+$ admin restart status
+Running since 2026-11-25 10:06:12
+Restart mode: exit (exits for docker to start it again)
+No changes are waiting for a restart.
 ```
 
 ## License

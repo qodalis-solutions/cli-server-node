@@ -970,6 +970,66 @@ validation messages (`must be a number`, `must be at least 1`, `must be one of: 
   needs `config:write` and is not read-only, so the MCP client's `QCLI_READ_ONLY` and the endpoint's own
   `mcp: { readOnly: true }` hide and refuse it. Errors come back as `isError` with `{ error, errors?, version? }`.
 
+## Restart
+
+Some changes take effect only after a restart: a setting with `requiresRestart`, a plugin installed later. The server
+keeps the list of them and can restart itself, from the dashboard, `admin restart --yes` (admin plugin) or the API.
+
+```ts
+const server = createCliServer({
+    // 'auto' (default): 'exit' under a detected supervisor, else not supported
+    // 'exit': exit with exitCode (default 75) for Docker (restart policy), systemd (Restart=always), PM2 or Kubernetes
+    // 'self': start the same command again (same arguments, environment, working directory, stdout/stderr), then exit
+    // 'handler': your function, after the graceful shutdown
+    restart: { mode: 'self' },
+});
+server.restart.markRequired({ id: 'plugin:tickets', source: 'tickets', description: 'Tickets plugin installed' });
+server.restart.clearRequired('plugin:tickets');
+server.restart.onShutdown('pool', () => pool.end()); // your own clean-up, in registration order
+```
+
+- **Pending list**: `markRequired({ id, source, description })` (once per id), `clearRequired(id)`; empty after every
+  start. The config service marks a changed entry with `requiresRestart` as `config:<provider>.<section>.<key>`
+  (source `config`, `CORS: Mode changed`) and clears it when the value is set back to what it was at start.
+- **Supervisor detection** (`auto`): PM2 (`pm_id`), systemd (`INVOCATION_ID`), Kubernetes (`KUBERNETES_SERVICE_HOST`,
+  `kubepods` in `/proc/1/cgroup`), Docker (`/.dockerenv`, `docker` in `/proc/1/cgroup`). Without one, restarting is not
+  supported until `restart.mode` is set.
+- **Graceful shutdown**: stop accepting connections, wait for in-flight requests (up to `drainTimeoutMs`, 10 s),
+  close every WebSocket (events, logs, shell) with **1012** (service restart), then the hooks: mounted job schedulers
+  stop, mounted plugins' `dispose()`, `onShutdown` functions. The HTTP server is the one `eventSocketManager.attach(server)`
+  got (or the one serving the requests).
+- **`self`** re-runs `process.execPath` with `process.execArgv` and `process.argv` (so `tsx`, `node --import ...`
+  keep working), detached, stdin ignored, stdout and stderr inherited: under `nohup ... >> server.log` the new process
+  appends to the same file. This process then exits 0.
+- **Sign-in**: on a server without an auth provider protecting it, restarting is refused (403) unless
+  `restart.allowAnonymous` is set.
+
+| Route | Permission | Does |
+|---|---|---|
+| `GET /api/v1/qcli/server/restart` | `admin:access` | The status below |
+| `POST /api/v1/qcli/server/restart` `{ reason? }` | `server:restart` | 202 `{ restarting: true, pending: [ids] }`, then the restart; 409 `{ error: 'restart not supported: no supervisor detected; set restart.mode' }` or `restart already in progress`; 403 without sign-in |
+
+```json
+{
+  "supported": true,
+  "mode": "self",
+  "supervisor": null,
+  "startedAt": "2026-11-25T10:00:00.000Z",
+  "pending": [
+    { "id": "config:cors.cors.mode", "source": "config", "description": "CORS: Mode changed", "since": "2026-11-25T10:04:05.000Z" }
+  ]
+}
+```
+
+`mode` is the mode in effect (`auto` shows `exit`), null when not supported, with `reason`
+(`no supervisor detected; set restart.mode`). `startedAt` changes once the server is back: poll it (or
+`GET /api/qcli/versions`) to know when.
+
+- **Permission** `server:restart` (core catalog, group `Server`).
+- **Audit** `server.restart`: `target` `server`, `details` the reason, `properties` `{ reason, by, pending, mode, supervisor, via }`.
+- **Events** (audience `admin:access`): `server:restart-required` `{ pending }` whenever the list changes,
+  `server:restarting` `{ reason, by, pending, mode }` before the shutdown.
+
 ## Terminal commands
 
 The server registers `config` (leave it out with `createCliServer({ config: { command: false } })`); plugins add
