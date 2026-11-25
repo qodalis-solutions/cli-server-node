@@ -105,8 +105,12 @@ const demoConfig = new CliStoredConfigProvider({
     ],
 });
 
-const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin, config } = createCliServer({
+const { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, mountPlugin, config, restart } = createCliServer({
     allowedOrigins,
+    // Restart from the dashboard or `admin restart --yes`: the demo runs bare (npx tsx, nohup), with no supervisor,
+    // so it starts itself again ('self': same command, environment and log file). Under Docker, systemd or PM2
+    // leave the mode out ('auto' exits with 75 for the supervisor to start it again).
+    restart: { mode: 'self' },
     config: { store: configStore, stores: { jobs: jobsConfigStore } },
     // The demo exposes the interactive shell. The users plugin is mounted below, so
     // the shell runs in "users" mode: a WS ticket from a session holding
@@ -417,6 +421,9 @@ mountPlugin(databasesPlugin);
 // Public API (host tokens, quotas, OpenAPI + Swagger UI), guides and the portal
 // -----------------------------------------------------------
 addPublicApi({ app, builder, mountPlugin }, usersPlugin);
+
+// A restart's graceful shutdown stops the jobs and disposes the mounted plugins itself; the host closes its own stores
+restart.onShutdown('redis config store', () => redisConfigStore?.close());
 
 // Stored settings are applied once every store has loaded them (the file at once, the database once its table exists)
 config.ready().catch((err) => console.error('[demo] config store failed:', err));
