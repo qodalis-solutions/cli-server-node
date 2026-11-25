@@ -8,7 +8,7 @@ export {
     IsADirectoryError,
 } from './errors';
 export { InMemoryFileStorageProvider } from './providers';
-export { OsFileStorageProvider, OsProviderOptions } from './providers';
+export { OsFileStorageProvider, OsProviderOptions, readOnlyFileStorage } from './providers';
 export { FileSystemModule } from './filesystem-module';
 // For the provider packages (filesystem-json, -sqlite, -s3), which list themselves as installed plugins
 export { CliInstalledPlugin, CLI_INSTALLED_PLUGIN, readInstalledPlugin } from '@qodalis/cli-server-abstractions';

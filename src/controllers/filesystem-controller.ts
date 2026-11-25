@@ -14,16 +14,24 @@ import { DEFAULT_MAX_UPLOAD_BYTES, FileSystemApiOptions } from '../filesystem/fi
 const logger = createLogger('FileSystem');
 
 /**
+ * True for an error of that class, also from another copy of the filesystem package (a storage installed at
+ * runtime brings its own): matched by its name.
+ */
+function isFsError<T extends Error>(err: unknown, type: new (...args: never[]) => T): err is T {
+    return err instanceof type || (err instanceof Error && err.name === type.name);
+}
+
+/**
  * Maps provider errors to appropriate HTTP status codes and sends a JSON error response.
  */
 function handleError(err: unknown, res: Response): void {
-    if (err instanceof FileNotFoundError) {
+    if (isFsError(err, FileNotFoundError)) {
         res.status(404).json({ error: err.message });
-    } else if (err instanceof PermissionDeniedError) {
+    } else if (isFsError(err, PermissionDeniedError)) {
         res.status(403).json({ error: err.message });
-    } else if (err instanceof NotADirectoryError || err instanceof IsADirectoryError) {
+    } else if (isFsError(err, NotADirectoryError) || isFsError(err, IsADirectoryError)) {
         res.status(400).json({ error: err.message });
-    } else if (err instanceof FileExistsError) {
+    } else if (isFsError(err, FileExistsError)) {
         res.status(409).json({ error: err.message });
     } else {
         res.status(500).json({ error: (err as Error).message });
@@ -107,7 +115,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             const entries = await provider.list(dirPath);
             res.json({ entries });
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to ls: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to ls: %s', (err as Error).message ?? err);
@@ -128,7 +136,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             const content = await provider.readFile(filePath);
             res.json({ content });
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to cat: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to cat: %s', (err as Error).message ?? err);
@@ -149,7 +157,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             const fileStat = await provider.stat(filePath);
             res.json(fileStat);
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to stat: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to stat: %s', (err as Error).message ?? err);
@@ -175,7 +183,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
 
             stream.pipe(res);
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to download: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to download: %s', (err as Error).message ?? err);
@@ -201,7 +209,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             await provider.uploadFile(targetPath, req.file.buffer);
             res.json({ path: targetPath, size: req.file.size });
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to upload: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to upload: %s', (err as Error).message ?? err);
@@ -222,7 +230,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             await provider.mkdir(dirPath, true);
             res.json({ path: dirPath });
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to mkdir: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to mkdir: %s', (err as Error).message ?? err);
@@ -243,7 +251,7 @@ export function createFilesystemRouter(provider: IFileStorageProvider, options: 
             await provider.remove(targetPath, true);
             res.json({ deleted: targetPath });
         } catch (err) {
-            if (err instanceof PermissionDeniedError) {
+            if (isFsError(err, PermissionDeniedError)) {
                 logger.warn('Failed to rm: %s', (err as Error).message ?? err);
             } else {
                 logger.error('Failed to rm: %s', (err as Error).message ?? err);
