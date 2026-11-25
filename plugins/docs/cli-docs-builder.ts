@@ -1,7 +1,8 @@
 import { Router, Request } from 'express';
-import type { CliInstalledPlugin } from '@qodalis/cli-server-abstractions';
-import { DocsPage, VARIABLE_KEY, comparePages, isValidSlug, parsePage, readFolder, replaceVariables } from './docs-pages';
+import type { CliInstalledPlugin, ICliModule } from '@qodalis/cli-server-abstractions';
+import { DocsPage, VARIABLE_KEY, comparePages, docsPageList, docsPageView, isValidSlug, parsePage, readFolder } from './docs-pages';
 import { docsInstalledPlugin } from './package-info';
+import { CliDocsCommandProcessor } from './docs-command';
 
 export const DEFAULT_DOCS_BASE_PATH = '/qcli/docs';
 export const DEFAULT_DOCS_TITLE = 'Guides';
@@ -32,6 +33,8 @@ export interface DocsPluginResult {
     /** Read by the portal plugin. */
     portalSection: DocsPortalSection;
     installedPlugin: CliInstalledPlugin;
+    /** The `docs` terminal command (`docs list`, `docs read <slug>`), registered by `mountPlugin`. */
+    module: ICliModule;
 }
 
 /** True for `/segment[/segment...]`: starts with `/`, no trailing `/`, not `/` itself. */
@@ -140,12 +143,8 @@ export class CliDocsBuilder {
         const basePath = this.basePath;
         const name = this.name;
         const baseUrl = this.baseUrl;
-        const variablesFor = (req: Request, pathBase: string) =>
-            new Map<string, string>([
-                ...hostVariables,
-                ['baseUrl', baseUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}${pathBase}`],
-                ['name', name],
-            ]);
+        const variablesWith = (url: string) => new Map<string, string>([...hostVariables, ['baseUrl', url], ['name', name]]);
+        const variablesFor = (req: Request, pathBase: string) => variablesWith(baseUrl ?? `${req.protocol}://${req.get('host') ?? 'localhost'}${pathBase}`);
         // The path the app is mounted under (a parent app's `app.use('/prefix', cli.app)`);
         // undefined (400) when it starts with `//` or `/\` and would point at another host
         const pathBaseOf = (req: Request): string | undefined => {
@@ -164,7 +163,7 @@ export class CliDocsBuilder {
             }
             const variables = variablesFor(req, pathBase);
             res.setHeader('Cache-Control', 'no-cache');
-            res.json(pages.map((p) => ({ slug: p.slug, title: replaceVariables(p.title, variables), group: p.group, order: p.order })));
+            res.json(docsPageList(pages, variables));
         });
         // a slug path with more segments is an unknown page too
         router.get('/pages/:slug/*', (_req, res) => {
@@ -183,13 +182,7 @@ export class CliDocsBuilder {
             }
             const variables = variablesFor(req, pathBase);
             res.setHeader('Cache-Control', 'no-cache');
-            res.json({
-                slug: page.slug,
-                title: replaceVariables(page.title, variables),
-                group: page.group,
-                order: page.order,
-                markdown: replaceVariables(page.markdown, variables),
-            });
+            res.json(docsPageView(page, variables));
         });
 
         return {
@@ -201,6 +194,15 @@ export class CliDocsBuilder {
             pages,
             portalSection: { kind: 'docs', title: this.title, basePath },
             installedPlugin: docsInstalledPlugin,
+            module: {
+                name: 'docs',
+                version: docsInstalledPlugin.version ?? '1.0.0',
+                description: 'Documentation pages in the terminal',
+                author: { name: 'Qodalis', email: 'nicolae.lupei@qodalis.com' },
+                icon: '📖',
+                // No request in a command: {{baseUrl}} is the configured base URL, else empty (links relative to the server root)
+                processors: [new CliDocsCommandProcessor(pages, bySlug, () => variablesWith(baseUrl ?? ''))],
+            },
         };
     }
 }

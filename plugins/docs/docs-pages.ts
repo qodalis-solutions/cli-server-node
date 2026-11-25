@@ -126,3 +126,32 @@ export const VARIABLE_KEY = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 export function replaceVariables(text: string, variables: ReadonlyMap<string, string>): string {
     return text.replace(VARIABLE, (match, key: string) => variables.get(key) ?? match);
 }
+
+/** A page in the list (`GET /pages`, `docs list`): its title with the variables replaced. */
+export interface DocsPageSummary {
+    slug: string;
+    title: string;
+    group: string;
+    order: number;
+}
+
+/** A page with its markdown (`GET /pages/:slug`, `docs read`), variables replaced. */
+export interface DocsPageView extends DocsPageSummary {
+    markdown: string;
+}
+
+/** The pages as listed (`GET /pages` and `docs list`). */
+export function docsPageList(pages: readonly DocsPage[], variables: ReadonlyMap<string, string>): DocsPageSummary[] {
+    return pages.map((p) => ({ slug: p.slug, title: replaceVariables(p.title, variables), group: p.group, order: p.order }));
+}
+
+/** One page as served (`GET /pages/:slug` and `docs read`). */
+export function docsPageView(page: DocsPage, variables: ReadonlyMap<string, string>): DocsPageView {
+    return {
+        slug: page.slug,
+        title: replaceVariables(page.title, variables),
+        group: page.group,
+        order: page.order,
+        markdown: replaceVariables(page.markdown, variables),
+    };
+}
