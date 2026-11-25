@@ -5,6 +5,7 @@ import {
     type CliConfigEntry,
     type CliConfigEntryType,
     type CliConfigErrors,
+    type CliConfigProviderStorage,
     type CliConfigSection,
     type CliConfigSource,
     type CliConfigUpdateResult,
@@ -13,7 +14,7 @@ import {
     type ICliConfigProvider,
     type ICliConfigWriter,
 } from './config-types';
-import { InMemoryConfigStore, type CliConfigStoredSection, type ICliConfigStore } from './config-store';
+import { CLI_CONFIG_STORE_STORAGE, InMemoryConfigStore, type CliConfigStoredSection, type ICliConfigStore } from './config-store';
 import { cloneCliConfigValue, inferCliConfigEntryType } from './config-validation';
 
 /** A setting of a {@link CliStoredConfigProvider}. */
@@ -85,6 +86,8 @@ export class CliStoredConfigProvider implements ICliConfigProvider, ICliConfigWr
     readonly description?: string;
     readonly order?: number;
     readonly requiredPermission?: string;
+    /** Changes are saved to the config store. */
+    readonly storage: CliConfigProviderStorage = { ...CLI_CONFIG_STORE_STORAGE };
     private readonly sections: CliConfigSectionDefinition[];
     private store?: ICliConfigStore;
     private readonly cache = new Map<string, CliConfigStoredSection>();

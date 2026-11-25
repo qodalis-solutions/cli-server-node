@@ -1,6 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CliConfigConflictError, type CliConfigSource, type CliConfigValue } from './config-types';
+import {
+    CliConfigConflictError,
+    type CliConfigProviderStorage,
+    type CliConfigSource,
+    type CliConfigStoreDescription,
+    type CliConfigValue,
+} from './config-types';
 import { cloneCliConfigValue } from './config-validation';
 
 /** A section's stored values (the settings changed from their defaults) and its version (0 when nothing is stored). */
@@ -19,6 +25,12 @@ export interface CliConfigStoredSection {
 export interface ICliConfigStore {
     /** The `source` of the settings it holds: `runtime` (memory), `file` or `database`. */
     readonly source: CliConfigSource;
+    /**
+     * Where it keeps the settings, shown by `GET /config` (`store`), the dashboard's Config page
+     * and `config list`: the file name or the database and table, never credentials. A store
+     * without it is shown as a `custom` store ({@link describeCliConfigStore}).
+     */
+    describe?(): CliConfigStoreDescription;
     /** A section's values; `{ values: {}, version: 0 }` when nothing is stored. */
     read(provider: string, section: string): Promise<CliConfigStoredSection>;
     /**
@@ -32,6 +44,35 @@ export interface ICliConfigStore {
         changes: Record<string, CliConfigValue | null>,
         expectedVersion?: number,
     ): Promise<CliConfigStoredSection>;
+}
+
+/** The `storage` of a provider whose changes are kept in the config store. */
+export const CLI_CONFIG_STORE_STORAGE: Readonly<CliConfigProviderStorage> = Object.freeze({
+    kind: 'store',
+    description: 'Changes are saved to the config store',
+});
+
+/** A store's description: its own `describe()`, else a `custom` store named after its class. */
+export function describeCliConfigStore(store: ICliConfigStore): CliConfigStoreDescription {
+    if (typeof store.describe === 'function') {
+        const d = store.describe();
+        return { kind: d.kind, title: d.title, detail: d.detail ?? '', persistent: d.persistent === true };
+    }
+    const name = (store as { constructor?: { name?: string } }).constructor?.name;
+    return { kind: 'custom', title: 'Custom store', detail: name && name !== 'Object' ? name : '', persistent: store.source !== 'runtime' };
+}
+
+/** The store as one line: `JSON file (qcli-demo-config.json), kept across restarts`. */
+export function describeCliConfigStoreLine(store: CliConfigStoreDescription): string {
+    return `${store.title}${store.detail ? ` (${store.detail})` : ''}, ${store.persistent ? 'kept across restarts' : 'changes are lost on restart'}`;
+}
+
+/** A path relative to the working directory when inside it, else the file name only (no absolute paths in descriptions). */
+function displayPath(filePath: string): string {
+    const absolute = path.resolve(filePath);
+    const relative = path.relative(process.cwd(), absolute);
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return relative.split(path.sep).join('/');
+    return path.basename(absolute);
 }
 
 type StoredData = Record<string, Record<string, CliConfigStoredSection>>;
@@ -78,6 +119,10 @@ export class InMemoryConfigStore implements ICliConfigStore {
     readonly source: CliConfigSource = 'runtime';
     private readonly data: StoredData = {};
 
+    describe(): CliConfigStoreDescription {
+        return { kind: 'memory', title: 'In memory', detail: '', persistent: false };
+    }
+
     async read(provider: string, section: string): Promise<CliConfigStoredSection> {
         return readSection(this.data, provider, section);
     }
@@ -107,6 +152,11 @@ export class JsonFileConfigStore implements ICliConfigStore {
     private data?: StoredData;
 
     constructor(readonly filePath: string) {}
+
+    /** The file's path relative to the working directory, or its name when outside it. */
+    describe(): CliConfigStoreDescription {
+        return { kind: 'file', title: 'JSON file', detail: displayPath(this.filePath), persistent: true };
+    }
 
     private load(): StoredData {
         if (this.data) return this.data;

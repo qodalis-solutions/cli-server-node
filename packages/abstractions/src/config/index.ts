@@ -2,6 +2,11 @@ export {
     CliConfigEntryType,
     CLI_CONFIG_ENTRY_TYPES,
     CliConfigSource,
+    CliConfigStoreKind,
+    CliConfigStoreDescription,
+    CliConfigStorageKind,
+    CliConfigProviderStorage,
+    CliConfigListView,
     CliConfigValue,
     CliConfigValidation,
     CliConfigEntry,
@@ -41,7 +46,16 @@ export {
     cloneCliConfigValue,
     cliConfigValuesEqual,
 } from './config-validation';
-export { ICliConfigStore, CliConfigStoredSection, InMemoryConfigStore, JsonFileConfigStore, applyCliConfigChanges } from './config-store';
+export {
+    ICliConfigStore,
+    CliConfigStoredSection,
+    InMemoryConfigStore,
+    JsonFileConfigStore,
+    applyCliConfigChanges,
+    describeCliConfigStore,
+    describeCliConfigStoreLine,
+    CLI_CONFIG_STORE_STORAGE,
+} from './config-store';
 export {
     CliStoredConfigProvider,
     CliStoredConfigProviderOptions,
