@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-databases",
-    "version": "1.0.0-beta.34",
+    "version": "1.0.0-beta.35",
     "description": "Databases for the Qodalis CLI server: size, load and largest tables of PostgreSQL, MySQL, SQL Server and SQLite databases, and their migrations, applied under a lock, tracked and run from the dashboard, the terminal and the API",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
