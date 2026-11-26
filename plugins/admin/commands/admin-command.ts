@@ -421,6 +421,7 @@ class AdminDashboardSearchProcessor extends CliCommandProcessor {
             if (command.args?.json) return json(result);
             if (result.items.length === 0) return query ? `No dashboard plugins match "${query}".` : 'The marketplace lists no dashboard plugins.';
             const status = (p: (typeof result.items)[number]): string => {
+                if (p.installed?.source === 'code') return `added in code${p.installed.version ? ` ${p.installed.version}` : ''}${p.updateAvailable ? ', newer version in the marketplace' : ''}`;
                 if (p.installed) return p.updateAvailable ? `installed ${p.installed.version}, update available` : `installed ${p.installed.version}`;
                 return p.allowed ? 'installable' : `blocked: ${p.blockedReason}`;
             };

@@ -27,8 +27,13 @@ export interface CliDashboardExtension {
     entry: string;
     /** Stylesheets (same rules as `entry`), at most 5. */
     styles?: string[];
-    /** Shown in the page's error panel. */
+    /** Shown in the page's error panel, and as the version added in code on the dashboard's Marketplace tab. */
     version?: string;
+    /**
+     * The npm package the page comes from (`@qodalis/cli-dashboard-module-jobs`): the dashboard's Marketplace tab
+     * shows that package as added in code, and the server refuses to install it from the marketplace.
+     */
+    package?: string;
     /**
      * Slots the module fills besides its page: `overview` (cards on the dashboard's Overview: stats, panels,
      * "Needs attention" items), `palette` (entries of the dashboard's command palette, e.g. jump to a job). The
@@ -47,6 +52,7 @@ export const DASHBOARD_EXTENSION_GROUPS = ['overview', 'operations', 'data', 'ac
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 const WIDGET = /^[a-z][a-z0-9-]{0,39}$/;
+const PACKAGE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 const invalid = (reason: string) => new Error(`invalid dashboard extension: ${reason}`);
 
@@ -73,6 +79,7 @@ function isIcon(value: unknown): value is string {
 export function validateDashboardExtension(input: CliDashboardExtension): CliDashboardExtension {
     if (!input || typeof input !== 'object') throw invalid('not an object');
     const { id, title, titles, icon, group, order, permission, entry, styles, version, widgets, search } = input;
+    const pkg = input.package;
     if (typeof id !== 'string' || !ID.test(id)) throw invalid(`id must match ${ID.source}`);
     if (typeof title !== 'string' || title.trim().length === 0 || title.length > 40) throw invalid(`${id}: title must be 1-40 characters`);
     if (typeof entry !== 'string' || !isUrl(entry)) throw invalid(`${id}: entry must be a root-relative path or an http(s) URL`);
@@ -113,6 +120,10 @@ export function validateDashboardExtension(input: CliDashboardExtension): CliDas
     if (version !== undefined) {
         if (typeof version !== 'string' || version.length === 0 || version.length > 50) throw invalid(`${id}: version must be 1-50 characters`);
         out.version = version;
+    }
+    if (pkg !== undefined && pkg !== null) {
+        if (typeof pkg !== 'string' || pkg.length > 214 || !PACKAGE.test(pkg)) throw invalid(`${id}: package must be an npm package name`);
+        out.package = pkg;
     }
     if (widgets !== undefined && widgets !== null) {
         if (!Array.isArray(widgets) || widgets.length > 10 || !widgets.every((w) => typeof w === 'string' && WIDGET.test(w))) {

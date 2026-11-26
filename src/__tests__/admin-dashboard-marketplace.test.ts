@@ -136,6 +136,41 @@ describe('dashboard marketplace: browsing', () => {
         expect(none.body).toMatchObject({ items: [], total: 0 });
     });
 
+    it('a page the host adds in code is installed with source code: by its package, else an official module by its id; install refused with 409', async () => {
+        const net = new FakeNet();
+        net.publish(JOBS, { versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
+        net.publish('@qodalis/cli-dashboard-module-users', { versions: [{ version: '1.1.0' }] });
+        net.publish(TICKETS, { versions: [{ version: '2.0.0' }] });
+        net.publish('@acme/cli-dashboard-billing', { extensionId: 'billing', versions: [{ version: '1.0.0' }] });
+        const h = await start({
+            net,
+            configure: (cli) => {
+                cli.builder.addDashboardExtension({ id: 'jobs', title: 'Jobs', entry: '/qcli/modules/jobs/extension.js', package: JOBS, version: '1.0.0' });
+                // no package: an official module's page by its id
+                cli.builder.addDashboardExtension({ id: 'users', title: 'Users', entry: '/qcli/modules/users/extension.js' });
+                // a third-party page without a package is not matched by its id
+                cli.builder.addDashboardExtension({ id: 'billing', title: 'Billing', entry: '/x/billing.js' });
+            },
+        });
+        const items = (await request(h.cli.app).get(`${BASE}/plugins`).set(auth(h.token))).body.items;
+        const byName = Object.fromEntries(items.map((i: { name: string }) => [i.name, i]));
+        expect(byName[JOBS]).toMatchObject({ installed: { version: '1.0.0', source: 'code' }, updateAvailable: true });
+        expect(byName['@qodalis/cli-dashboard-module-users']).toMatchObject({ installed: { version: null, source: 'code' }, updateAvailable: false });
+        expect(byName[TICKETS].installed).toBeNull();
+        expect(byName['@acme/cli-dashboard-billing'].installed).toBeNull();
+        expect((await request(h.cli.app).get(`${BASE}/plugins/${JOBS}`).set(auth(h.token))).body.installed).toEqual({ version: '1.0.0', source: 'code' });
+        const res = await request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name: JOBS });
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual({ error: `already added in code: ${JOBS}@1.0.0` });
+        expect(net.calls.filter((c) => c.includes('cdn') || c.includes('unpkg'))).toEqual([]);
+        expect(readdirSync(h.dir)).toEqual([]);
+        // not a marketplace install: nothing to update or remove here
+        expect((await request(h.cli.app).put(`${BASE}/installed/${JOBS}`).set(auth(h.token)).send({})).status).toBe(404);
+        expect((await request(h.cli.app).delete(`${BASE}/installed/${JOBS}`).set(auth(h.token))).status).toBe(404);
+        // the command says so too
+        expect((await runCommand(h.cli, 'admin dashboard search')).text).toContain('added in code 1.0.0, newer version in the marketplace');
+    });
+
     it('requires.installed follows the server plugins the server has (GET /plugins/installed)', async () => {
         const net = new FakeNet();
         net.publish(JOBS, { serverPackages: [{ ecosystem: 'npm', name: '@qodalis/cli-server-plugin-jobs', install: 'npm i @qodalis/cli-server-plugin-jobs' }], versions: [{ version: '1.0.0' }] });
@@ -403,7 +438,8 @@ describe('dashboard marketplace: install, update, remove', () => {
         });
         const res = await request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name: JOBS });
         expect(res.status).toBe(409);
-        expect(res.body).toEqual({ error: 'dashboard extension already registered: jobs' });
+        // jobs is the official module's page: added in code
+        expect(res.body).toEqual({ error: `already added in code: ${JOBS}` });
         expect(readdirSync(h.dir)).toEqual([]);
         // the extension's own id; a second package with that id clashes with the first
         expect((await request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name: '@acme/cli-dashboard-billing' })).body.id).toBe('billing');
@@ -439,7 +475,7 @@ describe('dashboard marketplace: install, update, remove', () => {
 
         net.publish(TICKETS, { versions: [{ version: '1.0.0' }, { version: '1.2.0' }] });
         expect((await request(h.cli.app).get(`${BASE}/installed`).set(auth(h.token))).body[0].updateAvailable).toBe(true);
-        expect((await request(h.cli.app).get(`${BASE}/plugins`).set(auth(h.token))).body.items[0]).toMatchObject({ installed: { version: '1.0.0' }, updateAvailable: true });
+        expect((await request(h.cli.app).get(`${BASE}/plugins`).set(auth(h.token))).body.items[0]).toMatchObject({ installed: { version: '1.0.0', source: 'marketplace' }, updateAvailable: true });
 
         const res = await request(h.cli.app).put(`${BASE}/installed/${encodeURIComponent(TICKETS)}`).set(auth(h.token)).send({});
         expect(res.status).toBe(200);

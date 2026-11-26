@@ -201,6 +201,12 @@ export interface ServerPluginAnnotations {
     /** False when the plugin needs the host's code (`autoInstall: false`): listed, never installed here. */
     autoInstall: boolean;
     autoInstallReason?: string;
+    /**
+     * `source: 'marketplace'`: installed from the marketplace (update and remove it here); `'code'`: the host adds
+     * this platform's package in its code (its version, null when unknown): never installed, updated or removed here.
+     */
+    installed: { version: string | null; source: 'code' | 'marketplace' } | null;
+    /** The marketplace has a newer compatible version than the installed one (for `source: 'code'`, to update in code). */
     updateAvailable: boolean;
     allowed: boolean;
     blockedReason?: string;
@@ -567,6 +573,11 @@ export class ServerPluginMarketplace {
             | undefined;
     }
 
+    /** The package as the host adds it in its code (listed among the installed plugins, not from the marketplace). */
+    private addedInCode(pkg: string): CliInstalledPlugin | undefined {
+        return this.deps.installedPlugins().find((p) => p.id === pkg && p.source !== 'marketplace');
+    }
+
     private annotate(item: MarketplaceServerItem): ServerPluginAnnotations {
         const platforms = platformsOf(item);
         const own = platforms[SERVER_PLUGIN_PLATFORM];
@@ -600,12 +611,19 @@ export class ServerPluginMarketplace {
             };
         }
         const blockedReason = this.blockedReason(item, own, platform, auto);
+        const code = !record && own ? this.addedInCode(own.package) : undefined;
+        const installed: ServerPluginAnnotations['installed'] = record
+            ? { version: record.version, source: 'marketplace' }
+            : code
+              ? { version: code.version && isVersion(code.version) ? code.version : null, source: 'code' }
+              : null;
         return {
             platform,
             otherPlatforms,
             autoInstall: auto.autoInstall,
             ...(auto.reason ? { autoInstallReason: auto.reason } : {}),
-            updateAvailable: !!record && !!platform?.latest && isVersion(platform.latest) && compareDashboardPluginVersions(platform.latest, record.version) > 0,
+            installed,
+            updateAvailable: !!installed?.version && !!platform?.latest && isVersion(platform.latest) && compareDashboardPluginVersions(platform.latest, installed.version) > 0,
             allowed: !blockedReason,
             ...(blockedReason ? { blockedReason } : {}),
         };
@@ -815,8 +833,8 @@ export class ServerPluginMarketplace {
         if (server && !satisfiesServerRange(server, range)) {
             throw new DashboardMarketplaceError(400, `incompatible: ${own.package}@${target.version} needs server ${range} (this server has ${server})`);
         }
-        const host = this.deps.installedPlugins().find((p) => p.id === own.package && p.source !== 'marketplace');
-        if (host) throw new DashboardMarketplaceError(409, `already installed by the host: ${own.package}`);
+        const host = this.addedInCode(own.package);
+        if (host) throw new DashboardMarketplaceError(409, `already added in code: ${own.package}${host.version ? `@${host.version}` : ''}`);
         return { plugin, own, target };
     }
 

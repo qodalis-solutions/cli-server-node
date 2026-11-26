@@ -61,15 +61,47 @@ function fileVersion(file: string): string | undefined {
     return existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 12) : undefined;
 }
 
+/** `/*! <package> <version> *\/`, the first line of a module's `extension.js` (the dashboard repo's module builds). */
+const MODULE_BANNER = /^\/\*!\s+((?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*)\s+(\S{1,50})\s+\*\//;
+
+/**
+ * The npm package and version of a module's build: the banner of its `extension.js`, else the `package.json` of the
+ * npm package whose `dist` it is. Undefined when neither says.
+ */
+export function dashboardModuleIdentity(dir: string): { package: string; version: string } | undefined {
+    try {
+        const file = join(dir, 'extension.js');
+        if (existsSync(file)) {
+            const head = readFileSync(file, 'utf8').slice(0, 300);
+            const banner = MODULE_BANNER.exec(head);
+            if (banner) return { package: banner[1], version: banner[2] };
+        }
+    } catch {
+        // Unreadable: no identity
+    }
+    for (const candidate of [join(dir, 'package.json'), join(dir, '..', 'package.json')]) {
+        try {
+            if (!existsSync(candidate)) continue;
+            const pkg = JSON.parse(readFileSync(candidate, 'utf8')) as { name?: unknown; version?: unknown };
+            if (typeof pkg.name === 'string' && /cli-dashboard-/.test(pkg.name) && typeof pkg.version === 'string') return { package: pkg.name, version: pkg.version };
+        } catch {
+            // Not a package.json
+        }
+    }
+    return undefined;
+}
+
 /**
  * Serves the module built in `dir` at `prefix` (default `/qcli/modules/<id>`), with `Cache-Control: no-cache`, and
  * returns its extension: `entry` is `<prefix>/extension.js?v=<hash>` and `styles` `<prefix>/extension.css?v=<hash>`
- * when the build has a stylesheet, so a new build is fetched at once.
+ * when the build has a stylesheet, so a new build is fetched at once. `package` and `version` come from the build
+ * ({@link dashboardModuleIdentity}) unless `info` gives them.
  */
 export function dashboardModulePage(dir: string, info: CliDashboardModuleInfo, prefix = `${DASHBOARD_MODULES_PREFIX}/${info.id}`): CliDashboardModulePage {
     const root = resolve(dir);
     const js = fileVersion(join(root, 'extension.js'));
     const css = fileVersion(join(root, 'extension.css'));
+    const identity = dashboardModuleIdentity(root);
     const handler: CliDashboardModulePage['handler'] = (req, res, next) => {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
             next();
@@ -123,6 +155,7 @@ export function dashboardModulePage(dir: string, info: CliDashboardModuleInfo, p
         prefix,
         handler,
         extension: {
+            ...(identity ? { package: identity.package, version: identity.version } : {}),
             ...info,
             entry: `${prefix}/extension.js${js ? `?v=${js}` : ''}`,
             ...(css ? { styles: [`${prefix}/extension.css?v=${css}`] } : {}),

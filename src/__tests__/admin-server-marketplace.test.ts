@@ -110,11 +110,29 @@ describe('server marketplace: browsing', () => {
             platform: { package: '@qodalis/cli-server-plugin-weather', latest: '1.1.0', installed: null, compatible: true },
             otherPlatforms: ['python', 'dotnet'],
             autoInstall: true,
+            installed: null,
             updateAvailable: false,
             allowed: true,
         });
         expect(byName.jobs).toMatchObject({ platform: { compatible: false, latest: null, reason: `needs server ^99.0.0 (this server has ${SERVER_VERSION})` }, allowed: false, blockedReason: `needs server ^99.0.0 (this server has ${SERVER_VERSION})` });
         expect(byName.kanban).toMatchObject({ allowed: false, blockedReason: 'unverified publisher' });
+    });
+
+    it('a plugin the host adds in code is installed with source code and its version: newer marketplace versions to update in code', async () => {
+        const h = await startServer({
+            net: seeded(),
+            configure: (cli) => cli.builder.addInstalledPlugin({ id: '@qodalis/cli-server-plugin-weather', name: 'Weather', version: '1.0.0', source: 'code' }),
+        });
+        const list = (await request(h.cli.app).get(`${SBASE}/plugins`).set(bearer(h.token))).body;
+        const weather = list.items.find((i: { name: string }) => i.name === 'weather');
+        expect(weather).toMatchObject({ installed: { version: '1.0.0', source: 'code' }, updateAvailable: true, platform: { installed: null, latest: '1.1.0' } });
+        expect(list.items.find((i: { name: string }) => i.name === 'kanban').installed).toBeNull();
+        const details = (await request(h.cli.app).get(`${SBASE}/plugins/weather`).set(bearer(h.token))).body;
+        expect(details.installed).toEqual({ version: '1.0.0', source: 'code' });
+        const res = await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'weather' });
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual({ error: 'already added in code: @qodalis/cli-server-plugin-weather@1.0.0' });
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'installed.json'))).toBe(false);
     });
 
     it('details: every platform version, Node ones annotated; autoInstall from the npm record', async () => {
@@ -195,6 +213,9 @@ describe('server marketplace: install, update, remove', () => {
         const first = await startServer({ net });
         await request(first.cli.app).post(`${SBASE}/installed`).set(bearer(first.token)).send({ name: 'weather', version: '1.0.0' }).expect(202);
         const h = await startServer({ net, dataDir: first.dataDir });
+        // Installed from the marketplace (running, so also listed among the packages): source marketplace, updatable here
+        const listed = (await request(h.cli.app).get(`${SBASE}/plugins`).set(bearer(h.token))).body.items.find((i: { name: string }) => i.name === 'weather');
+        expect(listed).toMatchObject({ installed: { version: '1.0.0', source: 'marketplace' }, updateAvailable: true, platform: { installed: '1.0.0' } });
         expect((await runCommand(h.cli, 'hello')).text).toBe('hi from 1.0.0');
         expect(h.cli.restart.pending()).toEqual([]);
 
@@ -300,7 +321,7 @@ describe('server marketplace: install, update, remove', () => {
         const net = seeded();
         const h = await startServer({ net, configure: (cli) => cli.builder.addInstalledPlugin({ id: '@qodalis/cli-server-plugin-weather', name: 'Weather' }) });
         expect((await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'weather' })).body).toEqual({
-            error: 'already installed by the host: @qodalis/cli-server-plugin-weather',
+            error: 'already added in code: @qodalis/cli-server-plugin-weather',
         });
         const pin = net.publishPackage('left-pad', '1.3.0');
         net.publishPackage('left-pad', '1.3.0', { tampered: true });

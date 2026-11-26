@@ -87,6 +87,7 @@ export {
     CliDashboardModulePage,
     CliDashboardModuleInfo,
     DASHBOARD_MODULES_PREFIX,
+    dashboardModuleIdentity,
     dashboardModulePage,
     findDashboardModule,
     resolveDashboardModulePage,

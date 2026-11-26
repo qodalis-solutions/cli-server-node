@@ -140,7 +140,7 @@ export interface InstalledDashboardPlugin {
 
 /** Where the plugins' pages are registered (the server's builder). */
 export interface DashboardExtensionHost {
-    list(): ReadonlyArray<{ id: string }>;
+    list(): ReadonlyArray<{ id: string; version?: string; package?: string }>;
     add(extension: CliDashboardExtension): void;
     remove(id: string): boolean;
 }
@@ -232,7 +232,12 @@ export interface MarketplaceDashboardVersion {
 
 /** The annotations the server adds to a marketplace item. */
 export interface DashboardPluginAnnotations {
-    installed: { version: string } | null;
+    /**
+     * `source: 'marketplace'`: installed from the marketplace (update and remove it here); `'code'`: the host adds the
+     * page in its code (its version when the build says, else null): never installed, updated or removed here.
+     */
+    installed: { version: string | null; source: 'code' | 'marketplace' } | null;
+    /** The marketplace has a newer version than the installed one (for `source: 'code'`, to update in code). */
     updateAvailable: boolean;
     allowed: boolean;
     blockedReason?: string;
@@ -469,7 +474,13 @@ export class DashboardMarketplace {
 
     /** The annotations of a list item or a plugin's details. */
     private annotate(item: MarketplaceDashboardItem): DashboardPluginAnnotations {
-        const installed = this.recordOf(item.name);
+        const record = this.recordOf(item.name);
+        const code = record ? undefined : this.addedInCode(item.name, item.extension?.id);
+        const installed: DashboardPluginAnnotations['installed'] = record
+            ? { version: record.version, source: 'marketplace' }
+            : code
+              ? { version: typeof code.version === 'string' ? code.version : null, source: 'code' }
+              : null;
         let latest: string | null | undefined;
         let api: number;
         if (Array.isArray(item.versions)) {
@@ -483,8 +494,9 @@ export class DashboardMarketplace {
         const blockedReason = this.blockedReason(item, api);
         const serverPackage = nodeServerPackage(item.serverPackages);
         return {
-            installed: installed ? { version: installed.version } : null,
-            updateAvailable: !!installed && typeof latest === 'string' && isValidDashboardPluginVersion(latest) && compareDashboardPluginVersions(latest, installed.version) > 0,
+            installed,
+            updateAvailable:
+                !!installed?.version && typeof latest === 'string' && isValidDashboardPluginVersion(latest) && isValidDashboardPluginVersion(installed.version) && compareDashboardPluginVersions(latest, installed.version) > 0,
             allowed: !blockedReason,
             ...(blockedReason ? { blockedReason } : {}),
             requires: serverPackage ? { serverPackage, installed: this.deps.serverPlugins().some((p) => p.id === serverPackage) } : null,
@@ -543,6 +555,19 @@ export class DashboardMarketplace {
         return [...this.plugins.values()].map((p) => ({ ...p.record, files: p.record.files.map((f) => ({ ...f })) }));
     }
 
+    /**
+     * The page the host adds in code for the package `name`: one whose `package` is `name`, else (a page without one)
+     * the page of an official module's id (`@qodalis/cli-dashboard-module-<id>`). Marketplace installs are not code.
+     */
+    addedInCode(name: string, extensionId?: unknown): { id: string; version?: string; package?: string } | undefined {
+        const pages = this.deps.extensions.list().filter((e) => !this.plugins.has(e.id));
+        const byPackage = pages.find((e) => e.package === name);
+        if (byPackage) return byPackage;
+        if (!OFFICIAL_MODULE.test(name)) return undefined;
+        const id = dashboardPluginId(name, extensionId);
+        return pages.find((e) => !e.package && e.id === id);
+    }
+
     private recordOf(name: string): InstalledDashboardPluginRecord | undefined {
         for (const p of this.plugins.values()) if (p.record.name === name) return p.record;
         return undefined;
@@ -583,6 +608,8 @@ export class DashboardMarketplace {
             const values = configValuesOf(config);
             const existing = this.recordOf(name);
             if (existing) throw new DashboardMarketplaceError(409, `already installed: ${name}@${existing.version}`);
+            const code = this.addedInCode(name);
+            if (code) throw new DashboardMarketplaceError(409, `already added in code: ${name}${code.version ? `@${code.version}` : ''}`);
             const { plugin, target } = await this.resolve(name, (version as string | null | undefined) ?? undefined);
             const settings = settingsOf(name, target);
             checkConfigValues(settings.config, values);
@@ -849,6 +876,7 @@ export class DashboardMarketplace {
             title: record.title,
             ...(record.icon ? { icon: record.icon } : {}),
             version: record.version,
+            package: record.name,
         });
         let extension: CliDashboardExtension;
         try {

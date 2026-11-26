@@ -13,6 +13,7 @@ import {
     CliDashboardExtension,
     DataExplorerLanguage,
     DataExplorerOutputFormat,
+    dashboardModuleIdentity,
     dashboardModulePage,
     validateDashboardExtension,
 } from '@qodalis/cli-server-abstractions';
@@ -82,6 +83,26 @@ describe('dashboardModulePage', () => {
         expect((await request(app).get('/qcli/modules/jobs/assets')).text).toBe('fallthrough');
         expect((await request(app).get('/qcli/modules/jobs/..%2f..%2fetc%2fpasswd')).text).toBe('fallthrough');
         expect((await request(app).post('/qcli/modules/jobs/extension.js')).text).toBe('fallthrough');
+    });
+
+    it('the package and version of a build: the banner of extension.js, else the npm package around dist; the info wins', () => {
+        const banner = build('/*! @qodalis/cli-dashboard-module-jobs 1.0.0-beta.29 */\nexport default {};');
+        const page = dashboardModulePage(banner, { id: 'jobs', title: 'Jobs' });
+        expect(page.extension).toMatchObject({ package: '@qodalis/cli-dashboard-module-jobs', version: '1.0.0-beta.29' });
+        expect(validateDashboardExtension(page.extension)).toMatchObject({ package: '@qodalis/cli-dashboard-module-jobs', version: '1.0.0-beta.29' });
+        expect(dashboardModulePage(banner, { id: 'jobs', title: 'Jobs', version: '9.9.9' }).extension.version).toBe('9.9.9');
+        // an npm package's dist
+        const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-module-pkg-'));
+        disposables.push(() => fs.rmSync(pkg, { recursive: true, force: true }));
+        fs.mkdirSync(path.join(pkg, 'dist'));
+        fs.writeFileSync(path.join(pkg, 'dist', 'extension.js'), 'export default {};');
+        fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@qodalis/cli-dashboard-module-audit', version: '1.0.0-beta.28' }));
+        expect(dashboardModuleIdentity(path.join(pkg, 'dist'))).toEqual({ package: '@qodalis/cli-dashboard-module-audit', version: '1.0.0-beta.28' });
+        // neither: nothing
+        const plain = dashboardModulePage(build(), { id: 'plain', title: 'Plain' }).extension;
+        expect(plain.package).toBeUndefined();
+        expect(plain.version).toBeUndefined();
+        expect(() => validateDashboardExtension({ id: 'x', title: 'X', entry: '/x.js', package: 'Not A Package' })).toThrow('package must be an npm package name');
     });
 
     it('validates and keeps widgets and search', () => {

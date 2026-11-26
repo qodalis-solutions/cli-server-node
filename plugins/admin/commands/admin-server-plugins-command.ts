@@ -51,7 +51,8 @@ class SearchProcessor extends CliCommandProcessor {
             if (result.items.length === 0) return query ? `No server plugins match "${query}".` : 'The marketplace lists no server plugins.';
             const rows = result.items.map((p) => {
                 let status: string;
-                if (p.platform?.installed) status = p.updateAvailable ? `installed ${p.platform.installed}, update available` : `installed ${p.platform.installed}`;
+                if (p.installed?.source === 'code') status = `added in code${p.installed.version ? ` ${p.installed.version}` : ''}${p.updateAvailable ? ', newer version in the marketplace' : ''}`;
+                else if (p.platform?.installed) status = p.updateAvailable ? `installed ${p.platform.installed}, update available` : `installed ${p.platform.installed}`;
                 else status = p.allowed ? 'installable' : `blocked: ${p.blockedReason}${p.autoInstallReason ? ` (${p.autoInstallReason})` : ''}`;
                 return [
                     p.name,
