@@ -25,6 +25,7 @@ import * as portalEntry from '../../plugins/portal/plugin';
 import * as docsEntry from '../../plugins/docs/plugin';
 import * as dataExplorerEntry from '../../plugins/data-explorer/plugin';
 import * as configRedisEntry from '../../plugins/config-redis/plugin';
+import * as weatherEntry from '../../plugins/weather/plugin';
 import { REDIS_CONFIG_WRITE_SCRIPT, type CliRedisConfigClient } from '@qodalis/cli-server-plugin-config-redis';
 
 const ROOT = resolve(__dirname, '..', '..');
@@ -320,6 +321,33 @@ describe('load order', () => {
             ['config-redis', 'needs-configuration'],
         ]);
         expect(cli.builder.configRegistry.storeOf('users-plugin')?.source).toBe('file');
+    });
+
+    it("config-redis keeps its settings in the server's plugin-settings.json store: no plugin's write is lost", async () => {
+        const dir = dataDir();
+        const cli = await start(dir, { configure: (b) => b.addPlugin(configRedisEntry).addPlugin(weatherEntry as never) });
+        expect(cli.serverPlugins.states().map((s) => [s.name, s.status])).toEqual([
+            ['config-redis', 'needs-configuration'],
+            ['weather', 'loaded'],
+        ]);
+        const registry = cli.builder.configRegistry;
+        // One store of the file: the loader's
+        expect(registry.storeOf('config-redis')).toBe(registry.storeOf('weather'));
+        await cli.config.update('weather', 'settings', { changes: { defaultLocation: 'Paris' } }, ADMIN);
+        await cli.config.update('config-redis', 'settings', { changes: { keyPrefix: 'acme:' } }, ADMIN);
+        await cli.config.update('weather', 'settings', { changes: { defaultLocation: 'Oslo' } }, ADMIN);
+        await cli.config.update('config-redis', 'settings', { changes: { ttlSeconds: 60 } }, ADMIN);
+        const file = readFileSync(join(dir, 'plugin-settings.json'), 'utf8');
+        expect(file).toContain('Oslo');
+        expect(file).toContain('acme:');
+        expect(file).toContain('60');
+
+        // Both kept across a restart
+        const next = await start(dir, { configure: (b) => b.addPlugin(configRedisEntry).addPlugin(weatherEntry as never) });
+        const value = async (provider: string, key: string) => (await providerView(next, provider)).sections[0].entries.find((e) => e.key === key)?.value;
+        expect(await value('weather', 'defaultLocation')).toBe('Oslo');
+        expect(await value('config-redis', 'keyPrefix')).toBe('acme:');
+        expect(await value('config-redis', 'ttlSeconds')).toBe(60);
     });
 
     it('addPlugin refuses an entry without createPlugin or plugin info, twice the same package, or once loading started', async () => {

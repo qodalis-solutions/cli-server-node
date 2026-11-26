@@ -213,6 +213,13 @@ export interface CliPluginContext {
     readonly serverDataDir: string;
     /** The server's event bus. */
     readonly eventBus: ICliEventBus;
+    /**
+     * The store of the plugins' settings file (`<serverDataDir>/plugin-settings.json`), the one instance the server
+     * keeps the plugins' settings in while it keeps its own in memory. A plugin that keeps settings there on purpose
+     * (`settings({ store })`, e.g. config-redis, whose URL cannot live in Redis) passes this store: a second store
+     * of the same file caches it too and loses the other's writes. Undefined on servers before it.
+     */
+    readonly pluginSettingsStore?: ICliConfigStore;
     /** The server's restart service (a setting that needs a restart marks it). */
     readonly restart: ICliServerRestart;
     /**

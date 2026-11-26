@@ -541,6 +541,7 @@ export class CliServerPlugins implements ICliServerPlugins {
             dataDir,
             serverDataDir: this.dataDir,
             eventBus: host.eventBus,
+            pluginSettingsStore: this.settingsFile(),
             restart: host.restart,
             source: candidate.source,
             options: Object.freeze({ ...candidate.options }),

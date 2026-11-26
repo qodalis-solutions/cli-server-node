@@ -27,8 +27,9 @@ export async function createPlugin(context: CliPluginContext): Promise<CliPlugin
         title: 'Config on Redis',
         description: "Redis as the server's config store",
         settings,
-        // Not in Redis: the URL must be read before Redis can be
-        store: new JsonFileConfigStore(join(context.serverDataDir, 'plugin-settings.json')),
+        // Not in Redis: the URL must be read before Redis can be. The server's own store of the file (a second one
+        // would cache the file too and lose the other plugins' writes); its own only on a server before it
+        store: context.pluginSettingsStore ?? new JsonFileConfigStore(join(context.serverDataDir, 'plugin-settings.json')),
     });
     const client = context.options.client as CliRedisConfigClient | undefined;
     const url = String(provider.value('settings', 'url') ?? '').trim();
