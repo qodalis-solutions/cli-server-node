@@ -299,6 +299,8 @@ export {
     CliServerPluginsOptions,
     CliServerPluginsHost,
     DEFAULT_DATA_DIR,
+    QCLI_DATA_DIR_ENV,
+    resolveDataDir,
     SHARED_PACKAGES,
     isValidServerPluginName,
     isValidServerPluginPackage,

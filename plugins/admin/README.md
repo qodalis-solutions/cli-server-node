@@ -197,7 +197,7 @@ new CliAdminBuilder()
     .setMarketplace({
         url: 'https://plugins.qodalis.com', // default
         install: 'verified', // default; 'listed': any listed version; 'off': browse only
-        dir: './qcli-data/dashboard-plugins', // default, from the working directory
+        dir: './qcli-data/dashboard-plugins', // default: <dataDir>/dashboard-plugins
     })
     .build({ registry, eventSocketManager, builder });
 ```
@@ -206,12 +206,19 @@ new CliAdminBuilder()
 |---|---|---|
 | `url` | `https://plugins.qodalis.com` | The marketplace (its public API at `/api/v1/qcli/marketplace`) |
 | `install` | `verified` | `verified`: listed versions of verified publishers only; `listed`: any listed version; `off`: browse only |
-| `dir` | `./qcli-data/dashboard-plugins` | Where installed plugins are kept |
+| `dir` | `<dataDir>/dashboard-plugins` | Where installed plugins are kept: the server's `dataDir` (`createCliServer({ dataDir })`, else `QCLI_DATA_DIR`, else `./qcli-data`), so one option moves every folder; an explicit `dir` wins |
 | `fetch` | global `fetch` | The HTTP client for the marketplace and the CDNs (tests pass a fake) |
 | `cdns` | jsDelivr, unpkg | Where bundles are downloaded from, in order |
 | `timeoutMs` | `15000` | Timeout of each request |
 
 `setMarketplace(false)` serves none of the routes below and loads no installed plugin.
+
+The folders must be writable. When one cannot be created or written (a container running as a non-root user with the
+default `./qcli-data` in a read-only app folder), the plugin logs one WARNING at startup naming it, and installing,
+updating or removing a dashboard or server plugin answers 500 with the folder and what to set:
+`{ "error": "cannot write the plugins folder /app/qcli-data/dashboard-plugins: permission denied (EACCES). Set dataDir (or QCLI_DATA_DIR) to a writable folder" }`
+(with an explicit `dir`: `Set the marketplace's dir to a writable folder`). `admin dashboard install` and `admin
+plugins install` print it as `Error: ...`. Only the folder and the error code are named.
 
 **Installing** resolves the version (the newest listed one this dashboard runs, `dashboardApi` 1, unless one is
 given), checks the trust policy, downloads each file of the version record (`files: [{ path, integrity, size }]`) from

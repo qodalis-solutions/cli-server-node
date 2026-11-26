@@ -27,7 +27,8 @@ import {
     DashboardMarketplaceOptions,
 } from './services/dashboard-marketplace';
 import { DASHBOARD_MODULES_PREFIX } from '@qodalis/cli-server-abstractions';
-import { join } from 'path';
+import { join, resolve, sep } from 'path';
+import { DATA_DIR_HINT, QCLI_DATA_DIR_ENV, unwritableFoldersWarning } from './services/plugins-folder';
 import * as crypto from 'crypto';
 
 /** The audit plugin's package id (the admin plugin does not depend on it). */
@@ -133,7 +134,8 @@ export class CliAdminBuilder {
     /**
      * Dashboard and server plugins from the marketplace: `url` (default `https://plugins.qodalis.com`), `install`
      * (`verified`, the default: listed versions of verified publishers only; `listed`: any listed version; `off`:
-     * browse only), `dir` (dashboard plugins, default `./qcli-data/dashboard-plugins`), `fetch` / `cdns` /
+     * browse only), `dir` (dashboard plugins, default `<dataDir>/dashboard-plugins`: the server's `dataDir`, else
+     * `QCLI_DATA_DIR`, else `./qcli-data`), `fetch` / `cdns` /
      * `timeoutMs` for the HTTP client, and for server plugins `npmRegistry` and `npm` (the runner). `false` turns the
      * marketplace off (no routes, installed dashboard plugins not loaded). Throws for an invalid url or policy when built.
      */
@@ -336,10 +338,16 @@ export class CliAdminBuilder {
         // Dashboard plugins from the marketplace: pages added and removed at runtime, served from this server
         let bus = eventBus;
         let marketplace: DashboardMarketplace | undefined;
+        // Kept in the server's data directory unless the marketplace names its own folder
+        const dataDir = builder.serverPlugins?.dataDir ?? resolve(process.env[QCLI_DATA_DIR_ENV] || 'qcli-data');
+        const explicitDashboardDir = this._marketplace !== false ? this._marketplace.dir : undefined;
+        const dashboardPluginsDir = explicitDashboardDir ?? join(dataDir, 'dashboard-plugins');
+        const dashboardFolderHint = explicitDashboardDir ? "Set the marketplace's dir to a writable folder" : DATA_DIR_HINT;
         if (this._marketplace !== false && builder.addDashboardExtension && builder.removeDashboardExtension) {
             const add = builder.addDashboardExtension.bind(builder);
             const remove = builder.removeDashboardExtension.bind(builder);
-            marketplace = new DashboardMarketplace(this._marketplace, {
+            marketplace = new DashboardMarketplace({ ...this._marketplace, dir: dashboardPluginsDir }, {
+                folderHint: dashboardFolderHint,
                 extensions: {
                     list: () => (builder.dashboardExtensions ?? []) as ReadonlyArray<{ id: string }>,
                     add: (extension) => void add(extension),
@@ -362,9 +370,14 @@ export class CliAdminBuilder {
 
         // Server plugins from the marketplace: installed with npm into <dataDir>/server-plugins, loaded at the next start
         let serverMarketplace: ServerPluginMarketplace | undefined;
+        let serverFolderHint = DATA_DIR_HINT;
         if (this._marketplace !== false && builder.serverPlugins) {
+            serverFolderHint = resolve(builder.serverPlugins.dir).startsWith(resolve(builder.serverPlugins.dataDir) + sep)
+                ? DATA_DIR_HINT
+                : 'Set serverPlugins.dir to a writable folder';
             serverMarketplace = new ServerPluginMarketplace(this._marketplace, {
                 plugins: builder.serverPlugins,
+                folderHint: serverFolderHint,
                 installedPlugins: () => builder.installedPlugins ?? [],
                 restart: builder.restart,
                 audit: () => builder.auditSink,
@@ -375,6 +388,15 @@ export class CliAdminBuilder {
             });
             router.use('/server/marketplace', authMiddleware, createServerMarketplaceController(serverMarketplace));
         }
+
+        // One WARNING at startup when installing would fail: a folder that cannot be created or written
+        const writableFolders: Array<{ dir: string; hint: string }> = [];
+        if (marketplace && marketplace.install !== 'off') writableFolders.push({ dir: marketplace.dir, hint: dashboardFolderHint });
+        if (serverMarketplace && serverMarketplace.install !== 'off' && builder.serverPlugins?.enabled) {
+            writableFolders.push({ dir: builder.serverPlugins.dir, hint: serverFolderHint });
+        }
+        const folderWarning = unwritableFoldersWarning(writableFolders);
+        if (folderWarning) console.warn(folderWarning);
 
         router.get('/dashboard/extensions', authMiddleware, (_req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
