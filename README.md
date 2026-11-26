@@ -292,8 +292,10 @@ receives the server's bus when mounted.
 ## Server plugins installed at runtime
 
 A server plugin can be installed while the server runs, from the admin dashboard's Marketplace tab or `admin plugins
-install <name>` ([admin plugin](plugins/admin/README.md#server-plugins-from-the-marketplace)): npm installs its
-package into `<dataDir>/server-plugins` and the server loads it at the next start. No host code changes.
+install <name>` ([admin plugin](plugins/admin/README.md#server-plugins-from-the-marketplace)): the server unpacks
+its verified package into `<dataDir>/server-plugins` with only the dependencies the marketplace pins (each checked
+against its sha512) or the host trusts (`trustedDependencies`), sharing every package it already has, and loads it at
+the next start. No host code changes, no install scripts.
 
 ```ts
 const server = createCliServer({
@@ -315,7 +317,8 @@ the host added; a filesystem storage or data explorer source they set is wired t
 **Shared packages.** `require('@qodalis/cli-server-abstractions')`, `@qodalis/cli-server-node` and
 `@qodalis/cli-server-plugin-*` from a plugin's files resolve to the server's own copy when it has one (npm still
 installs the plugin's dependencies next to it, unused for these), so classes, symbols and the event bus are the
-server's. Every server package shares one version: a plugin's range on the core or the abstractions is its server
+server's. Any other package a plugin requires and did not bring (the marketplace install shares the server's copy and
+never installs it) resolves to the server's too. Every server package shares one version: a plugin's range on the core or the abstractions is its server
 range.
 
 ### Making a plugin installable

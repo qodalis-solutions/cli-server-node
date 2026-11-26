@@ -409,8 +409,17 @@ it (`GET /plugins/installed`).
 
 The marketplace's server plugins (`kind=server`) have a package per server platform (Node, Python, .NET). This server
 lists and installs only the **Node** package; the others show as `otherPlatforms`. Same `setMarketplace` options and
-trust policy as dashboard plugins (`verified` by default), plus `npmRegistry` (default `https://registry.npmjs.org`)
-and `npm` (the runner; tests pass a fake).
+trust policy as dashboard plugins (`verified` by default), plus `npmRegistry` (default `https://registry.npmjs.org`),
+`trustedDependencies` (below; default none) and `hostPackageVersion` (how the server's own packages are found; tests
+pass one).
+
+```ts
+new CliAdminBuilder().setMarketplace({
+    install: 'verified',
+    // dependencies a plugin may bring when the marketplace pins none for its version: names, @scope/*, prefix*
+    trustedDependencies: ['left-pad', '@acme/*', 'date-fns*'],
+});
+```
 
 An install:
 
@@ -423,14 +432,31 @@ An install:
 3. downloads the tarball (50 MB at most) and checks its sha512 (502 `integrity mismatch: ...`, nothing stored), then its
    `package.json`: name and version, `qodalis.kind: "server"`, an `entry`, no `autoInstall: false`, and a range on
    `@qodalis/cli-server-node` or `-abstractions` this server satisfies;
-4. runs `npm install <dataDir>/server-plugins/tarballs/<name>-<version>.tgz --prefix <dataDir>/server-plugins
-   --no-audit --no-fund --ignore-scripts` (the verified local file; it stays, npm's `package.json` refers to it);
-5. records the plugin in `<dataDir>/server-plugins/installed.json` (written atomically) and marks a restart as required
+4. resolves its dependencies (`dependencies` and `optionalDependencies`, then theirs; peers are the server's):
+   - **the server's own copy**: a `@qodalis/*` package or one the server already resolves is shared, never installed
+     or shadowed (the loader resolves it to the server's copy); at a version outside the range the install is refused
+     (400 `incompatible dependency: <id>@<range> (the server has <version>)`), as is a `@qodalis/*` package the host
+     lacks;
+   - **pinned by the marketplace**: when the version record has `dependencies: [{ id, version, integrity, range }]`
+     (npm's sha512), exactly the pinned version (it must be in the range: else 400 `incompatible dependency`), its npm
+     record agreeing with the pin and its tarball matching it (502 `integrity mismatch`); a dependency the server
+     lacks and that has no pin is refused: 400 `untrusted dependency: <id> (not pinned by the marketplace)`;
+   - **no pins**: only a dependency the host trusts (`trustedDependencies`: a name, `@scope/*` or `prefix*`), the
+     newest version in the range from the registry's packument (`dist-tags.latest` when it is in the range), its
+     tarball matching the registry's sha512; any other is refused: 400 `untrusted dependency: <id> (the marketplace
+     pins none and the server does not trust it)`.
+
+   An optional dependency that cannot be installed is left out. Every refusal happens before anything is stored.
+5. unpacks the verified tarball into `<dataDir>/server-plugins/node_modules/<package>` and its dependencies into that
+   package's own `node_modules` (staged, then swapped in), itself: npm is not run, nothing else is fetched and no
+   install script ever runs (stronger than `--ignore-scripts`). The tarball stays in `tarballs/`;
+6. records the plugin in `<dataDir>/server-plugins/installed.json` (with the `dependencies` it installed: `{ id,
+   version, integrity, source: 'pinned' | 'trusted' }`) (written atomically) and marks a restart as required
    (`plugin:<name>`, source `plugins`, `Install <name> <version>`); audit `server.plugin.install`, event
    `server:plugins-changed` (audience `admin:access`).
 
 The server loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)). An update
-works the same way; a removal runs `npm uninstall`. Each marks the restart, or clears it when the installed list is back
+works the same way (the package folder replaced); a removal deletes the package's folder. Each marks the restart, or clears it when the installed list is back
 to what the server runs (an install removed before a restart, an update back to the running version).
 
 ### Server marketplace API
