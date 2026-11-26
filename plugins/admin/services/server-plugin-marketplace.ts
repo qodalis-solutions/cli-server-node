@@ -21,6 +21,11 @@ import {
 export const SERVER_PLUGIN_PLATFORM = 'node';
 /** The platforms a server plugin may have a package for. */
 export const SERVER_PLUGIN_PLATFORMS: readonly string[] = ['node', 'python', 'dotnet'];
+/**
+ * What `search` lists: `this` (default) this server's platform, `all` every server plugin, or one platform's (the
+ * marketplace's `platform` filter).
+ */
+export const SERVER_PLUGIN_PLATFORM_FILTERS: readonly string[] = ['this', 'all', ...SERVER_PLUGIN_PLATFORMS];
 /** The permission to install, update and remove server plugins. */
 export const PLUGINS_INSTALL_PERMISSION = 'plugins:install';
 /** The npm registry tarballs and their integrity come from. */
@@ -453,6 +458,15 @@ function listedVersions(item: MarketplaceServerItem, p: MarketplaceServerPlatfor
     return versions.filter((v) => v && isVersion(v.version) && (v.status ?? 'listed') === 'listed').sort((a, b) => compareDashboardPluginVersions(b.version, a.version));
 }
 
+/**
+ * A list item without the marketplace's view of the platform it was asked for (another one's, or none): its `latest`,
+ * `version`, `compatible`, `reason` and runtime flags, so this server's annotation comes from its own package only.
+ */
+function withoutPlatformView(item: MarketplaceServerItem): MarketplaceServerItem {
+    const { latest: _l, version: _v, compatible: _c, reason: _r, autoInstall: _a, autoInstallReason: _ar, autoInstallDerived: _ad, needsConfiguration: _n, ...rest } = item;
+    return rest as MarketplaceServerItem;
+}
+
 /** Whether the plugin runs without the host's code: the version's, else the platform's, else the item's `autoInstall`. */
 function autoInstallOf(item: MarketplaceServerItem, p: MarketplaceServerPlatform | undefined, v?: MarketplaceServerVersion): { autoInstall: boolean; reason?: string } {
     for (const source of [v, p, item]) {
@@ -513,9 +527,19 @@ export class ServerPluginMarketplace {
 
     // ---------------------------------------------------------------- browsing
 
-    /** `GET /plugins`: the marketplace's server plugins with a package for this platform, annotated. */
-    async search(params: { query?: string; page?: number; pageSize?: number } = {}): Promise<{ items: Array<MarketplaceServerItem & ServerPluginAnnotations>; total: number; page: number; pageSize: number }> {
-        const qs = this.platformQuery();
+    /**
+     * `GET /plugins`: the marketplace's server plugins, annotated for this server. `platform`: `this` (default) the ones
+     * with a package for this server's platform, checked against this server's version; `all` every server plugin; or
+     * `node`, `python`, `dotnet`, passed on to the marketplace. Plugins without a package for this platform are listed
+     * but not installable (`not available for node`), also when the marketplace ignores the filter.
+     */
+    async search(params: { query?: string; page?: number; pageSize?: number; platform?: string } = {}): Promise<{ items: Array<MarketplaceServerItem & ServerPluginAnnotations>; total: number; page: number; pageSize: number }> {
+        const filter = params.platform === undefined || params.platform === '' ? 'this' : params.platform;
+        if (!SERVER_PLUGIN_PLATFORM_FILTERS.includes(filter)) throw new DashboardMarketplaceError(400, `invalid platform: ${filter} (${SERVER_PLUGIN_PLATFORM_FILTERS.join(', ')})`);
+        const platform = filter === 'this' ? SERVER_PLUGIN_PLATFORM : filter === 'all' ? null : filter;
+        // The marketplace's view of an item (latest, compatible, reason, autoInstall) is this server's only when it was asked for this platform
+        const ownView = platform === SERVER_PLUGIN_PLATFORM;
+        const qs = ownView ? this.platformQuery() : new URLSearchParams({ kind: 'server', ...(platform ? { platform } : {}) });
         if (params.query?.trim()) qs.set('query', params.query.trim().slice(0, 200));
         if (params.page !== undefined) qs.set('page', String(params.page));
         if (params.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
@@ -525,7 +549,7 @@ export class ServerPluginMarketplace {
         const items = all.filter((i) => i && isValidServerPluginName(i.name) && i.kind === 'server');
         const filtered = items.length === all.length;
         return {
-            items: items.map((item) => ({ ...item, ...this.annotate(item) })),
+            items: items.map((item) => ({ ...item, ...this.annotate(ownView ? item : withoutPlatformView(item)) })),
             total: filtered && typeof body.total === 'number' ? body.total : items.length,
             page: typeof body.page === 'number' ? body.page : (params.page ?? 1),
             pageSize: typeof body.pageSize === 'number' ? body.pageSize : (params.pageSize ?? items.length),

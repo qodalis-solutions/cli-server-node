@@ -153,6 +153,91 @@ describe('server marketplace: browsing', () => {
         expect((await request(h.cli.app).get(`${SBASE}/plugins/..%2F..%2Fetc`).set(bearer(h.token))).status).toBe(400);
     });
 
+    describe('the platform filter', () => {
+        const list = async (h: Awaited<ReturnType<typeof startServer>>, platform?: string) => {
+            const res = await request(h.cli.app)
+                .get(`${SBASE}/plugins`)
+                .query(platform === undefined ? {} : { platform })
+                .set(bearer(h.token));
+            return { res, url: new URL(h.net.calls[h.net.calls.length - 1]), byName: Object.fromEntries((res.body.items ?? []).map((i: { name: string }) => [i.name, i])) };
+        };
+        const notForNode = { platform: null, allowed: false, blockedReason: 'not available for node' };
+
+        it('this (the default): this platform with this server version, as before', async () => {
+            const h = await startServer({ net: seeded() });
+            for (const platform of [undefined, 'this', '']) {
+                const { res, url, byName } = await list(h, platform);
+                expect(res.status).toBe(200);
+                expect(`${url.origin}${url.pathname}?${url.searchParams}`).toBe(
+                    `${MARKET}/api/v1/qcli/marketplace/plugins?kind=server&platform=node&serverVersion=${encodeURIComponent(SERVER_VERSION)}`,
+                );
+                expect(Object.keys(byName).sort()).toEqual(['jobs', 'kanban', 'users', 'weather']);
+                expect(res.body.total).toBe(4);
+                expect(byName.jobs).toMatchObject({ allowed: false, blockedReason: `needs server ^99.0.0 (this server has ${SERVER_VERSION})` });
+            }
+        });
+
+        it('all: no platform filter and no server version; a plugin without a Node package is listed, not installable', async () => {
+            const h = await startServer({ net: seeded() });
+            const { res, url, byName } = await list(h, 'all');
+            expect(res.status).toBe(200);
+            expect([...url.searchParams.entries()]).toEqual([['kind', 'server']]);
+            expect(Object.keys(byName).sort()).toEqual(['jobs', 'kanban', 'logs-seq', 'users', 'weather']);
+            expect(res.body.total).toBe(5);
+            expect(byName['logs-seq']).toMatchObject({ ...notForNode, otherPlatforms: ['dotnet'], installed: null, updateAvailable: false });
+            expect(byName.weather).toMatchObject({ platform: { package: '@qodalis/cli-server-plugin-weather', latest: '1.1.0', compatible: true }, otherPlatforms: ['python', 'dotnet'], allowed: true });
+            expect(byName.kanban).toMatchObject({ allowed: false, blockedReason: 'unverified publisher' });
+        });
+
+        it('node, python, dotnet: passed on exactly; the annotation is this server\'s, never the asked platform\'s', async () => {
+            const h = await startServer({ net: seeded() });
+            const node = await list(h, 'node');
+            expect([...node.url.searchParams.entries()]).toEqual([['kind', 'server'], ['platform', 'node'], ['serverVersion', SERVER_VERSION]]);
+            expect(Object.keys(node.byName).sort()).toEqual(['jobs', 'kanban', 'users', 'weather']);
+
+            const python = await list(h, 'python');
+            expect(python.res.status).toBe(200);
+            expect([...python.url.searchParams.entries()]).toEqual([['kind', 'server'], ['platform', 'python']]);
+            expect(Object.keys(python.byName)).toEqual(['weather']);
+            // the marketplace's latest is Python's (1.0.0b31): this server's annotation keeps the Node package's
+            expect(python.byName.weather).toMatchObject({ latest: '1.0.0b31', platform: { package: '@qodalis/cli-server-plugin-weather', latest: '1.1.0', compatible: true }, allowed: true });
+            expect(python.res.body.total).toBe(1);
+
+            const dotnet = await list(h, 'dotnet');
+            expect([...dotnet.url.searchParams.entries()]).toEqual([['kind', 'server'], ['platform', 'dotnet']]);
+            expect(Object.keys(dotnet.byName).sort()).toEqual(['logs-seq', 'weather']);
+            expect(dotnet.byName['logs-seq']).toMatchObject(notForNode);
+            expect(dotnet.byName.weather).toMatchObject({ allowed: true, platform: { latest: '1.1.0' } });
+        });
+
+        it('an older marketplace ignoring the filter: other platforms\' plugins come back not installable', async () => {
+            const net = seeded();
+            net.ignorePlatformFilter = true;
+            const h = await startServer({ net });
+            const { byName } = await list(h, 'this');
+            expect(Object.keys(byName).sort()).toEqual(['jobs', 'kanban', 'logs-seq', 'users', 'weather']);
+            expect(byName['logs-seq']).toMatchObject(notForNode);
+            expect(byName['logs-seq'].platform).toBeNull();
+            const python = await list(h, 'python');
+            expect(python.byName['logs-seq']).toMatchObject(notForNode);
+            // Python's view (not available for python) is not this server's: jobs keeps its Node package
+            expect(python.byName.jobs).toMatchObject({ compatible: false, reason: 'not available for python', platform: { package: '@qodalis/cli-server-plugin-jobs' } });
+            expect(python.byName.jobs.blockedReason).not.toBe('not available for python');
+        });
+
+        it('anything else is a 400, asked of no marketplace', async () => {
+            const h = await startServer({ net: seeded() });
+            for (const platform of ['java', 'NODE', 'this,all']) {
+                const res = await request(h.cli.app).get(`${SBASE}/plugins`).query({ platform }).set(bearer(h.token));
+                expect(res.status, platform).toBe(400);
+                expect(res.body).toEqual({ error: `invalid platform: ${platform} (this, all, node, python, dotnet)` });
+            }
+            const twice = await request(h.cli.app).get(`${SBASE}/plugins?platform=all&platform=node`).set(bearer(h.token));
+            expect(twice.status).toBe(400);
+            expect(h.net.calls).toEqual([]);
+        });
+    });
+
     it('an unreachable marketplace is a 502', async () => {
         const net = seeded();
         net.marketplaceDown = true;
@@ -390,6 +475,13 @@ describe('server marketplace: admin plugins command', () => {
         expect(search).toMatch(/^jobs\s+.*blocked: needs server \^99\.0\.0/m);
         expect(search).toContain('blocked: unverified publisher');
         expect(await run('admin plugins search nothing-like-this')).toBe('No server plugins match "nothing-like-this".');
+        const all = await run('admin plugins search --platform all');
+        expect(all).toMatch(/^logs-seq\s+\(not for node\)\s+-\s+dotnet\s+qodalis \(verified\)\s+blocked: not available for node$/m);
+        expect(new URL(net.calls[net.calls.length - 1]).searchParams.get('platform')).toBeNull();
+        expect(await run('admin plugins search --platform python')).toMatch(/^weather\s+@qodalis\/cli-server-plugin-weather\s+1\.1\.0\s+node, python, dotnet/m);
+        expect(new URL(net.calls[net.calls.length - 1]).searchParams.get('platform')).toBe('python');
+        expect(await run('admin plugins search --platform this')).not.toContain('logs-seq');
+        expect(await run('admin plugins search --platform java')).toBe('Error: invalid platform: java (this, all, node, python, dotnet)');
 
         expect(await run('admin plugins installed')).toBe(`No server plugins installed from the marketplace (${MARKET}, install: verified; admin plugins search <query> finds some).`);
         expect(await run('admin plugins install weather@1.0.0')).toBe(

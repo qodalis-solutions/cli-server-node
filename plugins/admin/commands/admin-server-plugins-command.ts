@@ -1,7 +1,7 @@
 import { CliCommandParameterDescriptor, CliCommandProcessor, CliProcessCommand, getCliCaller, getPositionals } from '@qodalis/cli-server-abstractions';
 import { DashboardMarketplaceActor, DashboardMarketplaceError } from '../services/dashboard-marketplace';
 import { formatTable } from './format-table';
-import { PLUGINS_INSTALL_PERMISSION, SERVER_PLUGIN_PLATFORM, ServerPluginChangeResult, ServerPluginMarketplace } from '../services/server-plugin-marketplace';
+import { PLUGINS_INSTALL_PERMISSION, SERVER_PLUGIN_PLATFORM, SERVER_PLUGIN_PLATFORM_FILTERS, ServerPluginChangeResult, ServerPluginMarketplace } from '../services/server-plugin-marketplace';
 
 const jsonParam = new CliCommandParameterDescriptor('json', 'Print the result as JSON', false, 'boolean');
 const json = (value: unknown) => JSON.stringify(value, null, 2);
@@ -36,8 +36,14 @@ class SearchProcessor extends CliCommandProcessor {
     command = 'search';
     description = "Searches the marketplace's server plugins: this server's package, version, platforms, whether it can be installed";
     acceptsValue = true;
-    parameters = [jsonParam];
-    examples = [{ command: 'admin plugins search jobs', description: 'Server plugins about jobs' }];
+    parameters = [
+        new CliCommandParameterDescriptor('platform', `Whose plugins: ${SERVER_PLUGIN_PLATFORM_FILTERS.join(', ')} (default this: the ones for this server)`, false, 'string'),
+        jsonParam,
+    ];
+    examples = [
+        { command: 'admin plugins search jobs', description: 'Server plugins about jobs' },
+        { command: 'admin plugins search --platform=all', description: 'Every server plugin, also the ones for other platforms' },
+    ];
 
     constructor(private readonly marketplace: ServerPluginMarketplace) {
         super();
@@ -46,7 +52,8 @@ class SearchProcessor extends CliCommandProcessor {
     handleAsync(command: CliProcessCommand): Promise<string> {
         return call(async () => {
             const query = getPositionals(command).join(' ');
-            const result = await this.marketplace.search({ query, pageSize: 50 });
+            const platform = command.args?.platform === undefined ? undefined : String(command.args.platform);
+            const result = await this.marketplace.search({ query, pageSize: 50, platform });
             if (command.args?.json) return json(result);
             if (result.items.length === 0) return query ? `No server plugins match "${query}".` : 'The marketplace lists no server plugins.';
             const rows = result.items.map((p) => {

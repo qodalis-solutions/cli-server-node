@@ -9,8 +9,10 @@ import { callerOf, intParam, nameBelow, sendError } from './dashboard-marketplac
  * updating and removing `plugins:install`. Every change takes effect after a restart: 202 with `restartRequired`.
  *
  * - `GET /` — `{ marketplaceUrl, install, platform: 'node', serverVersion, enabled }`
- * - `GET /plugins?query=&page=&pageSize=` — the marketplace's server plugins with a Node package, annotated
- *   (`platform`, `otherPlatforms`, `autoInstall`, `updateAvailable`, `allowed`, `blockedReason`)
+ * - `GET /plugins?query=&page=&pageSize=&platform=` — the marketplace's server plugins, annotated (`platform`,
+ *   `otherPlatforms`, `autoInstall`, `updateAvailable`, `allowed`, `blockedReason`); `platform`: `this` (default: the
+ *   ones with a Node package), `all`, `node`, `python` or `dotnet` (400 for anything else). Plugins without a Node
+ *   package are not installable here.
  * - `GET /plugins/{name}` — one plugin with its platforms and versions
  * - `GET /installed` — the installed plugins and how they run (`status`, `loadedVersion`, `error`, `updateAvailable`)
  * - `POST /installed` `{ name, version? }` — 202, the installed plugin with `restartRequired`
@@ -43,7 +45,8 @@ export function createServerMarketplaceController(marketplace: ServerPluginMarke
             const query = typeof req.query.query === 'string' ? req.query.query : undefined;
             const page = intParam(req.query.page, 'page', 1_000_000);
             const pageSize = intParam(req.query.pageSize, 'pageSize', 100);
-            res.json(await marketplace.search({ query, page, pageSize }));
+            const platform = req.query.platform === undefined ? undefined : typeof req.query.platform === 'string' ? req.query.platform : '?';
+            res.json(await marketplace.search({ query, page, pageSize, platform }));
         } catch (err) {
             sendError(res, err);
         }

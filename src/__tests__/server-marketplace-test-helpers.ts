@@ -118,6 +118,8 @@ export class FakeServerNet {
     readonly calls: string[] = [];
     readonly distTags = new Map<string, Record<string, string>>();
     marketplaceDown = false;
+    /** As the marketplace before `platform` filtered the list: every server plugin, whatever `platform` says. */
+    ignorePlatformFilter = false;
 
     /**
      * A plain npm package (a dependency): its record, packument entry and tarball; `tampered` serves other bytes.
@@ -252,7 +254,7 @@ export class FakeServerNet {
             if (u.searchParams.get('kind') !== 'server') return response(200, { items: [], total: 0, page: 1, pageSize: 24 });
             const query = (u.searchParams.get('query') ?? '').toLowerCase();
             const items = [...this.plugins.values()]
-                .filter((p) => String(p.name).includes(query) && (!platform || (p.platforms as Record<string, unknown>)[platform]))
+                .filter((p) => String(p.name).includes(query) && (!platform || this.ignorePlatformFilter || (p.platforms as Record<string, unknown>)[platform]))
                 .map(({ versions: _v, ...summary }) => ({ ...summary, ...view(_v ? { ...summary, versions: _v } : summary) }));
             return response(200, { items, total: items.length, page: 1, pageSize: Number(u.searchParams.get('pageSize') ?? 24) });
         }

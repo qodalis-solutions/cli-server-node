@@ -467,7 +467,7 @@ Mounted at `/api/v1/qcli/server/marketplace`. Reading needs `admin:access`; `POS
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | `{ "marketplaceUrl": "https://plugins.qodalis.com", "install": "verified", "platform": "node", "serverVersion": "1.0.0-beta.31", "enabled": true }` (`enabled`: false with `createCliServer({ serverPlugins: false })`) |
-| GET | `/plugins?query=&page=&pageSize=` | The marketplace's `kind=server&platform=node&serverVersion=<this>` list, annotated (below); 502 `marketplace unreachable` |
+| GET | `/plugins?query=&page=&pageSize=&platform=` | The marketplace's server plugins, annotated (below); 502 `marketplace unreachable`. `platform`: `this` (default: `kind=server&platform=node&serverVersion=<this>`), `all` (`kind=server`, every server plugin), `node`, `python` or `dotnet` (passed on as `platform=`); 400 for anything else. A plugin without a Node package is listed with `platform: null`, `allowed: false`, `blockedReason: "not available for node"`; outside `this` and `node`, whether a version fits this server is checked by the details and the install |
 | GET | `/plugins/{name}` | One plugin: every platform's versions (`versions`, each with `platform`), the Node ones with `allowed` and `blockedReason`; `autoInstall` from the newest Node package's npm record |
 | GET | `/installed` | The installed plugins and how they run (below) |
 | POST | `/installed` | `{ name, version? }`: **202** with the installed plugin and `restartRequired` |
@@ -683,7 +683,7 @@ the core [`config`](../../README.md#terminal-commands) command; a dashboard plug
 | `admin status --history [--minutes 60] [--json]` | `admin:access` | Summary of the status samples of the last minutes (1-1440): count, min/avg/max memory and CPU, peak connections (`GET /status/history`) |
 | `admin plugins`, `admin plugins list [--json]` | `admin:access` | Command modules: id, name, version, enabled or disabled, commands (`GET /plugins`) |
 | `admin plugins enable <id>`, `admin plugins disable <id>` | `admin:access` | Turns a module's commands on or off, like `POST /plugins/{id}/toggle` but idempotent (`... is already enabled.`); the `admin` module itself cannot be disabled from the terminal |
-| `admin plugins search [<query>] [--json]` | `admin:access` | The marketplace's server plugins: plugin, this server's package, version, platforms, publisher, installed / installable / blocked and why (`GET /server/marketplace/plugins`) |
+| `admin plugins search [<query>] [--platform this\|all\|node\|python\|dotnet] [--json]` | `admin:access` | The marketplace's server plugins: plugin, this server's package, version, platforms, publisher, installed / installable / blocked and why (`GET /server/marketplace/plugins`) |
 | `admin plugins installed [--json]` | `admin:access` | The server plugins installed from the marketplace: package, version (update available), status (loaded, pending restart, failed with its error, removed), when and by whom |
 | `admin plugins install <name>[@version]` | `admin:access`, `plugins:install` | Installs this server's package of a server plugin with the API's checks; it runs after a restart (`POST /server/marketplace/installed`) |
 | `admin plugins update <name>[@version]` | `admin:access`, `plugins:install` | Updates to the newest compatible version or the one given (`PUT /server/marketplace/installed/{name}`) |
