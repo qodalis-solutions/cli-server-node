@@ -367,15 +367,31 @@ export function readTarballFiles(tgz: Uint8Array, limit = 200 * 1024 * 1024): Ma
     return files;
 }
 
-/** The `package.json` of an npm tarball (`package/package.json`). Throws when there is none. */
-export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
+/** The folder every file of an npm tarball is under. */
+const TARBALL_ROOT = 'package/';
+
+/**
+ * The files of an npm tarball, every one under `package/` (names as stored). Throws 502 `invalid tarball` when it
+ * cannot be read, `invalid tarball: <name>` for a file outside `package/`: `tarballPackageJson` reads
+ * `package/package.json` and `unpackTarball` writes the folder's content, so another top folder could replace it.
+ */
+function tarballPackageFiles(tgz: Uint8Array): Map<string, Buffer> {
     let files: Map<string, Buffer>;
     try {
         files = readTarballFiles(tgz);
     } catch {
         throw new DashboardMarketplaceError(502, 'invalid tarball');
     }
-    const raw = files.get('package/package.json');
+    for (const name of files.keys()) {
+        if (!name.startsWith(TARBALL_ROOT)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name.slice(0, 200)} is outside package/`);
+    }
+    return files;
+}
+
+/** The `package.json` of an npm tarball (`package/package.json`). Throws when there is none or a file is outside `package/`. */
+export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
+    const files = tarballPackageFiles(tgz);
+    const raw = files.get(`${TARBALL_ROOT}package.json`);
     if (!raw) throw new DashboardMarketplaceError(502, 'invalid tarball: no package/package.json');
     try {
         return JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
@@ -385,22 +401,21 @@ export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
 }
 
 /**
- * Writes an npm tarball's files into `dir` (the `package/` folder's content; npm packs some with another top folder),
- * each kept inside it. No scripts run.
+ * Writes an npm tarball's files into `dir` (the content of its `package/` folder; a file outside it refuses the
+ * whole tarball before anything is written), each kept inside it. No scripts run.
  */
 export async function unpackTarball(tgz: Uint8Array, dir: string): Promise<void> {
-    let files: Map<string, Buffer>;
-    try {
-        files = readTarballFiles(tgz);
-    } catch {
-        throw new DashboardMarketplaceError(502, 'invalid tarball');
-    }
+    const files = tarballPackageFiles(tgz);
     const root = resolve(dir);
+    const targets: Array<[string, Buffer]> = [];
     for (const [name, content] of files) {
-        const relative = name.includes('/') ? name.slice(name.indexOf('/') + 1) : name;
+        const relative = name.slice(TARBALL_ROOT.length);
         if (!relative) continue;
         const path = resolve(root, relative);
         if (!path.startsWith(root + sep)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name}`);
+        targets.push([path, content]);
+    }
+    for (const [path, content] of targets) {
         await mkdir(dirname(path), { recursive: true });
         await writeFile(path, content);
     }

@@ -5,6 +5,7 @@ Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@q
 
 ## Unreleased
 
+- Server marketplace: a tarball with a file outside `package/` is refused (502 `invalid tarball: <name> is outside package/`) before anything is unpacked: the server checked `package/package.json` but unpacked any top folder, so a second `x/package.json` could replace it.
 - config-redis keeps its settings in the server's own store of `plugin-settings.json` (new `CliPluginContext.pluginSettingsStore`): it created a second store of the file, and the two caches lost each other's writes.
 - A plugin added in code (`builder.addPlugin`) is listed with its version and description (it showed 0.0.0 and none): from the entry's `plugin` info, else the package's package.json (resolved from the server, then the working directory), else what the module it returns lists or says; 0.0.0 only when nothing says one.
 - Dashboard plugins install again: the admin plugin sends `kind=dashboard` when it looks up a plugin and its version records on the marketplace, which answers 404 for a plugin of another kind (server plugin lookups send `kind=server`).

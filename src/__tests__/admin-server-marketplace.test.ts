@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { defaultHostPackageVersion, isTrustedDependency, readTarballFiles, satisfiesServerRange, tarballPackageJson } from '../../plugins/admin/index';
+import { defaultHostPackageVersion, isTrustedDependency, readTarballFiles, satisfiesServerRange, tarballPackageJson, unpackTarball } from '../../plugins/admin/index';
 import { runCommand } from './command-test-helpers';
 import {
     FakeServerNet,
@@ -21,6 +21,7 @@ import {
     cleanupServerHosts,
     makeTarball,
     pluginPackage,
+    serverTempDir,
     startServer,
 } from './server-marketplace-test-helpers';
 
@@ -62,8 +63,24 @@ describe('server marketplace: helpers', () => {
         expect([...files.keys()]).toEqual(['package/package.json', 'package/lib/a.js']);
         expect(files.get('package/lib/a.js')!.length).toBe(700);
         expect(tarballPackageJson(tgz)).toEqual({ name: 'x', version: '1.0.0' });
-        expect(() => tarballPackageJson(makeTarball({ 'other/package.json': '{}' }))).toThrow('no package/package.json');
+        expect(() => tarballPackageJson(makeTarball({ 'other/package.json': '{}' }))).toThrow('invalid tarball: other/package.json is outside package/');
+        expect(() => tarballPackageJson(makeTarball({ 'package/index.js': '' }))).toThrow('no package/package.json');
         expect(() => tarballPackageJson(Buffer.from('not gzip'))).toThrow('invalid tarball');
+    });
+
+    it('refuses a tarball with a file outside package/: a second x/package.json would replace the checked one when unpacked', async () => {
+        const checked = '{"name":"x","version":"1.0.0"}';
+        const tgz = makeTarball({ 'package/package.json': checked, 'package/index.js': 'ok', 'x/package.json': '{"name":"x","version":"6.6.6","main":"evil.js"}' });
+        expect(() => tarballPackageJson(tgz)).toThrow('invalid tarball: x/package.json is outside package/');
+        const dir = serverTempDir();
+        await expect(unpackTarball(tgz, join(dir, 'pkg'))).rejects.toThrow('invalid tarball: x/package.json is outside package/');
+        // Nothing written
+        expect(existsSync(join(dir, 'pkg'))).toBe(false);
+        // A file at the top level is refused too; the package/ folder's content is what is unpacked
+        await expect(unpackTarball(makeTarball({ 'package/package.json': checked, 'README.md': 'x' }), join(dir, 'top'))).rejects.toThrow('invalid tarball: README.md is outside package/');
+        await unpackTarball(makeTarball({ 'package/package.json': checked, 'package/lib/a.js': 'a' }), join(dir, 'ok'));
+        expect(readFileSync(join(dir, 'ok', 'package.json'), 'utf8')).toBe(checked);
+        expect(readFileSync(join(dir, 'ok', 'lib', 'a.js'), 'utf8')).toBe('a');
     });
 });
 
