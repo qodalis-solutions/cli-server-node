@@ -568,6 +568,39 @@ describe('server marketplace: dependencies', () => {
         expect((await runCommand(next.cli, 'deps')).text).toBe(`1.3.0 2.1.0 ${EXPRESS} host`);
     });
 
+    it('pinned at two versions (the AWS SDK\'s exact pins): the plugin\'s hoisted, the other below the dependency needing it', async () => {
+        const net = new FakeServerNet();
+        // left-pad@1.3.0 needs tiny-dep 1.0.0 exactly; the plugin needs ^2.0.0 (the marketplace pins both, its tree)
+        const leftPad = net.publishPackage('left-pad', '1.3.0', { deps: { 'tiny-dep': '1.0.0' } });
+        const tinyOld = net.publishPackage('tiny-dep', '1.0.0');
+        const tiny = net.publishPackage('tiny-dep', '2.1.0');
+        net.publish('deps', {
+            versions: [{
+                version: '1.0.0',
+                files: depsPlugin({ ...DEPS, 'tiny-dep': '^2.0.0' }),
+                dependencies: [
+                    { id: 'left-pad', version: '1.3.0', integrity: leftPad, range: '^1.3.0' },
+                    { id: 'tiny-dep', version: '1.0.0', integrity: tinyOld, range: '1.0.0' },
+                    { id: 'tiny-dep', version: '2.1.0', integrity: tiny, range: '^2.0.0' },
+                ],
+            }],
+        });
+        const h = await startServer({ net, hostPackages: { express: EXPRESS } });
+        const res = await post(h);
+        expect(res.status).toBe(202);
+        const modules = join(pluginDir(h.dataDir), 'node_modules');
+        const versionAt = (...path: string[]) => JSON.parse(readFileSync(join(modules, ...path, 'package.json'), 'utf8')).version;
+        expect(versionAt('tiny-dep')).toBe('2.1.0');
+        expect(versionAt('left-pad', 'node_modules', 'tiny-dep')).toBe('1.0.0');
+        expect(installedJson(h.dataDir)[0].dependencies).toEqual([
+            { id: 'left-pad', version: '1.3.0', integrity: leftPad, source: 'pinned' },
+            { id: 'tiny-dep', version: '2.1.0', integrity: tiny, source: 'pinned' },
+            { id: 'tiny-dep', version: '1.0.0', integrity: tinyOld, source: 'pinned', path: 'left-pad/node_modules/tiny-dep' },
+        ]);
+        const next = await startServer({ net, dataDir: h.dataDir });
+        expect((await runCommand(next.cli, 'deps')).text).toBe(`1.3.0 2.1.0 ${EXPRESS} host`);
+    });
+
     it('pinned: a dependency without a pin, a pin out of the range, a pin the registry disagrees with are refused; nothing stored', async () => {
         const net = new FakeServerNet();
         const leftPad = net.publishPackage('left-pad', '1.3.0', { deps: { 'tiny-dep': '^2.0.0' } });

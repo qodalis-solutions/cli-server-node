@@ -3,6 +3,7 @@ import cors from 'cors';
 import { CliCommandRegistry, CliCommandExecutorService, CliEventBus, CliEventSocketManager, CliLogSocketManager } from './services';
 import { withFileStorageEvents } from './filesystem/file-storage-events';
 import { CliBuilder } from './extensions';
+import { DATA_EXPLORER_POLICY_SERVICE } from './extensions/cli-builder';
 import { createCliController } from './controllers/cli-controller';
 import { createCliVersionController } from './controllers/cli-version-controller';
 import { createFilesystemRouter } from './controllers/filesystem-controller';
@@ -593,7 +594,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             mcpFeatures.add('filesystem');
             // The dashboard's Filesystem page (@qodalis/cli-dashboard-module-filesystem)
             const page = filesystemDashboardPage(builder.dashboardModuleDir('filesystem'));
-            if (page) {
+            // Not when the page is registered already (its dashboard plugin installed from the marketplace)
+            if (page && !builder.dashboardExtensions.some((e) => e.id === page.extension.id)) {
                 builder.addDashboardExtension(page.extension);
                 lateRouter.use(page.prefix, page.handler);
             }
@@ -606,8 +608,11 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
     };
     const wireDataExplorer = () => {
+        // The data-explorer plugin loaded (its rules shared): served with no source yet, its page then lists none
+        const pluginLoaded = builder.pluginServices.has(DATA_EXPLORER_POLICY_SERVICE);
+        if (pluginLoaded) builder.enableDataExplorer();
         const deBuilder = builder.dataExplorerBuilder;
-        if (!deRouter && deBuilder && deBuilder.registry.size > 0) {
+        if (!deRouter && deBuilder && (deBuilder.registry.size > 0 || pluginLoaded)) {
             // The sign-in provider can be set later (setAuth, mountPlugin): read it per request
             const deExecutor = new DataExplorerExecutor(deBuilder.registry, {
                 audit: () => {
@@ -644,7 +649,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             mcpFeatures.add('data-explorer');
             // The dashboard's Data explorer page (@qodalis/cli-dashboard-module-data-explorer)
             const page = dataExplorerDashboardPage(builder.dashboardModuleDir('data-explorer'));
-            if (page) {
+            // Not when the page is registered already (its dashboard plugin installed from the marketplace)
+            if (page && !builder.dashboardExtensions.some((e) => e.id === page.extension.id)) {
                 builder.addDashboardExtension(page.extension);
                 lateRouter.use(page.prefix, page.handler);
             }

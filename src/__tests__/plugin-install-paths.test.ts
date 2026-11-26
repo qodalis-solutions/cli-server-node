@@ -206,6 +206,48 @@ describe('every official plugin installs from its entry point with settings', ()
         expect(options).toMatchObject({ readOnly: true, maxRows: 100, rateLimit: { maxQueries: 10, windowSeconds: 60 } });
     });
 
+    it('data explorer without a source: its API answers (no sources), not a 404 that reads as "plugin not installed"', async () => {
+        const cli = await start(dataDir(), { configure: (b) => b.addPlugin(dataExplorerEntry) });
+        expect(cli.serverPlugins.states().map((s) => [s.name, s.status])).toEqual([['data-explorer', 'loaded']]);
+        const sources = await request(cli.app).get('/api/qcli/data-explorer/sources');
+        expect(sources.status).toBe(200);
+        expect(sources.body).toEqual([]);
+        // The page's extension is listed too (served by the server when the dashboard plugin is not installed)
+        expect(cli.builder.dataExplorerBuilder).toBeDefined();
+    });
+
+    it('the data explorer and filesystem pages installed from the marketplace: the server\'s own copies are not registered again', async () => {
+        const moduleDir = join(dataDir(), 'module');
+        mkdirSync(moduleDir, { recursive: true });
+        writeFileSync(join(moduleDir, 'extension.js'), 'export default {};');
+        const marketplacePage = (id: string) => ({ id, title: id, entry: `/qcli/admin/marketplace/${id}/extension.js` });
+        const cli = await start(dataDir(), {
+            configure: (b) =>
+                b
+                    .setDashboardModuleDir('data-explorer', moduleDir)
+                    .setDashboardModuleDir('filesystem', moduleDir)
+                    .addDashboardExtension(marketplacePage('data-explorer'))
+                    .addDashboardExtension(marketplacePage('filesystem'))
+                    .addPlugin(dataExplorerEntry)
+                    .addPlugin(filesystemSqliteEntry, { path: join(dataDir(), 'files.db') }),
+        });
+        expect(cli.serverPlugins.states().map((s) => [s.name, s.status])).toEqual([
+            ['data-explorer', 'loaded'],
+            ['filesystem-sqlite', 'loaded'],
+        ]);
+        expect(cli.builder.dashboardExtensions.filter((e) => e.id === 'data-explorer' || e.id === 'filesystem').map((e) => e.entry)).toEqual([
+            '/qcli/admin/marketplace/data-explorer/extension.js',
+            '/qcli/admin/marketplace/filesystem/extension.js',
+        ]);
+        expect((await request(cli.app).get('/api/qcli/data-explorer/sources')).status).toBe(200);
+        expect((await request(cli.app).get('/api/qcli/fs/ls?path=/')).status).not.toBe(404);
+    });
+
+    it('without the data explorer plugin or a source, its API is missing (the dashboard page says so)', async () => {
+        const cli = await start(dataDir());
+        expect((await request(cli.app).get('/api/qcli/data-explorer/sources')).status).toBe(404);
+    });
+
     it('config-redis: Redis becomes the default store; the providers registered before it move there', async () => {
         const redis = new FakeRedis();
         const cli = await start(dataDir(), { configure: (b) => b.addPlugin(configRedisEntry, { client: redis }) });
