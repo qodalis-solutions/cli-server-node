@@ -5,7 +5,7 @@
  * turned off. Refused when the host (or another plugin) already set the filesystem storage.
  */
 import type { CliConfigSettingDefinition, CliPluginContext, CliPluginEntryInfo, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
-import { OsFileStorageProvider, readOnlyFileStorage } from './index';
+import { OsFileStorageProvider, readOnlyFileStorage } from './providers';
 
 /** The plugin, for `builder.addPlugin(entry, options)` (the marketplace's record says it for an installed copy). */
 export const plugin: CliPluginEntryInfo = { id: 'filesystem', package: '@qodalis/cli-server-plugin-filesystem', title: 'Filesystem', icon: '📁' };

@@ -4,7 +4,7 @@
  * keys the AWS default credential chain is used. `aws configure set` still changes them until the next restart.
  */
 import type { CliConfigSettingDefinition, CliPluginContext, CliPluginEntryInfo, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
-import { AwsModule } from './index';
+import { AwsModule } from './aws-module';
 import { AwsCommandProcessor } from './aws-command-processor';
 
 /** The plugin, for `builder.addPlugin(entry, options)` (the marketplace's record says it for an installed copy). */

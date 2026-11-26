@@ -4,7 +4,7 @@
  */
 import type { CliConfigSettingDefinition, CliPluginContext, CliPluginEntryInfo, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
 import { DEFAULT_WEATHER_LOCATION } from './defaults';
-import { WeatherModule } from './index';
+import { WeatherModule } from './weather-module';
 
 /** The plugin, for `builder.addPlugin(entry, options)` (the marketplace's record says it for an installed copy). */
 export const plugin: CliPluginEntryInfo = { id: 'weather', package: '@qodalis/cli-server-plugin-weather', title: 'Weather', icon: '🌤️' };
