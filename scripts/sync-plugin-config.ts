@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     }
 }
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && require.main === module) {
     main().catch((err) => {
         console.error(err);
         process.exit(1);

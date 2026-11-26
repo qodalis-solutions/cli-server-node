@@ -18,7 +18,7 @@ export const order = 60;
 /** The id of its settings provider (`portal` is the provider of its branding). */
 export const SETTINGS_ID = 'portal-plugin';
 
-/** Its settings (code options of the same keys are their defaults; `theme`, `footerLinks` and `sections` from code only). */
+/** Its settings (code options of the same keys are their defaults; `theme`, `footerLinks`, `sections` and `siteDir` from code only). */
 export const settings: CliConfigSettingDefinition[] = [
     { key: 'path', label: 'Path', description: 'Where the portal is served (/ for the root)', type: 'string', default: DEFAULT_PORTAL_PATH, requiresRestart: true, validation: { required: true, pattern: '^(/|(/[A-Za-z0-9._~-]+)+)$' } },
     { key: 'name', label: 'Name', type: 'string', default: DEFAULT_PORTAL_NAME, requiresRestart: true, validation: { required: true, max: 80 } },
@@ -34,6 +34,7 @@ export async function createPlugin(context: CliPluginContext): Promise<CliPlugin
     if (sections.length === 0) return context.needsConfiguration('a docs or public-api plugin (install one, or add it before the portal)');
     const builder = new CliPortalBuilder().setPath(text('path') || DEFAULT_PORTAL_PATH).setName(text('name') || DEFAULT_PORTAL_NAME);
     if (text('logoUrl')) builder.setLogoUrl(text('logoUrl'));
+    if (typeof context.options.siteDir === 'string') builder.setSiteDir(context.options.siteDir);
     const theme = context.options.theme;
     if (theme && typeof theme === 'object') builder.setTheme(theme as Parameters<CliPortalBuilder['setTheme']>[0]);
     for (const link of (context.options.footerLinks as Array<{ label: string; url: string }> | undefined) ?? []) builder.addFooterLink(link);
