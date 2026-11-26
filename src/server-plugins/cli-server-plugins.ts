@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'fs';
 import { rename, rm, writeFile, mkdir } from 'fs/promises';
 import { randomBytes } from 'crypto';
 import Module, { createRequire } from 'module';
-import { isAbsolute, join, resolve, sep } from 'path';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import {
     CLI_PLUGIN_LOAD_ORDER,
     CLI_SERVER_PLUGIN_KIND,
@@ -11,6 +11,8 @@ import {
     CliStoredConfigProvider,
     JsonFileConfigStore,
     installedPluginName,
+    installedPluginOf,
+    readInstalledPlugin,
     type CliInstalledPlugin,
     type CliPluginContext,
     type CliPluginEntryResult,
@@ -159,6 +161,9 @@ export function serverPluginEntryPath(packageDir: string, entry: unknown): strin
     return path;
 }
 
+/** The version of a code plugin nothing says one for. */
+const UNKNOWN_VERSION = '0.0.0';
+
 /** True for a plugin result `mountPlugin` takes. */
 function isMountable(value: unknown): value is { prefix: string; router: unknown } {
     const v = value as { prefix?: unknown; router?: unknown } | undefined;
@@ -169,6 +174,32 @@ function isMountable(value: unknown): value is { prefix: string; router: unknown
 function isModule(value: unknown): value is ICliModule {
     const v = value as Partial<ICliModule> | undefined;
     return !!v && typeof v.name === 'string' && Array.isArray(v.processors);
+}
+
+/** A version or description: a non-empty string, else undefined. */
+function text(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/**
+ * The version and description of a package the host added in code, from its package.json: `<package>/package.json`
+ * when the package exports it, else the package.json above its main file; resolved from the server, then from the
+ * working directory. Undefined when it cannot be found.
+ */
+export function codePluginPackageInfo(pkg: string): { version?: string; description?: string } | undefined {
+    for (const req of [hostRequire, createRequire(join(process.cwd(), 'package.json'))]) {
+        for (const request of [`${pkg}/package.json`, pkg]) {
+            let file: string;
+            try {
+                file = req.resolve(request);
+            } catch {
+                continue;
+            }
+            const found = readInstalledPlugin(dirname(file), pkg);
+            if (found) return { version: text(found.version), description: text(found.description) };
+        }
+    }
+    return undefined;
 }
 
 /** A load order: a finite number, else `DEFAULT`. */
@@ -212,6 +243,8 @@ interface Candidate {
     title?: string;
     icon?: string;
     description?: string;
+    /** A code plugin whose version neither its entry nor its package.json says: the module it returns may. */
+    versionUnknown?: boolean;
     options: Readonly<Record<string, unknown>>;
     createPlugin: (c: CliPluginContext) => CliPluginEntryResult | Promise<CliPluginEntryResult>;
     record?: CliServerPluginRecord;
@@ -331,15 +364,20 @@ export class CliServerPlugins implements ICliServerPlugins {
         const candidates: Candidate[] = [];
         for (const { entry, options } of this.codePlugins) {
             const info = entry.plugin!;
+            // The entry's plugin info, else the package's package.json; else the module it returns says it (loadOne)
+            const pkg = text(info.version) && text(info.description) ? undefined : codePluginPackageInfo(info.package);
+            const version = text(info.version) ?? pkg?.version;
+            const description = text(info.description) ?? pkg?.description;
             candidates.push({
                 name: info.id,
                 package: info.package,
-                version: info.version ?? '0.0.0',
+                version: version ?? UNKNOWN_VERSION,
+                ...(version ? {} : { versionUnknown: true }),
                 source: 'code',
                 order: orderOf(entry.order),
                 ...(info.title ? { title: info.title } : {}),
                 ...(info.icon ? { icon: info.icon } : {}),
-                ...(info.description ? { description: info.description } : {}),
+                ...(description ? { description } : {}),
                 options,
                 createPlugin: entry.createPlugin.bind(entry),
             });
@@ -538,6 +576,7 @@ export class CliServerPlugins implements ICliServerPlugins {
         };
         try {
             const result = (await candidate.createPlugin(context)) as unknown;
+            this.completeInfo(host, candidate, state, result);
             // A plugin waiting for its settings registers nothing, whatever it returned
             if (!missing) this.register(host, result);
         } catch (err) {
@@ -554,6 +593,31 @@ export class CliServerPlugins implements ICliServerPlugins {
         }
         if (state.settings) host.builder.updateInstalledPlugin(candidate.package, { settings: state.settings });
         this._states.push(state);
+    }
+
+    /** A code plugin's version and description its entry and package.json left out, from what it returned. */
+    private completeInfo(host: CliServerPluginsHost, candidate: Candidate, state: CliServerPluginState, result: unknown): void {
+        if (candidate.source !== 'code' || (!candidate.versionUnknown && candidate.description)) return;
+        const listed = installedPluginOf(result);
+        const own = listed && listed.id === candidate.package ? listed : undefined;
+        const module = isModule(result) ? result : undefined;
+        const changes: Partial<CliInstalledPlugin> = {};
+        if (candidate.versionUnknown) {
+            const version = text(own?.version) ?? text(module?.version);
+            if (version) {
+                candidate.version = version;
+                state.version = version;
+                changes.version = version;
+            }
+        }
+        if (!candidate.description) {
+            const description = text(own?.description) ?? text(module?.description);
+            if (description) {
+                candidate.description = description;
+                changes.description = description;
+            }
+        }
+        if (Object.keys(changes).length > 0) host.builder.updateInstalledPlugin(candidate.package, changes);
     }
 
     private register(host: CliServerPluginsHost, result: unknown): void {
