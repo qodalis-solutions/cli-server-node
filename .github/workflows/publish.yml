@@ -68,6 +68,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Plugins mount in an app (types)
+        run: npx tsc -p tsconfig.typecheck.json
+
       - name: Publish all packages
         run: |
           publish_pkg() {

@@ -3,6 +3,10 @@
 Notable changes to the Node CLI server packages (`@qodalis/cli-server-node`, `@qodalis/cli-server-abstractions`,
 `@qodalis/cli-server-plugin-*`). Every package shares one version with the .NET and Python servers.
 
+## Unreleased
+
+- **The admin plugin mounts in TypeScript apps again.** 1.0.0-beta.34 typed its `mcpProviders` tools as `unknown[]`, so `cli.mountPlugin(admin)` failed to compile (`CliAdminPluginResult` is not assignable to `MountablePlugin`). The tools are typed (`AdminMcpTool`), and CI type-checks every plugin's build result against `MountablePlugin` (`tsconfig.typecheck.json`).
+
 ## 1.0.0-beta.34
 
 - The admin plugin embeds dashboard 1.0.0-beta.32: notification bell and page, Plugins → Updates, rendered plugin readmes, a link to the marketplace site.
