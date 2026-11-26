@@ -3,17 +3,17 @@
  * cli-marketplace's `kind=server` API (list items with `platforms: { node: { package, registry, latest, install } }`
  * and, with `platform=`, `latest`/`version`/`compatible`/`reason`; details with every platform's versions in one list,
  * each with `platform`, `package`, `registry`, `serverRange`, `integrity`), a fake npm registry with real gzip'd
- * tarballs, and a fake npm that unpacks them into `<prefix>/node_modules`.
+ * tarballs and packuments (plugins and plain dependencies), and the marketplace's dependency pins.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { gzipSync } from 'zlib';
 import { createHash } from 'crypto';
 import request from 'supertest';
 import type { AuditEntry, CliEvent } from '@qodalis/cli-server-abstractions';
 import { createCliServer, CliServerResult } from '../create-cli-server';
-import { CliAdminBuilder, CliAdminPluginResult, DashboardInstallPolicy, MarketplaceFetch, NpmRunner, readTarballFiles } from '../../plugins/admin/index';
+import { CliAdminBuilder, CliAdminPluginResult, DashboardInstallPolicy, MarketplaceFetch } from '../../plugins/admin/index';
 import { response } from './dashboard-marketplace-test-helpers';
 import { ROOT_PASS, V1 } from './command-test-helpers';
 import { CliUsersBuilder } from '../../plugins/users/index';
@@ -66,12 +66,12 @@ export function makeTarball(files: Record<string, string>): Buffer {
 export function pluginPackage(
     name: string,
     version: string,
-    options: { qodalis?: Record<string, unknown> | null; entry?: string; peer?: Record<string, string>; command?: string; text?: string } = {},
+    options: { qodalis?: Record<string, unknown> | null; entry?: string; peer?: Record<string, string>; deps?: Record<string, string>; command?: string; text?: string } = {},
 ): Record<string, string> {
     const command = options.command ?? 'hello';
     const qodalis = options.qodalis === null ? undefined : { kind: 'server', entry: './plugin.js', ...(options.qodalis ?? {}) };
     return {
-        'package/package.json': JSON.stringify({ name, version, description: `${name} for tests`, main: 'plugin.js', ...(qodalis ? { qodalis } : {}), ...(options.peer ? { peerDependencies: options.peer } : {}) }),
+        'package/package.json': JSON.stringify({ name, version, description: `${name} for tests`, main: 'plugin.js', ...(qodalis ? { qodalis } : {}), ...(options.peer ? { peerDependencies: options.peer } : {}), ...(options.deps ? { dependencies: options.deps } : {}) }),
         'package/plugin.js':
             options.entry ??
             `exports.createPlugin = async (context) => ({
@@ -93,6 +93,8 @@ export interface FakePlatformVersion {
     marketplaceIntegrity?: string;
     /** The npm record's `qodalis` block (default: the package.json's). */
     npmQodalis?: Record<string, unknown>;
+    /** The marketplace's dependency pins for the version (absent: none). */
+    dependencies?: Array<{ id: string; version: string; integrity: string; range?: string }>;
 }
 
 export interface FakeServerPlugin {
@@ -114,7 +116,28 @@ export class FakeServerNet {
     /** npm: `<package>@<version>` -> its record and tarball. */
     readonly npm = new Map<string, { record: Record<string, unknown>; tarball: Buffer; served: Buffer }>();
     readonly calls: string[] = [];
+    readonly distTags = new Map<string, Record<string, string>>();
     marketplaceDown = false;
+
+    /**
+     * A plain npm package (a dependency): its record, packument entry and tarball; `tampered` serves other bytes.
+     * Returns its sha512, for a pin.
+     */
+    publishPackage(name: string, version: string, options: { deps?: Record<string, string>; tampered?: boolean; latest?: boolean } = {}): string {
+        const files = {
+            'package/package.json': JSON.stringify({ name, version, main: 'index.js', ...(options.deps ? { dependencies: options.deps } : {}) }),
+            'package/index.js': `module.exports = { name: '${name}', version: '${version}' };`,
+        };
+        const tarball = makeTarball(files);
+        const integrity = sha512(tarball);
+        this.npm.set(`${name}@${version}`, {
+            record: { ...JSON.parse(files['package/package.json']), dist: { tarball: `${REGISTRY}/-/tarballs/${encodeURIComponent(`${name}@${version}`)}`, integrity } },
+            tarball,
+            served: options.tampered ? makeTarball({ ...files, 'package/evil.js': 'boom' }) : tarball,
+        });
+        if (options.latest) this.distTags.set(name, { latest: version });
+        return integrity;
+    }
 
     readonly fetch: MarketplaceFetch = async (url) => {
         this.calls.push(url);
@@ -128,6 +151,14 @@ export class FakeServerNet {
             return entry ? bytesResponse(entry.served) : response(404, { error: 'not found' });
         }
         if (url.startsWith(REGISTRY)) {
+            const doc = /^\/([^/]+)$/.exec(url.slice(REGISTRY.length));
+            if (doc) {
+                const name = decodeURIComponent(doc[1]);
+                const versions = [...this.npm.entries()].filter(([key]) => key.slice(0, key.lastIndexOf('@')) === name);
+                if (!versions.length) return response(404, { error: 'not found' });
+                const tags = this.distTags.get(name);
+                return response(200, { name, ...(tags ? { 'dist-tags': tags } : {}), versions: Object.fromEntries(versions.map(([key, e]) => [key.slice(key.lastIndexOf('@') + 1), e.record])) });
+            }
             const m = /^\/(.+)\/([^/]+)$/.exec(url.slice(REGISTRY.length));
             const entry = m ? this.npm.get(`${decodeURIComponent(m[1])}@${decodeURIComponent(m[2])}`) : undefined;
             return entry ? response(200, entry.record) : response(404, { error: 'not found' });
@@ -168,6 +199,7 @@ export class FakeServerNet {
                     serverRange: v.serverRange === undefined ? '^1.0.0-beta.3' : v.serverRange,
                     publishedAt: '2026-11-23T10:00:00Z',
                     status: v.status ?? 'listed',
+                    ...(v.dependencies ? { dependencies: v.dependencies } : {}),
                 });
             }
         }
@@ -239,39 +271,11 @@ export class FakeServerNet {
     }
 }
 
-/** npm, faked: `install <tarball>` unpacks it into `<prefix>/node_modules/<name>`, `uninstall <name>` deletes it. */
-export class FakeNpm {
-    readonly calls: string[][] = [];
-    fail?: { code: number; stderr: string };
-
-    readonly run: NpmRunner = async (args) => {
-        this.calls.push(args);
-        if (this.fail) return { code: this.fail.code, stdout: '', stderr: this.fail.stderr };
-        const prefix = args[args.indexOf('--prefix') + 1];
-        if (args[0] === 'install') {
-            const { readFileSync } = await import('fs');
-            const files = readTarballFiles(readFileSync(args[1]));
-            const pkg = JSON.parse(files.get('package/package.json')!.toString()) as { name: string };
-            const root = join(prefix, 'node_modules', pkg.name);
-            rmSync(root, { recursive: true, force: true });
-            for (const [path, bytes] of files) {
-                const target = join(root, path.slice('package/'.length));
-                mkdirSync(dirname(target), { recursive: true });
-                writeFileSync(target, bytes);
-            }
-        } else if (args[0] === 'uninstall') {
-            rmSync(join(prefix, 'node_modules', args[1]), { recursive: true, force: true });
-        }
-        return { code: 0, stdout: 'added 1 package', stderr: '' };
-    };
-}
-
 export interface ServerHost {
     cli: CliServerResult;
     admin: CliAdminPluginResult;
     dataDir: string;
     net: FakeServerNet;
-    npm: FakeNpm;
     audit: AuditEntry[];
     events: CliEvent[];
     token: string;
@@ -301,10 +305,18 @@ export function cleanupServerHosts(): void {
  * plugin with one user per `users` entry); its runtime plugins loaded before it answers.
  */
 export async function startServer(
-    options: { net?: FakeServerNet; npm?: FakeNpm; dataDir?: string; install?: DashboardInstallPolicy; users?: Record<string, string[]>; configure?: (cli: CliServerResult) => void; serverPlugins?: false } = {},
+    options: {
+        net?: FakeServerNet;
+        dataDir?: string;
+        /** The packages the host resolves and their versions, null for none (default: `@qodalis/*` at the server's version only). */
+        hostPackages?: Record<string, string | null>;
+        trustedDependencies?: string[];         install?: DashboardInstallPolicy;
+        users?: Record<string, string[]>;
+        configure?: (cli: CliServerResult) => void;
+        serverPlugins?: false;
+    } = {},
 ): Promise<ServerHost> {
     const net = options.net ?? new FakeServerNet();
-    const npm = options.npm ?? new FakeNpm();
     const dataDir = options.dataDir ?? serverTempDir();
     const cli = createCliServer({ dataDir, ...(options.serverPlugins === false ? { serverPlugins: false as const } : {}) });
     const audit: AuditEntry[] = [];
@@ -312,7 +324,16 @@ export async function startServer(
     const events: CliEvent[] = [];
     cli.eventBus.subscribe('server:*', (e) => void events.push(e));
     options.configure?.(cli);
-    const marketplace = { url: MARKET, dir: join(dataDir, 'dashboard-plugins'), fetch: net.fetch, npm: npm.run, npmRegistry: REGISTRY, install: options.install };
+    const hostPackages = options.hostPackages ?? {};
+    const marketplace = {
+        url: MARKET,
+        dir: join(dataDir, 'dashboard-plugins'),
+        fetch: net.fetch,
+        npmRegistry: REGISTRY,
+        install: options.install,
+        trustedDependencies: options.trustedDependencies,
+        hostPackageVersion: (name: string) => (name in hostPackages ? (hostPackages[name] ?? undefined) : name.startsWith('@qodalis/') ? SERVER_VERSION : undefined),
+    };
     const tokens: Record<string, string> = {};
     let admin: CliAdminPluginResult;
     if (options.users) {
@@ -343,7 +364,7 @@ export async function startServer(
     admin.logBuffer.restoreConsole();
     admin.statusSampler.stop();
     await cli.serverPlugins.ready();
-    const host = { cli, admin, dataDir, net, npm, audit, events, token: tokens.root, tokens };
+    const host = { cli, admin, dataDir, net, audit, events, token: tokens.root, tokens };
     hosts.push(host);
     return host;
 }

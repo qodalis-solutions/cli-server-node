@@ -1,17 +1,17 @@
 /**
  * Server plugins from the marketplace (admin plugin): the marketplace's kind=server list and details annotated for this
  * server's platform, the trust policy, integrity (the npm record, the marketplace and the tarball), the server range,
- * autoInstall false, install / update / remove with a fake npm (restart marked and cleared, installed.json, loaded at
- * the next start), persistence, permissions, path safety, audit and events, and `admin plugins`. No network, no npm.
+ * autoInstall false, install / update / remove (unpacked by the server, restart marked and cleared, installed.json,
+ * loaded at the next start), dependencies (the marketplace's pins, the host's trusted list, the server's own copies
+ * shared, the refusals), persistence, permissions, path safety, audit and events, and `admin plugins`. No network, no npm.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { readTarballFiles, satisfiesServerRange, tarballPackageJson } from '../../plugins/admin/index';
+import { defaultHostPackageVersion, isTrustedDependency, readTarballFiles, satisfiesServerRange, tarballPackageJson } from '../../plugins/admin/index';
 import { runCommand } from './command-test-helpers';
 import {
-    FakeNpm,
     FakeServerNet,
     MARKET,
     REGISTRY,
@@ -129,7 +129,7 @@ describe('server marketplace: browsing', () => {
 });
 
 describe('server marketplace: install, update, remove', () => {
-    it('installs the Node package: verified tarball, npm install of the local file, installed.json, restart marked; loaded at the next start', async () => {
+    it('installs the Node package: verified tarball unpacked by the server, installed.json, restart marked; loaded at the next start', async () => {
         const net = seeded();
         const h = await startServer({ net });
         const res = await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'weather' });
@@ -145,12 +145,11 @@ describe('server marketplace: install, update, remove', () => {
             loadedVersion: null,
             restartRequired: true,
         });
-        // npm ran once, on the verified local tarball, scripts off
+        // the verified tarball, unpacked by the server (no npm, no install scripts) and kept
         const dir = join(h.dataDir, 'server-plugins');
-        expect(h.npm.calls).toEqual([
-            ['install', join(dir, 'tarballs', '@qodalis+cli-server-plugin-weather-1.1.0.tgz'), '--prefix', dir, '--no-audit', '--no-fund', '--ignore-scripts'],
-        ]);
-        expect(existsSync(join(dir, 'package.json'))).toBe(true);
+        expect(readdirSync(join(dir, 'tarballs'))).toEqual(['@qodalis+cli-server-plugin-weather-1.1.0.tgz']);
+        expect(JSON.parse(readFileSync(join(dir, 'node_modules', '@qodalis', 'cli-server-plugin-weather', 'package.json'), 'utf8')).version).toBe('1.1.0');
+        expect(existsSync(join(dir, 'node_modules', '@qodalis', 'cli-server-plugin-weather', 'node_modules'))).toBe(false);
         expect(installedJson(h.dataDir)).toEqual([
             expect.objectContaining({ name: 'weather', package: '@qodalis/cli-server-plugin-weather', version: '1.1.0', integrity: expect.stringMatching(/^sha512-/), installedBy: 'admin' }),
         ]);
@@ -199,7 +198,7 @@ describe('server marketplace: install, update, remove', () => {
         const removed = await request(h.cli.app).delete(`${SBASE}/installed/weather`).set(bearer(h.token));
         expect(removed.status).toBe(202);
         expect(removed.body).toMatchObject({ name: 'weather', status: 'removed', restartRequired: true });
-        expect(h.npm.calls.at(-1)).toEqual(['uninstall', '@qodalis/cli-server-plugin-weather', '--prefix', join(h.dataDir, 'server-plugins'), '--no-audit', '--no-fund', '--ignore-scripts']);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules', '@qodalis', 'cli-server-plugin-weather'))).toBe(false);
         expect(installedJson(h.dataDir)).toEqual([]);
         expect(h.cli.restart.pending()).toEqual([expect.objectContaining({ id: 'plugin:weather', description: 'Remove weather 1.0.0' })]);
         // Still running until the restart, listed as removed
@@ -231,7 +230,7 @@ describe('server marketplace: install, update, remove', () => {
         const off = await startServer({ net, install: 'off' });
         expect((await request(off.cli.app).post(`${SBASE}/installed`).set(bearer(off.token)).send({ name: 'weather' })).body).toEqual({ error: 'install disabled' });
         expect((await request(off.cli.app).get(`${SBASE}/plugins`).set(bearer(off.token))).body.items[0]).toMatchObject({ allowed: false, blockedReason: 'install disabled' });
-        expect(verified.npm.calls).toEqual([]);
+        expect(existsSync(join(verified.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
     });
 
     it('integrity: a tampered tarball and a marketplace that disagrees with npm install nothing', async () => {
@@ -246,7 +245,7 @@ describe('server marketplace: install, update, remove', () => {
         expect(b.body).toEqual({ error: 'integrity mismatch: the marketplace and the npm registry disagree' });
         // nothing downloaded for the second, nothing stored for either
         expect(net.calls.filter((c) => c.includes('/-/tarballs/')).length).toBe(1);
-        expect(h.npm.calls).toEqual([]);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
         expect(existsSync(join(h.dataDir, 'server-plugins', 'installed.json'))).toBe(false);
         expect(h.cli.restart.pending()).toEqual([]);
     });
@@ -262,7 +261,7 @@ describe('server marketplace: install, update, remove', () => {
         expect(jobs.body.error).toBe(`incompatible: @qodalis/cli-server-plugin-jobs@2.0.0 needs server ^99.0.0 (this server has ${SERVER_VERSION})`);
         const peer = await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'peer' });
         expect(peer.body.error).toBe(`incompatible: @qodalis/cli-server-plugin-peer@1.0.0 needs server ^7.0.0 (this server has ${SERVER_VERSION})`);
-        expect(h.npm.calls).toEqual([]);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
     });
 
     it('refuses what needs the host: autoInstall false (npm record or tarball), no entry, not a server plugin, not for node', async () => {
@@ -277,23 +276,26 @@ describe('server marketplace: install, update, remove', () => {
         expect((await post('noentry')).body).toEqual({ error: '@qodalis/cli-server-plugin-noentry declares no qodalis.entry' });
         expect((await post('web')).body).toEqual({ error: 'not a server plugin package: @qodalis/cli-server-plugin-web (no qodalis.kind "server")' });
         expect((await post('logs-seq')).body).toEqual({ error: 'not available for node: logs-seq' });
-        expect(h.npm.calls).toEqual([]);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
     });
 
-    it('a package the host installed is refused; npm failing stores nothing', async () => {
+    it('a package the host installed is refused; a failed dependency stores nothing', async () => {
         const net = seeded();
-        const npm = new FakeNpm();
-        const h = await startServer({ net, npm, configure: (cli) => cli.builder.addInstalledPlugin({ id: '@qodalis/cli-server-plugin-weather', name: 'Weather' }) });
+        const h = await startServer({ net, configure: (cli) => cli.builder.addInstalledPlugin({ id: '@qodalis/cli-server-plugin-weather', name: 'Weather' }) });
         expect((await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'weather' })).body).toEqual({
             error: 'already installed by the host: @qodalis/cli-server-plugin-weather',
         });
-        net.publish('other', { versions: [{ version: '1.0.0' }] });
-        npm.fail = { code: 1, stderr: 'npm ERR! code ENOTFOUND\nnpm ERR! network' };
+        const pin = net.publishPackage('left-pad', '1.3.0');
+        net.publishPackage('left-pad', '1.3.0', { tampered: true });
+        net.publish('other', {
+            versions: [{ version: '1.0.0', files: pluginPackage('@qodalis/cli-server-plugin-other', '1.0.0', { deps: { 'left-pad': '^1.3.0' } }), dependencies: [{ id: 'left-pad', version: '1.3.0', integrity: pin }] }],
+        });
         const res = await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'other' });
         expect(res.status).toBe(502);
-        expect(res.body).toEqual({ error: 'npm install failed (exit 1): npm ERR! code ENOTFOUND' });
-        expect(readdirSync(join(h.dataDir, 'server-plugins', 'tarballs'))).toEqual([]);
+        expect(res.body.error).toBe('integrity mismatch: left-pad@1.3.0');
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'tarballs'))).toBe(false);
         expect(existsSync(join(h.dataDir, 'server-plugins', 'installed.json'))).toBe(false);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
     });
 
     it('path safety: invalid names and versions are refused before anything is fetched', async () => {
@@ -388,5 +390,132 @@ describe('server marketplace: registry calls', () => {
         const h = await startServer({ net: seeded() });
         await request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name: 'weather' }).expect(202);
         expect(h.net.calls).toContain(`${REGISTRY}/@qodalis%2fcli-server-plugin-weather/1.1.0`);
+    });
+});
+
+describe('server marketplace: dependencies', () => {
+    const PKG = '@qodalis/cli-server-plugin-deps';
+    const pluginDir = (dataDir: string) => join(dataDir, 'server-plugins', 'node_modules', '@qodalis', 'cli-server-plugin-deps');
+    /** A plugin whose command answers the versions it required: its own dependency and the server's express. */
+    const depsPlugin = (deps: Record<string, string>) =>
+        pluginPackage(PKG, '1.0.0', {
+            deps,
+            entry: `exports.createPlugin = async () => ({
+                name: 'deps', version: '1.0.0', description: 'test', author: { name: 't' },
+                processors: [{ command: 'deps', description: 'versions', handleAsync: async () => require('left-pad').version + ' ' + require('tiny-dep').version + ' ' + require('express/package.json').version + ' ' + (require.resolve('express').includes('server-plugins') ? 'own' : 'host') }],
+            });`,
+        });
+    const DEPS = { 'left-pad': '^1.3.0', express: '^4.0.0', '@qodalis/cli-server-abstractions': '^1.0.0-beta.1' };
+    const EXPRESS: string = require('express/package.json').version;
+    const post = (h: Awaited<ReturnType<typeof startServer>>, name = 'deps') => request(h.cli.app).post(`${SBASE}/installed`).set(bearer(h.token)).send({ name });
+
+    it('pinned by the marketplace: exactly the pins, each checked, in the plugin\'s own node_modules; the server\'s copies shared, never installed', async () => {
+        const net = new FakeServerNet();
+        const leftPad = net.publishPackage('left-pad', '1.3.0', { deps: { 'tiny-dep': '^2.0.0' } });
+        net.publishPackage('left-pad', '1.9.0', { latest: true });
+        const tiny = net.publishPackage('tiny-dep', '2.1.0');
+        net.publish('deps', {
+            versions: [{ version: '1.0.0', files: depsPlugin(DEPS), dependencies: [{ id: 'left-pad', version: '1.3.0', integrity: leftPad, range: '^1.3.0' }, { id: 'tiny-dep', version: '2.1.0', integrity: tiny, range: '^2.0.0' }] }],
+        });
+        const h = await startServer({ net, hostPackages: { express: EXPRESS } });
+        const res = await post(h);
+        expect(res.status).toBe(202);
+        const modules = join(pluginDir(h.dataDir), 'node_modules');
+        expect(readdirSync(modules).sort()).toEqual(['left-pad', 'tiny-dep']);
+        expect(JSON.parse(readFileSync(join(modules, 'left-pad', 'package.json'), 'utf8')).version).toBe('1.3.0');
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules', 'express'))).toBe(false);
+        expect(existsSync(join(modules, '@qodalis'))).toBe(false);
+        expect(installedJson(h.dataDir)[0].dependencies).toEqual([
+            { id: 'left-pad', version: '1.3.0', integrity: leftPad, source: 'pinned' },
+            { id: 'tiny-dep', version: '2.1.0', integrity: tiny, source: 'pinned' },
+        ]);
+        // no packument read: the pins decide
+        expect(net.calls.some((c) => c === `${REGISTRY}/left-pad`)).toBe(false);
+
+        // loaded at the next start: its own dependencies, the server's express
+        const next = await startServer({ net, dataDir: h.dataDir });
+        expect((await runCommand(next.cli, 'deps')).text).toBe(`1.3.0 2.1.0 ${EXPRESS} host`);
+    });
+
+    it('pinned: a dependency without a pin, a pin out of the range, a pin the registry disagrees with are refused; nothing stored', async () => {
+        const net = new FakeServerNet();
+        const leftPad = net.publishPackage('left-pad', '1.3.0', { deps: { 'tiny-dep': '^2.0.0' } });
+        const old = net.publishPackage('left-pad', '1.0.0');
+        net.publishPackage('tiny-dep', '2.1.0');
+        net.publish('deps', { versions: [{ version: '1.0.0', files: depsPlugin(DEPS), dependencies: [{ id: 'left-pad', version: '1.3.0', integrity: leftPad }] }] });
+        net.publish('old', { node: '@qodalis/cli-server-plugin-deps', versions: [{ version: '1.0.0', files: depsPlugin(DEPS), dependencies: [{ id: 'left-pad', version: '1.0.0', integrity: old }] }] });
+        net.publish('liar', { node: '@qodalis/cli-server-plugin-deps', versions: [{ version: '1.0.0', files: depsPlugin(DEPS), dependencies: [{ id: 'left-pad', version: '1.3.0', integrity: old }] }] });
+        const h = await startServer({ net, hostPackages: { express: EXPRESS }, trustedDependencies: ['*'] });
+        const unpinned = await post(h);
+        expect(unpinned.status).toBe(400);
+        expect(unpinned.body).toEqual({ error: 'untrusted dependency: tiny-dep (not pinned by the marketplace)' });
+        expect((await post(h, 'old')).body).toEqual({ error: 'incompatible dependency: left-pad@^1.3.0 (the marketplace pins 1.0.0)' });
+        const liar = await post(h, 'liar');
+        expect(liar.status).toBe(502);
+        expect(liar.body).toEqual({ error: 'integrity mismatch: the marketplace and the npm registry disagree on left-pad@1.3.0' });
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'node_modules'))).toBe(false);
+        expect(existsSync(join(h.dataDir, 'server-plugins', 'installed.json'))).toBe(false);
+    });
+
+    it('no pins: only what the server trusts (names, @scope/*, prefix*), the newest version in the range, checked against the registry', async () => {
+        const net = new FakeServerNet();
+        net.publishPackage('left-pad', '1.3.0', { deps: { 'tiny-dep': '^2.0.0' } });
+        net.publishPackage('left-pad', '1.4.0', { deps: { 'tiny-dep': '^2.0.0' } });
+        net.publishPackage('left-pad', '2.0.0');
+        net.publishPackage('tiny-dep', '2.1.0');
+        net.publish('deps', { versions: [{ version: '1.0.0', files: depsPlugin(DEPS) }] });
+
+        const none = await startServer({ net, hostPackages: { express: EXPRESS } });
+        const refused = await post(none);
+        expect(refused.status).toBe(400);
+        expect(refused.body).toEqual({ error: 'untrusted dependency: left-pad (the marketplace pins none and the server does not trust it)' });
+        const partly = await startServer({ net, hostPackages: { express: EXPRESS }, trustedDependencies: ['left-*'] });
+        expect((await post(partly)).body).toEqual({ error: 'untrusted dependency: tiny-dep (the marketplace pins none and the server does not trust it)' });
+
+        const h = await startServer({ net, hostPackages: { express: EXPRESS }, trustedDependencies: ['left-*', 'tiny-dep', '@acme/*'] });
+        expect((await post(h)).status).toBe(202);
+        expect(installedJson(h.dataDir)[0].dependencies).toEqual([
+            expect.objectContaining({ id: 'left-pad', version: '1.4.0', source: 'trusted' }),
+            expect.objectContaining({ id: 'tiny-dep', version: '2.1.0', source: 'trusted' }),
+        ]);
+        const next = await startServer({ net, dataDir: h.dataDir });
+        expect((await runCommand(next.cli, 'deps')).text).toBe(`1.4.0 2.1.0 ${EXPRESS} host`);
+    });
+
+    it('the server\'s own packages: never installed; an incompatible version or a missing server package refused', async () => {
+        const net = new FakeServerNet();
+        net.publishPackage('left-pad', '1.3.0');
+        net.publishPackage('express', '4.21.0');
+        net.publish('deps', { versions: [{ version: '1.0.0', files: depsPlugin({ express: '^4.0.0' }), dependencies: [{ id: 'express', version: '4.21.0', integrity: 'sha512-x' }] }] });
+        net.publish('needs', {
+            node: '@qodalis/cli-server-plugin-needs',
+            versions: [{ version: '1.0.0', files: pluginPackage('@qodalis/cli-server-plugin-needs', '1.0.0', { deps: { '@qodalis/cli-server-plugin-billing': '^1.0.0' } }) }],
+        });
+        const old = await startServer({ net, hostPackages: { express: '3.21.0' }, trustedDependencies: ['*'] });
+        const res = await post(old);
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'incompatible dependency: express@^4.0.0 (the server has 3.21.0)' });
+        // a pin for a package the server has is not used: the server's copy
+        const ok = await startServer({ net, hostPackages: { express: EXPRESS } });
+        expect((await post(ok)).status).toBe(202);
+        expect(existsSync(join(pluginDir(ok.dataDir), 'node_modules'))).toBe(false);
+        expect(installedJson(ok.dataDir)[0].dependencies).toBeUndefined();
+        const host = await startServer({ net, trustedDependencies: ['*'], hostPackages: { '@qodalis/cli-server-plugin-billing': null } });
+        expect((await post(host, 'needs')).body).toEqual({ error: 'incompatible dependency: @qodalis/cli-server-plugin-billing@^1.0.0 (a server package the host does not have)' });
+    });
+
+    it('the host\'s packages by default: read from what the server resolves', () => {
+        expect(defaultHostPackageVersion('express')).toBe(EXPRESS);
+        expect(defaultHostPackageVersion('@qodalis/cli-server-abstractions')).toMatch(/^\d+\.\d+\.\d+/);
+        expect(defaultHostPackageVersion('no-such-package-qcli-test')).toBeUndefined();
+    });
+
+    it('trusted patterns', () => {
+        expect(isTrustedDependency('left-pad', ['left-pad'])).toBe(true);
+        expect(isTrustedDependency('left-pad', ['left-*'])).toBe(true);
+        expect(isTrustedDependency('@acme/x', ['@acme/*'])).toBe(true);
+        expect(isTrustedDependency('@acmex/x', ['@acme/*'])).toBe(false);
+        expect(isTrustedDependency('right-pad', ['left-*', 'pad'])).toBe(false);
+        expect(isTrustedDependency('anything', [])).toBe(false);
     });
 });
