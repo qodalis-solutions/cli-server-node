@@ -32,6 +32,22 @@ describe('OsFileStorageProvider: allowed roots', () => {
         fs.rmSync(base, { recursive: true, force: true });
     });
 
+    it('a folder above the roots lists only the folders leading to them (the dashboard starts at /); nothing else is served', async () => {
+        const top = base.split(path.sep).filter(Boolean)[0];
+        expect((await provider.list('/')).map((e) => [e.name, e.type])).toEqual([[top, 'directory']]);
+        expect((await provider.list(base)).map((e) => e.name)).toEqual(['other', 'share']);
+        expect((await provider.list(root)).map((e) => e.name)).toEqual(['a.txt', 'sub']);
+        // a folder above no root, and files above the roots, stay refused
+        fs.writeFileSync(path.join(base, 'secret.txt'), 's');
+        await expect(provider.list(path.join(base, 'nope'))).rejects.toBeInstanceOf(PermissionDeniedError);
+        await expect(provider.readFile(path.join(base, 'secret.txt'))).rejects.toBeInstanceOf(PermissionDeniedError);
+        const app = express();
+        app.use('/fs', createFilesystemRouter(provider));
+        const res = await request(app).get('/fs/ls').query({ path: '/' });
+        expect(res.status).toBe(200);
+        expect(res.body.entries.map((e: { name: string }) => e.name)).toEqual([top]);
+    });
+
     it('refuses to remove an allowed root (also through a trailing slash or a symlink)', async () => {
         await expect(provider.remove(root, true)).rejects.toBeInstanceOf(PermissionDeniedError);
         await expect(provider.remove(root + '/', true)).rejects.toBeInstanceOf(PermissionDeniedError);

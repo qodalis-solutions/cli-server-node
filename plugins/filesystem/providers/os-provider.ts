@@ -100,8 +100,34 @@ export class OsFileStorageProvider implements IFileStorageProvider {
         }
     }
 
+    /**
+     * The folders leading to the allowed roots below `path` (a folder above them, which is not served itself): `/`
+     * lists `srv` for the root `/srv/files`, so a client starting at `/` (the dashboard's Filesystem page) can walk to
+     * the roots. Empty when `path` is above none.
+     */
+    private async towardRoots(path: string): Promise<FileEntry[]> {
+        const above = nodePath.resolve(path);
+        const prefix = above.endsWith(nodePath.sep) ? above : above + nodePath.sep;
+        const names = new Set<string>();
+        for (const root of [...this.allowedPaths, ...(await this.allowedRoots())]) {
+            if (root.startsWith(prefix)) names.add(root.slice(prefix.length).split(nodePath.sep)[0]);
+        }
+        return [...names]
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b))
+            .map((name) => ({ name, type: 'directory' as const, size: 0, modified: '' }));
+    }
+
     async list(path: string): Promise<FileEntry[]> {
-        const resolved = await this.validate(path);
+        let resolved: string;
+        try {
+            resolved = await this.validate(path);
+        } catch (err) {
+            if (!(err instanceof PermissionDeniedError)) throw err;
+            const toward = await this.towardRoots(path);
+            if (toward.length === 0) throw err;
+            return toward;
+        }
 
         let stat;
         try {

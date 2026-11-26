@@ -63,7 +63,9 @@ describe('server marketplace: helpers', () => {
         expect([...files.keys()]).toEqual(['package/package.json', 'package/lib/a.js']);
         expect(files.get('package/lib/a.js')!.length).toBe(700);
         expect(tarballPackageJson(tgz)).toEqual({ name: 'x', version: '1.0.0' });
-        expect(() => tarballPackageJson(makeTarball({ 'other/package.json': '{}' }))).toThrow('invalid tarball: other/package.json is outside package/');
+        // npm strips the top folder whatever its name (@types/uuid@9.0.1 has uuid/)
+        expect(tarballPackageJson(makeTarball({ 'uuid/package.json': '{"name":"@types/uuid"}', 'uuid/index.d.ts': '' }))).toEqual({ name: '@types/uuid' });
+        expect(() => tarballPackageJson(makeTarball({ 'uuid/package.json': '{}', 'other/package.json': '{}' }))).toThrow('invalid tarball: other/package.json is outside uuid/');
         expect(() => tarballPackageJson(makeTarball({ 'package/index.js': '' }))).toThrow('no package/package.json');
         expect(() => tarballPackageJson(Buffer.from('not gzip'))).toThrow('invalid tarball');
     });
@@ -78,6 +80,8 @@ describe('server marketplace: helpers', () => {
         expect(existsSync(join(dir, 'pkg'))).toBe(false);
         // A file at the top level is refused too; the package/ folder's content is what is unpacked
         await expect(unpackTarball(makeTarball({ 'package/package.json': checked, 'README.md': 'x' }), join(dir, 'top'))).rejects.toThrow('invalid tarball: README.md is outside package/');
+        await unpackTarball(makeTarball({ 'uuid/package.json': checked, 'uuid/index.d.ts': 'd' }), join(dir, 'types'));
+        expect(readFileSync(join(dir, 'types', 'index.d.ts'), 'utf8')).toBe('d');
         await unpackTarball(makeTarball({ 'package/package.json': checked, 'package/lib/a.js': 'a' }), join(dir, 'ok'));
         expect(readFileSync(join(dir, 'ok', 'package.json'), 'utf8')).toBe(checked);
         expect(readFileSync(join(dir, 'ok', 'lib', 'a.js'), 'utf8')).toBe('a');
@@ -597,6 +601,32 @@ describe('server marketplace: dependencies', () => {
             { id: 'tiny-dep', version: '2.1.0', integrity: tiny, source: 'pinned' },
             { id: 'tiny-dep', version: '1.0.0', integrity: tinyOld, source: 'pinned', path: 'left-pad/node_modules/tiny-dep' },
         ]);
+        const next = await startServer({ net, dataDir: h.dataDir });
+        expect((await runCommand(next.cli, 'deps')).text).toBe(`1.3.0 2.1.0 ${EXPRESS} host`);
+    });
+
+    it('a dependency of a dependency needing another version than the server\'s: its own copy below it; the plugin keeps the server\'s', async () => {
+        const net = new FakeServerNet();
+        const leftPad = net.publishPackage('left-pad', '1.3.0', { deps: { express: '3.0.0', 'tiny-dep': '^2.0.0' } });
+        const oldExpress = net.publishPackage('express', '3.0.0');
+        const tiny = net.publishPackage('tiny-dep', '2.1.0');
+        net.publish('deps', {
+            versions: [{
+                version: '1.0.0',
+                files: depsPlugin(DEPS),
+                dependencies: [
+                    { id: 'left-pad', version: '1.3.0', integrity: leftPad, range: '^1.3.0' },
+                    { id: 'express', version: '3.0.0', integrity: oldExpress, range: '3.0.0' },
+                    { id: 'tiny-dep', version: '2.1.0', integrity: tiny, range: '^2.0.0' },
+                ],
+            }],
+        });
+        const h = await startServer({ net, hostPackages: { express: EXPRESS } });
+        expect((await post(h)).status).toBe(202);
+        const modules = join(pluginDir(h.dataDir), 'node_modules');
+        expect(existsSync(join(modules, 'express'))).toBe(false);
+        expect(JSON.parse(readFileSync(join(modules, 'left-pad', 'node_modules', 'express', 'package.json'), 'utf8')).version).toBe('3.0.0');
+        expect(installedJson(h.dataDir)[0].dependencies.map((d: { path?: string; id: string }) => d.path ?? d.id)).toEqual(['left-pad', 'left-pad/node_modules/express', 'tiny-dep']);
         const next = await startServer({ net, dataDir: h.dataDir });
         expect((await runCommand(next.cli, 'deps')).text).toBe(`1.3.0 2.1.0 ${EXPRESS} host`);
     });
