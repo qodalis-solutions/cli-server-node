@@ -156,6 +156,40 @@ previous release's table and its columns to the new names, keeping the data) wor
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (it registers the host's databases (their connection pools) and the host's migrations), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install databases` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install databases`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings one database from its settings with its size, load, largest tables and migrations (dashboard, `databases`, MCP, `/api/v1/qcli/databases`). The driver (`pg`, `mysql2`, `mssql`, `better-sqlite3`) comes from the plugin's folder or the server's. Load order: `CORE` (30): before the plugins that keep data in it; shared as the `databases` service.
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `name` | string | `main` | required | The database in the API, the terminal and the dashboard |
+| `dialect` | enum | `postgres` |  |  |
+| `connectionString` | secret | — | required | A connection string (postgres://, mysql://, mssql: Server=...), or the SQLite file (relative: the plugin data folder); kept as a secret |
+| `migrationsFolder` | string | — |  | NNNN_name.up.sql / .down.sql files (relative: the plugin data folder); empty: none |
+| `applyOnStartup` | boolean | `false` |  | Pending migrations run when the server starts |
+
+Every setting needs a restart. Set them on the Config page or with `config set databases.settings.<key> <value>`, then
+restart. Without a connection (or `configure` in code) it is `needs-configuration`. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `configure(builder)` (the host's own databases and migration sources on the same plugin) and `auditStore`.
+
+```ts
+import { databasesPluginEntry } from '@qodalis/cli-server-plugin-databases';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(databasesPluginEntry, { dialect: 'postgres', connectionString: process.env.DATABASE_URL, applyOnStartup: true }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
+

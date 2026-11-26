@@ -451,9 +451,41 @@ command (`config get users`).
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (it replaces the server's sign-in: an auth provider for every route and socket, its stores and the default admin password), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install users` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install users`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings the sign-in, users, groups, permissions, sessions, API tokens and the audit log. Its stores are users-postgres's when that plugin is installed (it loads before), else in memory. Its setup is the `users-plugin` provider; sessions, lockout and passwords stay the `users` provider's. Load order: `AUTH` (10): first; requests wait until it is loaded, so it protects the very first one.
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `defaultAdminPassword` | secret | — |  | The seeded root user's password; empty: a random one, logged once |
+| `protectServer` | boolean | `true` |  | Every route and socket needs a sign-in |
+| `allowNonExpiringTokens` | boolean | `false` |  | API tokens may be created without an expiry date |
+| `linkApprovalUrl` | string | — |  | Where users approve a terminal's link request; empty: the dashboard's |
+
+Every setting needs a restart. Set them on the Config page or with `config set users-plugin.settings.<key> <value>`, then
+restart. Nothing is required: without a root password a random one is printed once to stderr. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `authAdapter`, the stores, `allowedOrigins` and the other `UsersModuleOptions`.
+
+```ts
+import { usersPluginEntry } from '@qodalis/cli-server-plugin-users';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(usersPluginEntry, { defaultAdminPassword: process.env.ADMIN_PASSWORD, protectServer: true }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
 
 ## License
 

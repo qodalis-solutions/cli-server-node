@@ -84,6 +84,38 @@ commands (`adduser`, `token`, `audit`, ...). Its migrations show in `databases r
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (the users plugin's stores in PostgreSQL, passed to `CliUsersBuilder` with the host's pool), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install users-postgres` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install users-postgres`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings the users plugin's stores in PostgreSQL; the schema migrations run at load. Load order: 5 (`AUTH - 5`): before the users plugin, which takes its stores (the `users.stores` service).
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `connectionString` | secret | — | required | postgres://user:password@host:5432/database (kept as a secret, never returned) |
+| `schema` | string | — |  | The schema of the tables; empty: the search path |
+| `tablePrefix` | string | `Qcli` |  | Prepended to the table names (default Qcli) |
+
+Every setting needs a restart. Set them on the Config page or with `config set users-postgres.settings.<key> <value>`, then
+restart. Without a connection string it is `needs-configuration` and the users plugin keeps its stores in memory. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `pool` (a `pg` Pool shared with the app).
+
+```ts
+import { usersPostgresPluginEntry } from '@qodalis/cli-server-plugin-users-postgres';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(usersPostgresPluginEntry, { connectionString: process.env.DATABASE_URL }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
+

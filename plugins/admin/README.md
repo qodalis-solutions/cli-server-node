@@ -312,8 +312,8 @@ gets no section. Its store is resolved like every provider's: the host's store f
       "allowCustomKeys": false,
       "entries": [
         { "key": "refreshSeconds", "label": "Refresh every", "description": "", "type": "number", "value": 60, "default": 30, "source": "file", "mutable": true, "requiresRestart": false, "sensitive": false, "validation": { "min": 5, "max": 3600 } },
-        { "key": "columns", "label": "columns", "description": "", "type": "string[]", "value": ["name", "status"], "default": ["name", "status"], "source": "default", "mutable": true, "requiresRestart": false, "sensitive": false },
-        { "key": "mode", "label": "mode", "description": "", "type": "enum", "value": "compact", "default": "compact", "source": "default", "mutable": true, "requiresRestart": false, "sensitive": false, "validation": { "options": ["compact", "full"] } }
+        { "key": "columns", "label": "columns", "description": "", "type": "string[]", "value": ["name", "status"], "default": ["name", "status"], "source": "default", "origin": "default", "mutable": true, "requiresRestart": false, "sensitive": false },
+        { "key": "mode", "label": "mode", "description": "", "type": "enum", "value": "compact", "default": "compact", "source": "default", "origin": "default", "mutable": true, "requiresRestart": false, "sensitive": false, "validation": { "options": ["compact", "full"] } }
       ]
     }
   ]
@@ -491,13 +491,29 @@ or the range's reason.
     "status": "pending",
     "loadedVersion": "1.0.0",
     "updateAvailable": false
+  },
+  {
+    "name": "users-postgres",
+    "package": "@qodalis/cli-server-plugin-users-postgres",
+    "version": "1.0.0-beta.31",
+    "title": "Users on PostgreSQL",
+    "icon": "🐘",
+    "description": null,
+    "installedAt": "2026-11-25T10:06:00.000Z",
+    "installedBy": "admin",
+    "status": "needs-configuration",
+    "loadedVersion": "1.0.0-beta.31",
+    "missing": ["settings.connectionString"],
+    "settings": "users-postgres"
   }
 ]
 ```
 
-`status`: `loaded` (runs this version), `pending` (installed or updated, runs after a restart), `failed` and `skipped`
-(the last start could not load it, or the host installed the same package: `error`), `removed` (removed, running until
-a restart).
+`status`: `loaded` (runs this version), `needs-configuration` (running, but its required settings have no value:
+`missing` lists them as `<section>.<key>` or a reason; it registered nothing, save them on the Config page or with
+`config set`, then restart), `pending` (installed or updated, runs after a restart), `failed` and `skipped` (the last
+start could not load it, or the host installed the same package: `error`), `removed` (removed, running until a
+restart). `settings`: the id of its config provider (`GET /api/v1/qcli/config/<id>`), once it registered one.
 
 `installed.json`:
 
@@ -512,11 +528,15 @@ a restart).
       "title": "Weather",
       "icon": "🌤️",
       "installedAt": "2026-11-25T10:04:05.123Z",
-      "installedBy": "admin"
+      "installedBy": "admin",
+      "settings": "weather"
     }
   ]
 }
 ```
+
+A plugin the last start found without a required setting keeps `"status": "needs-configuration"` and `"missing"` there
+(cleared once it loads).
 
 ## Color scheme
 
@@ -767,8 +787,8 @@ $ admin plugins install weather@1.0.0-beta.30
 Installed weather: @qodalis/cli-server-plugin-weather@1.0.0-beta.30.
 Restart the server to apply it: admin restart (or the dashboard).
 
-$ admin plugins install users
-Error: needs setup in code: replaces the server's sign-in
+$ admin plugins install admin
+Error: needs setup in code: hosts the dashboard and the marketplace itself: mount it in code (CliAdminBuilder)
 
 $ admin plugins installed
 1 server plugin(s) from https://plugins.qodalis.com (install: verified)

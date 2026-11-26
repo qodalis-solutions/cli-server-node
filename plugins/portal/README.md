@@ -152,6 +152,38 @@ page, and a wrong colour is easier to catch in review.
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (a developer portal whose sections come from the host's public API and docs plugins), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install portal` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install portal`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings the developer portal at its path. Its setup is the `portal-plugin` provider; branding and colours stay the `portal` provider's. Load order: 60 (`DEFAULT + 10`): after the docs and public-api plugins it shows (the `portal.section.docs` and `portal.section.api` services).
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `path` | string | `/qcli/portal` | required | Where the portal is served (/ for the root) |
+| `name` | string | `Documentation` | required |  |
+| `logoUrl` | string | — |  | An http(s) URL or a root-relative path; empty: none |
+
+Every setting needs a restart. Set them on the Config page or with `config set portal-plugin.settings.<key> <value>`, then
+restart. Without a docs or public-api plugin it is `needs-configuration`. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `theme`, `footerLinks`, `sections`, `siteDir`.
+
+```ts
+import { portalPluginEntry } from '@qodalis/cli-server-plugin-portal';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(portalPluginEntry, { name: 'RateBell API', path: '/qcli/portal' }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
+

@@ -153,6 +153,42 @@ The users plugin checks token names and the 20-token limit in the process that c
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (it publishes the host's own API routes with tokens and quotas, and needs the users plugin), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install public-api` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install public-api`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings the host's public API: host tokens, one quota for every account, usage, the OpenAPI document and Swagger UI. The host's routes take the guard from the `public-api` service (`builder.pluginServices.get('public-api').guard('rates:read')`). Load order: `DEFAULT` (50), after the users plugin it builds on (the `users` service: added in code, mounted, or installed).
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `basePath` | string | `/qcli/api` | required | Where the OpenAPI document and Swagger UI are served |
+| `title` | string | `API reference` | required |  |
+| `openApiFile` | string | — |  | A JSON file (relative paths from the plugin's data directory); empty: an empty document |
+| `serverUrl` | string | — |  | The document's servers URL; empty: the request's |
+| `requestsPerDay` | number | `0` |  | Per account; 0: unlimited |
+| `requestsPerMinute` | number | `0` |  | Per account; 0: unlimited |
+| `usageRetentionDays` | number | `31` |  |  |
+
+Every setting needs a restart. Set them on the Config page or with `config set public-api.settings.<key> <value>`, then
+restart. Without the users plugin it is `needs-configuration`. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `quota` (a function per account, wins over the two quota settings), `usageStore`, `openApi` (an object), `users`.
+
+```ts
+import { publicApiPluginEntry } from '@qodalis/cli-server-plugin-public-api';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(publicApiPluginEntry, { basePath: '/qcli/api', requestsPerDay: 1000 }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
+

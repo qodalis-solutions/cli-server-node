@@ -307,7 +307,8 @@ await server.serverPlugins.ready(); // the runtime plugins are loaded after the 
 At startup the server reads `<dataDir>/server-plugins/installed.json` and, for each plugin, requires its package's
 entry from `<dataDir>/server-plugins/node_modules` and calls `createPlugin(context)`. A plugin that fails (missing
 package, wrong version, no entry, an exception) is logged and its error kept in `installed.json` (`error`, cleared once
-it loads); startup goes on. A package the host already installed in code is skipped. Loaded packages are listed by
+it loads); startup goes on. A plugin whose required settings have no value is `needs-configuration` (below). A package
+the host already installed in code is skipped. Loaded packages are listed by
 `GET /api/v1/qcli/plugins/installed` with `source: "marketplace"`; their routes are reachable even after a catch-all
 the host added; a filesystem storage or data explorer source they set is wired then.
 
@@ -342,19 +343,22 @@ Declare a `qodalis` block in `package.json` and export `createPlugin` from a Com
 import type { CliPluginContext, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
 import { CliTicketsBuilder } from './builder';
 
+// For builder.addPlugin (the marketplace's record says it for an installed copy) and when it loads (default 50)
+export const plugin = { id: 'tickets', package: '@acme/cli-server-plugin-tickets', title: 'Tickets' };
+export const order = 50; // CLI_PLUGIN_LOAD_ORDER.DEFAULT
+
 export async function createPlugin(context: CliPluginContext): Promise<CliPluginEntryResult> {
     // Its settings: a config provider with defaults (the dashboard's Config page, config set tickets.settings.<key>)
     const settings = await context.settings({
         title: 'Tickets',
         settings: [
             { key: 'project', type: 'string', default: 'SUP', requiresRestart: true },
-            { key: 'apiToken', type: 'secret', requiresRestart: true },
+            { key: 'apiToken', type: 'secret', required: true, requiresRestart: true },
         ],
     });
-    if (!settings.value('settings', 'apiToken')) {
-        context.logger.warn('no API token: config set tickets.settings.apiToken <token>, then restart');
-        return; // nothing registered until configured
-    }
+    // A required setting without a value: needs-configuration, nothing registered until it is saved and the server restarts
+    const missing = settings.missingRequired();
+    if (missing.length) return context.needsConfiguration(missing);
     return new CliTicketsBuilder({ project: String(settings.value('settings', 'project')) }).build(context.eventBus);
 }
 ```
@@ -370,17 +374,72 @@ export async function createPlugin(context: CliPluginContext): Promise<CliPlugin
   `settings(options)`: registers a `CliStoredConfigProvider` (id: the plugin's id unless `id` is given; one section
   `settings`, or `sections`) and resolves once its stored values are loaded. Read values with `provider.value(section,
   key)`, at start or on every use; `secret` settings are kept server-side and never returned.
-- **Host wiring needed?** A plugin that replaces a core service (sign-in, a store) or publishes the host's own code
-  declares `"autoInstall": false` and an `autoInstallReason`: it is listed, never installed at runtime; the dashboard
-  shows "needs setup in code".
+- **The rest of the context**: `source` (`marketplace` or `code`), `options` (the host's code options:
+  `builder.addPlugin(entry, options)`; empty from the marketplace), `services` (what plugins share: `users`,
+  `users.stores`, `databases`, `public-api`, `portal.section.docs|api`, `data-explorer.policy`) and
+  `needsConfiguration(missing)`.
+- **Required settings** (`required: true`): without a value the entry returns `context.needsConfiguration(missing)`
+  (`settings.missingRequired()` lists them as `<section>.<key>`): the plugin registers nothing, startup goes on, and its
+  state is `needs-configuration` with `missing` in `serverPlugins.states()`, `installed.json`, the admin plugin's
+  `GET /server/marketplace/installed` and the installed plugins (`GET /api/v1/qcli/plugins/installed`). It runs once
+  they are saved (Config page, `config set`) and the server restarts.
+- **`qodalis.config`**: the settings the entry asks for, for the marketplace before install (same schema as a
+  dashboard plugin's `config`, plus `secret`, `required`, `requiresRestart`, `sensitive`; `needsConfiguration: true`
+  when a required setting has no default: "Needs configuration after install"). Generate it with
+  `cliPluginConfigManifest(settings)`; the official plugins export `settings` and `npm run sync:plugin-config` writes it.
+- **Code only**: a package that cannot run without the host's code declares `"autoInstall": false` and an
+  `autoInstallReason`: listed, never installed at runtime; the dashboard shows "needs setup in code". Of the official
+  plugins only `admin` (it hosts the dashboard and the marketplace).
 
-| Official plugin | From the marketplace | Settings / why not |
+### Load order
+
+Code-added and installed plugins load together, sorted by the entry's `order` (or `qodalis.order`; code first on a
+tie). `CLI_PLUGIN_LOAD_ORDER` (the same values on the Python and .NET servers):
+
+| Order | | Official plugins |
+|---|---|---|
+| `AUTH` 10 | the sign-in; requests wait until these are loaded, so the first one is protected | users (users-postgres at 5: its stores, before it) |
+| `CONFIG_STORE` 20 | config stores: `builder.replaceConfigStore(store)` moves the providers already on the default store (the AUTH plugins' settings wait for it) | config-redis |
+| `CORE` 30 | what others build on | databases, data-explorer (its rules for the sources) |
+| `DEFAULT` 50 | everything else | weather, aws, docs, jobs, audit, filesystem*, public-api |
+| 60 | after docs and public-api | portal |
+| `SOURCE` 70 | data explorer sources | data-explorer-* |
+
+### Installing in code
+
+The same entry and settings from code: `builder.addPlugin(entry, options)` (every official package exports its entry:
+`usersPluginEntry`, `databasesPluginEntry`, ...). Options of a setting's key become its default with source and origin
+`code`; a saved setting (dashboard, `config set`) overrides it at the next start (origin `setting`); options that are
+not settings (a pool, a client, a function) are read by the entry only. Secrets from code are never returned either.
+
+```ts
+import { usersPluginEntry } from '@qodalis/cli-server-plugin-users';
+import { usersPostgresPluginEntry } from '@qodalis/cli-server-plugin-users-postgres';
+
+const server = createCliServer({
+    configure: (builder) =>
+        builder
+            .addPlugin(usersPluginEntry, { defaultAdminPassword: process.env.ADMIN_PASSWORD })
+            .addPlugin(usersPostgresPluginEntry, { connectionString: process.env.DATABASE_URL }),
+});
+await server.serverPlugins.ready();
+```
+
+Plugin settings are kept by the server's config store; while it keeps them in memory (no `config.store`), in
+`<dataDir>/plugin-settings.json` (mode 0600), so they survive the restart they wait for. A config entry carries
+`origin`: `code`, `setting` or `default` (`source` stays the store kind: `runtime`, `file`, `database`, or `code`).
+
+| Official plugin | From the marketplace and code | Settings |
 |---|---|---|
 | weather, aws, docs, jobs, audit | yes | weather `defaultLocation`; aws `region`, `profile`, keys (secrets); docs `folder`, `basePath`, `title`, `name`; audit `maxEntries`; jobs its own `jobs` provider |
-| filesystem, filesystem-json, filesystem-s3 | yes | folders, a JSON file or an S3 bucket (keys as secrets), read-only by default |
-| data-explorer-postgres, -mysql, -mssql, -mongo, -redis, -elasticsearch, -sql | yes | one source each: name, connection (a secret), read-only (default), timeout, rows |
-| admin, users, users-postgres, filesystem-sqlite, databases, public-api, portal, config-redis | no | host wiring (sign-in, stores, the host's databases, routes or public API) |
-| data-explorer | no | part of the server: install a source |
+| filesystem, filesystem-json, filesystem-s3, filesystem-sqlite | yes | folders (required), a JSON file, an S3 bucket (required; keys as secrets), a SQLite file |
+| data-explorer-postgres, -mysql, -mssql, -mongo, -redis, -elasticsearch, -sql | yes | one source each: name, connection (a required secret), read-only (default), timeout, rows |
+| data-explorer | yes | rules for every source: read-only for all, a row cap, a rate limit |
+| users, users-postgres | yes | users (`users-plugin`): root password (secret), protect the server, tokens without expiry, link approval page; users-postgres: connection string (required secret), schema, table prefix |
+| config-redis | yes | URL (required secret), key prefix, expiry |
+| databases | yes | name, dialect, connection (required secret), migrations folder, apply on startup |
+| public-api, portal | yes | public-api: path, title, OpenAPI file, server URL, quota, retention (needs the users plugin); portal (`portal-plugin`): path, name, logo (needs docs or public-api) |
+| admin | code only | it hosts the dashboard and the marketplace |
 
 ## Dashboard extensions
 

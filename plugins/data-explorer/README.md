@@ -145,9 +145,41 @@ tools.
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (it is part of the server), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install data-explorer` refuses it. Set it up in code as shown
-above. Install a source instead (`data-explorer-postgres`, `-mysql`, `-mssql`, `-mongo`, `-redis`, `-elasticsearch`, `-sql`): each adds itself to the server's data explorer.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install data-explorer`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings the rules every source added after it follows (read-only for all, a row cap, a rate limit for sources without their own), as the `data-explorer.policy` service. The data explorer itself is part of the server: its API, page and MCP tools are served once a source is added. Load order: `CORE` (30): before its sources (`SOURCE`, 70).
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `forceReadOnly` | boolean | `false` |  | Every source may only read, whatever its own setting |
+| `maxRows` | number | `0` |  | The most rows any source returns; 0: each source its own |
+| `rateLimitQueries` | number | `0` |  | Per caller and source, for sources without their own limit; 0: none |
+| `rateLimitWindowSeconds` | number | `60` |  |  |
+
+Every setting needs a restart. Set them on the Config page or with `config set data-explorer.settings.<key> <value>`, then
+restart. Nothing is required. A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: nothing.
+
+```ts
+import { dataExplorerPluginEntry } from '@qodalis/cli-server-plugin-data-explorer';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(dataExplorerPluginEntry, { forceReadOnly: true, maxRows: 500 }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
 
 ## License
 

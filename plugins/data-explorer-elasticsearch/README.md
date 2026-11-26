@@ -89,7 +89,7 @@ start, no code ([runtime plugins](../../README.md#server-plugins-installed-at-ru
 | `maxRows` | number | `1000` | 1-100000 |
 
 Every setting needs a restart. Set them with `config set data-explorer-elasticsearch.settings.<key> <value>` or the Config page, then restart: until
-the connection is set, no source is added (a warning is logged). The connection is a `secret` setting: kept by the
+the connection is set the plugin is `needs-configuration` (no source added, listed with its `missing` settings). The connection is a `secret` setting: kept by the
 server's config store, never returned by the API (`isSet` only). The database driver comes with the package.
 
 ## License

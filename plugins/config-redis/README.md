@@ -85,9 +85,40 @@ None of its own: the settings are read and changed with the server's [`config` c
 
 ## Install from the dashboard
 
-Not installable at runtime: its package declares `"autoInstall": false` (a config store, not a plugin: pass it to `createCliServer({ config: { store } })` or `stores`), so the marketplace and the
-dashboard list it with "needs setup in code" and `admin plugins install config-redis` refuses it. Set it up in code as shown
-above.
+Installable at runtime from the admin dashboard's Marketplace tab (Server plugins) or `admin plugins install config-redis`
+([admin plugin](../admin/README.md#server-plugins-from-the-marketplace)): the server installs the npm package into
+`<dataDir>/server-plugins` and loads it at the next start ([runtime plugins](../../README.md#server-plugins-installed-at-runtime)).
+Its entry (`qodalis.entry`, `dist/plugin.js`) brings Redis as the server's default config store. Its own settings are kept in `<dataDir>/plugin-settings.json`, never in Redis. Load order: `CONFIG_STORE` (20): the providers registered before it (the host's, the users plugin's) move to Redis, those after it start there.
+
+| Setting | Type | Default | | |
+|---|---|---|---|---|
+| `url` | secret | — | required | redis://[:password@]host:6379/0 (rediss:// for TLS); kept as a secret, never returned |
+| `keyPrefix` | string | `qcli:config:` |  | Prepended to every key: <prefix><provider>:<section> |
+| `ttlSeconds` | number | `0` |  | A section expires this long after its last change; 0: never |
+
+Every setting needs a restart. Set them on the Config page or with `config set config-redis.settings.<key> <value>`, then
+restart. Without a URL it is `needs-configuration` and the settings stay where they were (the plugins' in `<dataDir>/plugin-settings.json`). A plugin waiting for a required setting is `needs-configuration`: it registers nothing, is listed
+with that status and its `missing` settings (installed.json, `GET /api/v1/qcli/server/marketplace/installed`, the
+installed plugins), and runs once they are saved and the server restarts. Secrets are kept by the config store
+(`<dataDir>/plugin-settings.json` while the server keeps its settings in memory), never returned (`isSet` only).
+The marketplace reads these settings from `qodalis.config` of the package.json (`npm run sync:plugin-config`).
+
+## Install in code
+
+The same entry and settings: `builder.addPlugin(entry, options)` runs it with the plugins installed at runtime, in
+load order. Options of a setting's key are its defaults (origin `code` on the Config page and in `config get`); a
+saved setting overrides them at the next start. Read from code only: `client` (an ioredis client shared with the app).
+
+```ts
+import { configRedisPluginEntry } from '@qodalis/cli-server-plugin-config-redis';
+
+const cli = createCliServer({
+    configure: (builder) => builder.addPlugin(configRedisPluginEntry, { url: process.env.REDIS_URL }),
+});
+await cli.serverPlugins.ready(); // before listening
+```
+
+The builder API above (`mountPlugin`) keeps working; it does not expose the settings.
 
 ## License
 
