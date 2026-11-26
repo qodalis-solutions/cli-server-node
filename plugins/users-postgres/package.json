@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-users-postgres",
-    "version": "1.0.0-beta.31",
+    "version": "1.0.0-beta.32",
     "description": "PostgreSQL stores for the Qodalis CLI server users plugin: users, groups, passwords, sessions, API tokens and the audit log survive restarts; the schema is versioned with the migrations plugin",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
