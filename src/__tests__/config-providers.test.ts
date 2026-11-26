@@ -127,20 +127,20 @@ describe('host: options and environment, secrets masked', () => {
     });
 
     it('through the server: options typed, secrets never in the response', async () => {
-        process.env.QCLI_TEST_SECRET_TOKEN = 'do-not-show-me';
+        process.env.QCLI_CFGTEST_SECRET_TOKEN = 'do-not-show-me';
         try {
-            const cli = createCliServer({ basePath: '/api/custom', maxTableRows: 50, config: { environment: { include: ['QCLI_TEST_*'] } } });
+            const cli = createCliServer({ basePath: '/api/custom', maxTableRows: 50, config: { environment: { include: ['QCLI_CFGTEST_*'] } } });
             const view = await cli.config.get('host', all);
             const options = section(view, 'options');
             expect(valueOf(options, 'basePath')).toBe('/api/custom');
             expect(options.entries.find((e) => e.key === 'maxTableRows')).toMatchObject({ type: 'number', value: 50 });
             expect(options.entries.find((e) => e.key === 'enableShell')).toMatchObject({ type: 'boolean', value: false });
             expect(section(view, 'environment').entries).toEqual([
-                expect.objectContaining({ key: 'QCLI_TEST_SECRET_TOKEN', value: null, isSet: true, sensitive: true }),
+                expect.objectContaining({ key: 'QCLI_CFGTEST_SECRET_TOKEN', value: null, isSet: true, sensitive: true }),
             ]);
             expect(JSON.stringify(view)).not.toContain('do-not-show-me');
         } finally {
-            delete process.env.QCLI_TEST_SECRET_TOKEN;
+            delete process.env.QCLI_CFGTEST_SECRET_TOKEN;
         }
     });
 });
