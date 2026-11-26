@@ -19,6 +19,7 @@ import {
     type DashboardPluginConfig,
     type DashboardPluginConfigEntry,
 } from './dashboard-plugin-config';
+import { DATA_DIR_HINT, pluginsFolderError } from './plugins-folder';
 
 /** Who may install dashboard plugins: listed versions of verified publishers, any listed version, or nobody (browse only). */
 export type DashboardInstallPolicy = 'verified' | 'listed' | 'off';
@@ -59,7 +60,11 @@ export interface DashboardMarketplaceOptions {
     url?: string;
     /** `verified` (default): listed versions of verified publishers only; `listed`: any listed version; `off`: browse only. */
     install?: DashboardInstallPolicy;
-    /** Where installed plugins are kept (default `./qcli-data/dashboard-plugins`, from the working directory). */
+    /**
+     * Where installed plugins are kept. The admin plugin defaults it to `<dataDir>/dashboard-plugins` (the server's
+     * `dataDir`, else `QCLI_DATA_DIR`, else `./qcli-data`); a `DashboardMarketplace` built directly uses
+     * `./qcli-data/dashboard-plugins`.
+     */
     dir?: string;
     /** The HTTP client for the marketplace and the CDNs (default: the global `fetch`). */
     fetch?: MarketplaceFetch;
@@ -168,6 +173,8 @@ export interface DashboardMarketplaceDeps {
     publish?: (type: string, data: Record<string, unknown>) => void;
     /** Publishes `config:changed` (audience `config:read`) when an install, update or removal changes stored settings. */
     publishConfigChanged?: (data: Record<string, unknown>) => void;
+    /** What to do when the plugins folder cannot be written (default: set `dataDir` or `QCLI_DATA_DIR`). */
+    folderHint?: string;
 }
 
 /** What `POST /installed` answers: the installed plugin, and why its settings were ignored (a bad marketplace record). */
@@ -760,9 +767,15 @@ export class DashboardMarketplace {
         });
     }
 
-    /** Runs changes one at a time. */
+    /** Runs changes one at a time; a file system error on the plugins folder becomes a 500 naming the folder. */
     private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-        const run = this.queue.then(fn, fn);
+        const guarded = () =>
+            fn().catch((err: unknown) => {
+                const message = pluginsFolderError(err, this.dir, this.deps.folderHint ?? DATA_DIR_HINT);
+                if (message) throw new DashboardMarketplaceError(500, message);
+                throw err;
+            });
+        const run = this.queue.then(guarded, guarded);
         this.queue = run.catch(() => undefined);
         return run;
     }

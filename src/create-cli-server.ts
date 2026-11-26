@@ -64,7 +64,7 @@ import {
 import { ConfigMcpToolProvider } from './mcp/providers/config-provider';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 import { CliServerRestart, CliServerRestartOptions, createRestartController } from './restart';
-import { CliServerPlugins, CliServerPluginsOptions, DEFAULT_DATA_DIR } from './server-plugins';
+import { CliServerPlugins, CliServerPluginsOptions, resolveDataDir } from './server-plugins';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -230,8 +230,9 @@ export interface CliServerOptions {
      */
     allowAnonymousAdmin?: boolean;
     /**
-     * The server's data directory (default `./qcli-data`, from the working directory): runtime-installed server
-     * plugins (`server-plugins/`) and their own data (`plugin-data/<id>/`).
+     * The server's data directory (default: the `QCLI_DATA_DIR` environment variable, else `./qcli-data`, from the
+     * working directory): runtime-installed server plugins (`server-plugins/`), their own data (`plugin-data/<id>/`)
+     * and the admin plugin's dashboard plugins (`dashboard-plugins/`). It must be writable.
      */
     dataDir?: string;
     /**
@@ -393,7 +394,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
-    builder.useServerPlugins(new CliServerPlugins(options.dataDir ?? DEFAULT_DATA_DIR, options.serverPlugins ?? {}));
+    builder.useServerPlugins(new CliServerPlugins(resolveDataDir(options.dataDir), options.serverPlugins ?? {}));
     if (options.config?.store) builder.setConfigStore(options.config.store);
     for (const [providerId, store] of Object.entries(options.config?.stores ?? {})) builder.setConfigStore(store, providerId);
 

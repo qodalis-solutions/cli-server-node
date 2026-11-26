@@ -65,6 +65,7 @@ npx -p @qodalis/cli-server-node qodalis-cli-server
 | `PORT` | `8047` | Listening port |
 | `QCLI_ALLOWED_ORIGINS` | none | Comma-separated origins allowed for CORS and WebSockets |
 | `QCLI_SHELL_TOKEN` | none | Enables the remote shell in token mode |
+| `QCLI_DATA_DIR` | `./qcli-data` | The server's data directory when `createCliServer` gets no `dataDir`: runtime-installed server plugins, dashboard plugins, plugin data and settings. Must be writable |
 
 Plugin authors who only need the base types can depend on [`@qodalis/cli-server-abstractions`](packages/abstractions/README.md) (zero dependencies).
 
@@ -299,12 +300,20 @@ the next start. No host code changes, no install scripts.
 
 ```ts
 const server = createCliServer({
-    dataDir: './qcli-data',      // default: ./qcli-data, from the working directory
+    dataDir: './qcli-data',      // default: QCLI_DATA_DIR, else ./qcli-data, from the working directory
     serverPlugins: {},           // default; { dir } keeps them elsewhere, false loads none
 });
 // ... the host's own mountPlugin calls ...
 await server.serverPlugins.ready(); // the runtime plugins are loaded after the host's mounts; await before listening
 ```
+
+The data directory holds everything the server writes at runtime: `server-plugins/`, the admin plugin's
+`dashboard-plugins/`, `plugin-data/<id>/` and `plugin-settings.json`, so it must be writable. In a container that runs
+as a non-root user, point it at a volume (`dataDir`, or the `QCLI_DATA_DIR` environment variable when the host sets
+none). When the admin marketplace is on and a plugins folder cannot be created or written, the server logs one startup
+WARNING naming it, and installing, updating or removing a plugin answers 500 with `{ "error": "cannot write the plugins
+folder <folder>: permission denied (EACCES). Set dataDir (or QCLI_DATA_DIR) to a writable folder" }` (the `admin
+dashboard|plugins install` commands print the same).
 
 At startup the server reads `<dataDir>/server-plugins/installed.json` and, for each plugin, requires its package's
 entry from `<dataDir>/server-plugins/node_modules` and calls `createPlugin(context)`. A plugin that fails (missing

@@ -36,6 +36,13 @@ import { createLogger } from '../utils/logger';
 
 /** The server's data directory unless `dataDir` is given: `./qcli-data` (from the working directory). */
 export const DEFAULT_DATA_DIR = 'qcli-data';
+/** The environment variable that moves the data directory when `dataDir` is not given. */
+export const QCLI_DATA_DIR_ENV = 'QCLI_DATA_DIR';
+
+/** The server's data directory: `dataDir` when given, else `QCLI_DATA_DIR`, else `./qcli-data`. */
+export function resolveDataDir(dataDir?: string): string {
+    return dataDir || process.env[QCLI_DATA_DIR_ENV] || DEFAULT_DATA_DIR;
+}
 
 const NPM_NAME = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;

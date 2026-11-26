@@ -22,7 +22,7 @@ import {
 import { CliConfigRegistry } from '../config/cli-config-registry';
 import { CliConfigService } from '../config/cli-config-service';
 import { CliServerRestart } from '../restart/cli-server-restart';
-import { CliServerPlugins, DEFAULT_DATA_DIR } from '../server-plugins/cli-server-plugins';
+import { CliServerPlugins, resolveDataDir } from '../server-plugins/cli-server-plugins';
 import {
     CliPermissionCatalog,
     CliPermissionInput,
@@ -91,7 +91,7 @@ export class CliBuilder {
     private readonly _installedPlugins: CliInstalledPlugin[] = [];
     private readonly _dashboardExtensions: CliDashboardExtension[] = [];
     private readonly _dashboardModuleDirs = new Map<string, string | false>();
-    private _serverPlugins = new CliServerPlugins(DEFAULT_DATA_DIR, false);
+    private _serverPlugins = new CliServerPlugins(resolveDataDir(), false);
 
     /**
      * Server-wide runtime options set by plugins (e.g. `externalAuthentication`,

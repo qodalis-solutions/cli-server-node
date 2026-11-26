@@ -16,6 +16,7 @@ import {
     MarketplaceFetchResponse,
     compareDashboardPluginVersions,
 } from './dashboard-marketplace';
+import { DATA_DIR_HINT, pluginsFolderError } from './plugins-folder';
 
 /** This server's platform in the marketplace (`platforms.node`). */
 export const SERVER_PLUGIN_PLATFORM = 'node';
@@ -133,6 +134,8 @@ export interface ServerPluginMarketplaceDeps {
     restart?: ICliServerRestart;
     audit?: () => ((entry: DashboardMarketplaceAuditEntry) => Promise<void>) | undefined;
     publish?: (type: string, data: Record<string, unknown>) => void;
+    /** What to do when the plugins folder cannot be written (default: set `dataDir` or `QCLI_DATA_DIR`). */
+    folderHint?: string;
 }
 
 /**
@@ -823,8 +826,15 @@ export class ServerPluginMarketplace {
         });
     }
 
+    /** Runs changes one at a time; a file system error on the plugins folder becomes a 500 naming the folder. */
     private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-        const run = this.queue.then(fn, fn);
+        const guarded = () =>
+            fn().catch((err: unknown) => {
+                const message = pluginsFolderError(err, this.deps.plugins.dir, this.deps.folderHint ?? DATA_DIR_HINT);
+                if (message) throw new DashboardMarketplaceError(500, message);
+                throw err;
+            });
+        const run = this.queue.then(guarded, guarded);
         this.queue = run.catch(() => undefined);
         return run;
     }
