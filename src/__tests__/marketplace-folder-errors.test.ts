@@ -46,7 +46,8 @@ const DATA_HINT = 'Set dataDir (or QCLI_DATA_DIR) to a writable folder';
 
 /** A server whose admin plugin keeps dashboard plugins in its data directory (no `dir`). */
 async function startInDataDir(net: FakeNet, dataDir?: string) {
-    const cli = createCliServer({ allowAnonymousAdmin: true, ...(dataDir ? { dataDir } : {}) });
+    // Notifications in memory: the security warning would create the data directory these tests lock
+    const cli = createCliServer({ allowAnonymousAdmin: true, notifications: { file: false }, ...(dataDir ? { dataDir } : {}) });
     const admin = new CliAdminBuilder()
         .setCredentials('admin', 'pass')
         .setJwtSecret('folder-test')

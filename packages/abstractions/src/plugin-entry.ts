@@ -46,6 +46,7 @@ import type { ICliConfigStore } from './config/config-store';
 import type { ICliEventBus } from './events';
 import type { CliConfigEntryType, CliConfigValidation, CliConfigValue } from './config/config-types';
 import type { ICliServerRestart } from './restart';
+import type { ICliNotifications } from './notifications';
 
 /** The kind of a server plugin package (`qodalis.kind`). */
 export const CLI_SERVER_PLUGIN_KIND = 'server';
@@ -176,6 +177,8 @@ export interface CliPluginBuilder {
      * default store move to the new one, those registered later start there.
      */
     replaceConfigStore?(store: ICliConfigStore): unknown;
+    /** The server's notifications (undefined on servers before it). */
+    readonly notifications?: ICliNotifications;
 }
 
 /** The settings of a plugin: one {@link CliStoredConfigProvider}, registered with the server's config providers. */
@@ -222,6 +225,11 @@ export interface CliPluginContext {
     readonly pluginSettingsStore?: ICliConfigStore;
     /** The server's restart service (a setting that needs a restart marks it). */
     readonly restart: ICliServerRestart;
+    /**
+     * The server's notifications: `notify({ key, kind, severity, title, message })` tells the dashboard's users,
+     * `resolve(key)` removes it once the condition ended. Undefined on servers before it.
+     */
+    readonly notifications?: ICliNotifications;
     /**
      * Registers the plugin's settings as a config provider (a {@link CliStoredConfigProvider}: defaults, validation,
      * values kept in the config store) and resolves once its stored values are loaded: read them with

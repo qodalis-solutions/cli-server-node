@@ -20,7 +20,10 @@ import { adminInstalledPlugin, CliInstalledPlugin } from './services/package-inf
 import { ADMIN_MODULE_NAME, CliAdminCommandProcessor } from './commands/admin-command';
 import { createDashboardMarketplaceController } from './controllers/dashboard-marketplace-controller';
 import { createServerMarketplaceController } from './controllers/server-marketplace-controller';
-import { PLUGINS_INSTALL_PERMISSION, ServerPluginMarketplace } from './services/server-plugin-marketplace';
+import { DEFAULT_NPM_REGISTRY, PLUGINS_INSTALL_PERMISSION, SERVER_CORE_PACKAGE, ServerPluginMarketplace } from './services/server-plugin-marketplace';
+import { UpdateChecker, UpdateCheckOptions, UpdateCheckScheduler, UPDATES_FILE } from './services/update-checker';
+import { createUpdatesController, canReadUpdates } from './controllers/updates-controller';
+import type { MarketplaceFetch } from './services/dashboard-marketplace';
 import {
     DASHBOARD_INSTALL_PERMISSION,
     DashboardMarketplace,
@@ -103,6 +106,13 @@ export interface CliAdminPluginResult {
     assetRoutes: Array<{ prefix: string; handler: DashboardMarketplace['handler'] }>;
     /** Receives the server's event bus from `mountPlugin` (`dashboard:extensions-changed`), unless `deps.eventBus` was given. */
     setEventBus(eventBus: ICliEventBus): void;
+    /**
+     * The update checker (`GET /api/v1/qcli/updates`, `POST /updates/check`): every 6 hours, a job of the jobs plugin
+     * when one is mounted; undefined when the marketplace is off.
+     */
+    updates?: UpdateChecker;
+    /** The `updates_list` MCP tool (registered by `mountPlugin` when MCP is on). */
+    mcpProviders: Array<{ name: string; getTools(): unknown[] }>;
 }
 
 /**
@@ -130,6 +140,17 @@ export class CliAdminBuilder {
     private _branding?: AdminBrandingDocument;
     private _configStore?: ICliConfigStore;
     private _marketplace: DashboardMarketplaceOptions | false = {};
+    private _updates: UpdateCheckOptions = {};
+
+    /**
+     * The periodic check for updates (marketplace plugins, plugins added in code, the server package): `enabled`
+     * (default true), `intervalMs` (default 6 hours), `initialDelayMs` (default 60 s after a start). `false` turns the
+     * periodic check off; "Check now" (`POST /api/v1/qcli/updates/check`) still works.
+     */
+    setUpdateChecks(options: UpdateCheckOptions | false): CliAdminBuilder {
+        this._updates = options === false ? { enabled: false } : { ...options };
+        return this;
+    }
 
     /**
      * Dashboard and server plugins from the marketplace: `url` (default `https://plugins.qodalis.com`), `install`
@@ -358,6 +379,7 @@ export class CliAdminBuilder {
                 publish: (type, data) => {
                     if (bus) void bus.publish(type, data, { permission: 'admin:access' });
                     else eventSocketManager.broadcastMessage({ type, ...data });
+                    updates?.refreshInstalled();
                 },
                 publishConfigChanged: (data) => {
                     if (bus) void bus.publish(CLI_CONFIG_CHANGED_EVENT, data, { permission: CliConfigPermissions.Read });
@@ -384,9 +406,38 @@ export class CliAdminBuilder {
                 publish: (type, data) => {
                     if (bus) void bus.publish(type, data, { permission: 'admin:access' });
                     else eventSocketManager.broadcastMessage({ type, ...data });
+                    updates?.refreshInstalled();
                 },
             });
             router.use('/server/marketplace', authMiddleware, createServerMarketplaceController(serverMarketplace));
+        }
+
+        // Updates: the marketplace's newer versions and the server package's, checked every 6 hours and on demand
+        let updates: UpdateChecker | undefined;
+        if (this._marketplace !== false && (marketplace || serverMarketplace)) {
+            const fetchFn = this._marketplace.fetch ?? (globalThis as { fetch?: MarketplaceFetch }).fetch;
+            if (fetchFn) {
+                updates = new UpdateChecker(
+                    {
+                        dashboard: marketplace,
+                        server: serverMarketplace,
+                        serverVersion: () => (builder.installedPlugins ?? []).find((p) => p.id === SERVER_CORE_PACKAGE)?.version ?? null,
+                        npmRegistry: serverMarketplace?.npmRegistry ?? DEFAULT_NPM_REGISTRY,
+                        fetch: fetchFn,
+                        timeoutMs: this._marketplace.timeoutMs,
+                        notifications: () => builder.notifications,
+                        scheduler: () => builder.pluginServices?.get<UpdateCheckScheduler>('jobs.scheduler'),
+                        file: join(dataDir, UPDATES_FILE),
+                    },
+                    this._updates,
+                );
+                router.use('/updates', authMiddleware, createUpdatesController(updates));
+                // After the host's own mounts (the jobs plugin may come later) and the runtime plugins
+                const checker = updates;
+                setImmediate(() => {
+                    void Promise.resolve(builder.serverPlugins?.ready?.()).then(() => checker.start(), () => checker.start());
+                });
+            }
         }
 
         // One WARNING at startup when installing would fail: a folder that cannot be created or written
@@ -463,6 +514,7 @@ export class CliAdminBuilder {
         }
 
         const dispose = () => {
+            updates?.stop();
             clearInterval(authResult.cleanupInterval);
             statusSampler.stop();
             logBuffer.restoreConsole();
@@ -511,6 +563,8 @@ export class CliAdminBuilder {
             setEventBus: (eventBus: ICliEventBus) => {
                 bus ??= eventBus;
             },
+            updates,
+            mcpProviders: updates ? [updatesMcpProvider(updates)] : [],
         };
     }
 
@@ -522,4 +576,37 @@ export class CliAdminBuilder {
         this._dashboardDir = dir;
         return this;
     }
+}
+
+/** `updates_list`: the update checker's last result (`check: true` checks first). */
+function updatesMcpProvider(checker: UpdateChecker) {
+    return {
+        name: 'updates',
+        getTools: () => [
+            {
+                name: 'updates_list',
+                description:
+                    'List the available updates: dashboard and server plugins installed from the marketplace with a newer version, plugins added in code with a newer package, and the server package; check: true asks the marketplace first',
+                inputSchema: {
+                    type: 'object' as const,
+                    properties: { check: { type: 'boolean' as const, description: 'Check now instead of answering the last result' } },
+                    required: [] as string[],
+                    additionalProperties: false as const,
+                },
+                requiredPermissions: [] as string[],
+                annotations: { readOnlyHint: true },
+                call: async (args: Record<string, unknown>, context: { auth?: { permissions?: string[] } }) => {
+                    if (context.auth && !canReadUpdates(context.auth.permissions ?? [])) {
+                        return { text: 'forbidden: missing permission updates:read', isError: true };
+                    }
+                    const result = args.check === true ? await checker.check() : checker.result();
+                    const lines = [...result.dashboardPlugins, ...result.serverPlugins, ...result.codePlugins, ...(result.server?.updateAvailable ? [result.server] : [])].map(
+                        (i) => `${i.kind} ${i.package}: ${i.current ?? '?'} -> ${i.latest ?? '?'} (${i.canUpdate ? 'update from the dashboard' : (i.reason ?? 'update in code')})`,
+                    );
+                    const text = `${result.count} update(s) available; last checked ${result.checkedAt ?? 'never'}${result.error ? ` (${result.error})` : ''}${lines.length ? `\n${lines.join('\n')}` : ''}`;
+                    return { text, structured: { ...result } as Record<string, unknown>, isError: false };
+                },
+            },
+        ],
+    };
 }

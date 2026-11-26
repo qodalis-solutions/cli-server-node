@@ -410,6 +410,8 @@ export class CliJobScheduler implements ICliJobScheduler {
             queued: false,
         };
         this._registrations.set(id, reg);
+        // Registered after start (a plugin loaded later): scheduled at once, as start() would have
+        if (this._running && reg.status === 'active') this._startTimer(reg);
         return id;
     }
 

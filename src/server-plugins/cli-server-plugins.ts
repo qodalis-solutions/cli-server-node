@@ -31,6 +31,7 @@ import {
     type CliConfigSectionDefinition,
     type CliConfigValue,
     type ICliPluginServices,
+    type ICliNotifications,
 } from '@qodalis/cli-server-abstractions';
 import { createLogger } from '../utils/logger';
 
@@ -131,6 +132,7 @@ export interface CliServerPluginsHost {
         removeInstalledPlugin(id: string): boolean;
         addConfigProvider(provider: CliStoredConfigProvider): unknown;
         readonly pluginServices: ICliPluginServices;
+        readonly notifications?: ICliNotifications;
         readonly configRegistry: {
             readonly hasDefaultStore: boolean;
             readonly providerStores: ReadonlyMap<string, unknown>;
@@ -550,6 +552,7 @@ export class CliServerPlugins implements ICliServerPlugins {
             eventBus: host.eventBus,
             pluginSettingsStore: this.settingsFile(),
             restart: host.restart,
+            ...(host.builder.notifications ? { notifications: host.builder.notifications } : {}),
             source: candidate.source,
             options: Object.freeze({ ...candidate.options }),
             services: host.builder.pluginServices,

@@ -65,6 +65,21 @@ import { ConfigMcpToolProvider } from './mcp/providers/config-provider';
 import type { CliPermissionInput } from './permissions/cli-permission-catalog';
 import { CliServerRestart, CliServerRestartOptions, createRestartController } from './restart';
 import { CliServerPlugins, CliServerPluginsOptions, resolveDataDir } from './server-plugins';
+import { join } from 'path';
+import {
+    ANONYMOUS_NOTIFICATION_VIEWER,
+    CliNotificationService,
+    CliNotificationsCommandProcessor,
+    CliNotificationsOptions,
+    CliNotificationViewer,
+    NOTIFICATIONS_FILE,
+    NotificationsMcpToolProvider,
+    createNotificationsController,
+    syncAnonymousAdminNotification,
+    syncPluginNotifications,
+    syncRestartNotification,
+} from './notifications';
+import { CLI_NOTIFICATION_CHANGED_EVENT, CLI_SERVER_RESTART_REQUIRED_EVENT } from '@qodalis/cli-server-abstractions';
 
 /**
  * Generic interface for plugin results that can be auto-mounted.
@@ -240,6 +255,12 @@ export interface CliServerOptions {
      * from `<dataDir>/server-plugins` (`dir` to keep them elsewhere); `false` loads none.
      */
     serverPlugins?: CliServerPluginsOptions | false;
+    /**
+     * System notifications (`/api/v1/qcli/notifications`, the `notifications` command, the dashboard's bell): kept in
+     * `<dataDir>/notifications.json` (`file`; `false` keeps them in memory), at most `maxItems` (500), `maxAgeDays`
+     * (30) after their last change.
+     */
+    notifications?: CliNotificationsOptions;
     /** Configure processors via the builder. */
     configure?: (builder: CliBuilder) => void;
 }
@@ -320,6 +341,11 @@ export interface CliServerResult {
      * after the host's own mounts; `await serverPlugins.ready()` before listening to have them all.
      */
     serverPlugins: CliServerPlugins;
+    /**
+     * The server's system notifications (same as `builder.notifications`): `notify({ key, ... })` adds or updates the
+     * notification of a key, `resolve(key)` removes it.
+     */
+    notifications: CliNotificationService;
 }
 
 export function createCliServer(options: CliServerOptions = {}): CliServerResult {
@@ -394,7 +420,16 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
 
     const registry = new CliCommandRegistry();
     const builder = new CliBuilder(registry);
-    builder.useServerPlugins(new CliServerPlugins(resolveDataDir(options.dataDir), options.serverPlugins ?? {}));
+    const dataDir = resolveDataDir(options.dataDir);
+    builder.useServerPlugins(new CliServerPlugins(dataDir, options.serverPlugins ?? {}));
+    // Notifications: set up before the host's code (configure) and the plugins publish; events once the bus exists
+    let notificationBus: ICliEventBus | undefined;
+    builder.notifications.configure({
+        file: options.notifications?.file ?? join(dataDir, NOTIFICATIONS_FILE),
+        maxItems: options.notifications?.maxItems,
+        maxAgeDays: options.notifications?.maxAgeDays,
+        eventBus: () => notificationBus,
+    });
     if (options.config?.store) builder.setConfigStore(options.config.store);
     for (const [providerId, store] of Object.entries(options.config?.stores ?? {})) builder.setConfigStore(store, providerId);
 
@@ -458,6 +493,24 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy, cliRoutes });
     const eventBus = new CliEventBus();
     eventBus.subscribe('*', (event) => eventSocketManager.deliverEvent(event));
+    notificationBus = eventBus;
+    const notifications = builder.notifications;
+    /** Who reads the notifications: the signed-in caller on a protected server, else one shared reader who sees all. */
+    const notificationViewer = (ctx: CliServerAuthContext | undefined): CliNotificationViewer => {
+        const auth = serverAuth;
+        if (!auth?.protectServer || !ctx) return ANONYMOUS_NOTIFICATION_VIEWER;
+        return { userId: ctx.userId, can: (permission) => auth.hasPermission(ctx, permission) };
+    };
+    // Each socket gets its own unread count and read flag
+    eventSocketManager.setPersonalizer(CLI_NOTIFICATION_CHANGED_EVENT, (message, auth) => {
+        const viewer = notificationViewer(auth);
+        const item = message.item as Record<string, unknown> | undefined;
+        return {
+            ...message,
+            ...(item ? { item: { ...item, read: notifications.readFlag(message.id as string | undefined, viewer.userId) } } : {}),
+            unreadCount: notifications.unreadCount(viewer),
+        };
+    });
     const logSocketManager = new CliLogSocketManager({
         allowedOrigins,
         trustProxy,
@@ -490,6 +543,10 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     // The `config` command is served by the config_* tools instead
     const commandsMcpProvider = new CommandsMcpToolProvider(registry, executor, eventBus, (root) => root instanceof CliConfigCommandProcessor);
     const mcpFeatures = new Set<string>(['commands']);
+    if (mcpOptions && cliRoutes) {
+        mcpFeatureProviders.push(new NotificationsMcpToolProvider(notifications, notificationViewer));
+        mcpFeatures.add('notifications');
+    }
     if (mcpOptions) {
         mcpFeatures.add('mcp');
         mcpFeatureProviders.push(
@@ -603,6 +660,9 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         routePermissions.push({ path: '/api/v1/qcli/server/restart', read: 'admin:access', write: 'server:restart' });
         app.use('/api/v1/qcli/server/restart', createRestartController(restart));
 
+        // System notifications: every signed-in user, each sees those whose permission they hold
+        app.use('/api/v1/qcli/notifications', createNotificationsController(notifications, (req) => notificationViewer(req.qcliServerAuth)));
+
         // API v1 routes
         app.use('/api/v1/qcli', createCliController(registry, executor, { shellCapabilities, eventBus }));
 
@@ -675,6 +735,13 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
     if (cliRoutes && options.config?.command !== false && !registry.findProcessor('config')) {
         builder.addProcessor(new CliConfigCommandProcessor(builder.config));
     }
+    if (cliRoutes && !registry.findProcessor('notifications')) {
+        builder.addProcessor(new CliNotificationsCommandProcessor(notifications, () => notificationViewer(getCliCaller())));
+    }
+    // The server's own sources: the security warning, restart required (now and on every change)
+    syncAnonymousAdminNotification(notifications, allowAnonymousAdmin);
+    syncRestartNotification(notifications, restart.pending());
+    eventBus.subscribe(CLI_SERVER_RESTART_REQUIRED_EVENT, () => syncRestartNotification(notifications, restart.pending()));
     if (mcpOptions) {
         mcpFeatureProviders.push(new ConfigMcpToolProvider(builder.config, () => serverAuth, anonymousRefusal));
         mcpFeatures.add('config');
@@ -814,6 +881,8 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         }
         if (isJobScheduler(plugin.scheduler)) {
             serverOptions.jobsEnabled = true;
+            // Other plugins schedule their own jobs on it (the admin plugin's update check)
+            if (!builder.pluginServices.has('jobs.scheduler')) builder.pluginServices.set('jobs.scheduler', plugin.scheduler);
             const scheduler = plugin.scheduler as unknown as { stop?: () => unknown };
             if (typeof scheduler.stop === 'function') restart.onShutdown('job scheduler', () => scheduler.stop!());
         }
@@ -852,8 +921,12 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
             wireDataExplorer();
         },
     });
+    // Plugins that failed to load or need configuration, once this start loaded them (after the host's mounts)
+    setImmediate(() => {
+        void serverPlugins.ready().then((states) => syncPluginNotifications(notifications, states));
+    });
 
-    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config, restart, serverPlugins };
+    return { app, registry, builder, executor, eventSocketManager, logSocketManager, eventBus, serverOptions, mountPlugin, setAuth, mcp, config: builder.config, restart, serverPlugins, notifications };
 }
 
 /** Duck-typed check (the jobs plugin may be a different package copy than the server's). */
