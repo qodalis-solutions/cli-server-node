@@ -105,7 +105,12 @@ export interface CliServerPluginsHost {
         removeInstalledPlugin(id: string): boolean;
         addConfigProvider(provider: CliStoredConfigProvider): unknown;
         readonly pluginServices: ICliPluginServices;
-        readonly configRegistry: { readonly hasDefaultStore: boolean; readonly providerStores: ReadonlyMap<string, unknown>; has(id: string): boolean };
+        readonly configRegistry: {
+            readonly hasDefaultStore: boolean;
+            readonly providerStores: ReadonlyMap<string, unknown>;
+            has(id: string): boolean;
+            moveProvider(providerId: string, store: JsonFileConfigStore): void;
+        };
     };
     config: ICliConfigService;
     eventBus: ICliEventBus;
@@ -212,6 +217,10 @@ export class CliServerPlugins implements ICliServerPlugins {
     private host?: CliServerPluginsHost;
     private readonly codePlugins: Array<{ entry: CliPluginEntry; options: Record<string, unknown> }> = [];
     private authLoaded = false;
+    /** Plugins at `CONFIG_STORE` still to load: the settings of those before them wait in memory for the store. */
+    private configStorePending = false;
+    /** Settings providers registered while a config store was pending (moved to the file store if none came). */
+    private parked: string[] = [];
     private authWaiters: Array<() => void> = [];
     private readonly logger = createLogger('ServerPlugins');
 
@@ -329,8 +338,10 @@ export class CliServerPlugins implements ICliServerPlugins {
         }
         // Stable: code plugins first on a tie
         const sorted = candidates.map((c, i) => ({ c, i })).sort((a, b) => a.c.order - b.c.order || a.i - b.i).map((x) => x.c);
+        this.configStorePending = sorted.some((c) => c.order === CLI_PLUGIN_LOAD_ORDER.CONFIG_STORE);
         for (const candidate of sorted) {
             if (candidate.order > CLI_PLUGIN_LOAD_ORDER.AUTH) this.releaseAuth();
+            if (candidate.order > CLI_PLUGIN_LOAD_ORDER.CONFIG_STORE) this.settleConfigStore(host);
             try {
                 await this.loadOne(host, candidate);
             } catch (err) {
@@ -338,12 +349,33 @@ export class CliServerPlugins implements ICliServerPlugins {
             }
         }
         this.releaseAuth();
+        this.settleConfigStore(host);
         try {
             host.afterLoad();
         } catch (err) {
             this.logger.error(`wiring the server plugins failed: ${(err as Error).message}`);
         }
         await this.saveStates(records);
+    }
+
+    /**
+     * After the `CONFIG_STORE` plugins: when none set the default store, the parked settings move to the plugins'
+     * settings file (the default store, if one was set, already took them).
+     */
+    private settleConfigStore(host: CliServerPluginsHost): void {
+        if (!this.configStorePending) return;
+        this.configStorePending = false;
+        const registry = host.builder.configRegistry;
+        if (!registry.hasDefaultStore) {
+            const file = this.settingsFile();
+            for (const id of this.parked) if (!registry.providerStores.has(id)) registry.moveProvider(id, file);
+        }
+        this.parked = [];
+    }
+
+    private settingsFileStore?: JsonFileConfigStore;
+    private settingsFile(): JsonFileConfigStore {
+        return (this.settingsFileStore ??= new JsonFileConfigStore(join(this.dataDir, CLI_PLUGIN_SETTINGS_FILE)));
     }
 
     private fail(name: string, pkg: string, version: string, source: 'code' | 'marketplace', order: number, err: unknown): void {
@@ -462,9 +494,13 @@ export class CliServerPlugins implements ICliServerPlugins {
                 const id = options.id ?? candidate.name;
                 const sections = options.sections ?? [{ id: 'settings', title: 'Settings', settings: options.settings ?? [] }];
                 // While the server keeps its settings in memory, a plugin's are kept in a file of the data directory
-                // (they must survive the restart they wait for); a store the host set wins
+                // (they must survive the restart they wait for); a store the host set wins. Before a CONFIG_STORE
+                // plugin they wait on the default store, which it may replace (else they move to the file after it)
                 const registry = host.builder.configRegistry;
-                const store = options.store ?? (!registry.hasDefaultStore && !registry.providerStores.has(id) ? new JsonFileConfigStore(join(this.dataDir, CLI_PLUGIN_SETTINGS_FILE)) : undefined);
+                const fallback = !options.store && !registry.hasDefaultStore && !registry.providerStores.has(id);
+                const parked = fallback && this.configStorePending;
+                const store = options.store ?? (fallback && !parked ? this.settingsFile() : undefined);
+                if (parked) this.parked.push(id);
                 const provider = new CliStoredConfigProvider({
                     id,
                     title: options.title ?? candidate.title ?? installedPluginName(candidate.package),

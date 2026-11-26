@@ -97,6 +97,17 @@ export class CliConfigRegistry {
         }
     }
 
+    /**
+     * Moves a registered provider to `store` (as the host's store for its id) and loads its values from there: the
+     * loader parks the settings of plugins loaded before a `CONFIG_STORE` plugin and moves them once it knows the store.
+     */
+    moveProvider(providerId: string, store: ICliConfigStore): void {
+        const provider = this.find(providerId);
+        if (!provider || !isStoreAttachable(provider)) return;
+        this._stores.set(providerId, store);
+        if (this._started) this.attach(provider);
+    }
+
     /** True when the host (or a `CONFIG_STORE` plugin) set the default store; false while settings stay in memory. */
     get hasDefaultStore(): boolean {
         return this._defaultStore !== undefined;
