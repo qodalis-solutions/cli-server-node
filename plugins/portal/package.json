@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-portal",
-    "version": "1.0.0-beta.32",
+    "version": "1.0.0-beta.33",
     "description": "Portal plugin for Qodalis CLI server — the prebuilt documentation portal (guides and API reference) at one mount, with portal.json",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
