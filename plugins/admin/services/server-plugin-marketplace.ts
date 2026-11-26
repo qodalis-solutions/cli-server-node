@@ -708,6 +708,11 @@ export class ServerPluginMarketplace {
 
     // ---------------------------------------------------------------- installed
 
+    /** The installed list (`installed.json`): the update checker compares its versions after a change. */
+    installedRecords(): CliServerPluginRecord[] {
+        return this.deps.plugins.records();
+    }
+
     private recordOf(name: string): CliServerPluginRecord | undefined {
         return this.deps.plugins.records().find((r) => r.name === name);
     }

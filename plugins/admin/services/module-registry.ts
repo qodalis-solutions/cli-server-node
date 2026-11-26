@@ -76,6 +76,10 @@ export interface IBuilderLike {
     readonly serverPlugins?: import('@qodalis/cli-server-abstractions').ICliServerPlugins;
     /** The server's restart service (`CliBuilder.restart`): `admin restart`. */
     readonly restart?: import('@qodalis/cli-server-abstractions').ICliServerRestart;
+    /** The server's notifications (`CliBuilder.notifications`): the update checker publishes the updates. */
+    readonly notifications?: import('@qodalis/cli-server-abstractions').ICliNotifications;
+    /** What plugins share (`CliBuilder.pluginServices`): the jobs plugin's scheduler (`jobs.scheduler`). */
+    readonly pluginServices?: { get<T = unknown>(name: string): T | undefined };
 }
 
 /** The id of a module or command group: its name in lower case, spaces as dashes. */

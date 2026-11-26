@@ -22,6 +22,7 @@ import {
 import { CliConfigRegistry } from '../config/cli-config-registry';
 import { CliConfigService } from '../config/cli-config-service';
 import { CliServerRestart } from '../restart/cli-server-restart';
+import { CliNotificationService } from '../notifications/cli-notification-service';
 import { CliServerPlugins, resolveDataDir } from '../server-plugins/cli-server-plugins';
 import {
     CliPermissionCatalog,
@@ -123,6 +124,13 @@ export class CliBuilder {
      * the settings with `requiresRestart`.
      */
     readonly restart = new CliServerRestart();
+
+    /**
+     * The server's system notifications (`GET /api/v1/qcli/notifications`, the dashboard's bell, `notifications`):
+     * `notify({ key, kind, severity, title, message, link?, requiredPermission? })` adds or updates the notification of
+     * a key, `resolve(key)` removes it once the condition ended. Kept in `<dataDir>/notifications.json`.
+     */
+    readonly notifications = new CliNotificationService();
 
     readonly config: CliConfigService = new CliConfigService(this.configRegistry, {
         audit: () => this.auditSink,

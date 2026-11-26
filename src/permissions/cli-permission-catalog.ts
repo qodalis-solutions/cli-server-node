@@ -38,6 +38,8 @@ export const CORE_PERMISSIONS: readonly CliPermissionInput[] = [
     { name: 'dashboard:install', description: 'Install, update and remove dashboard plugins from the marketplace', group: 'Server' },
     { name: 'plugins:install', description: 'Install, update and remove server plugins from the marketplace', group: 'Server' },
     { name: 'server:restart', description: 'Restart the server', group: 'Server' },
+    { name: 'updates:read', description: 'See the available updates and check for them', group: 'Server' },
+    { name: 'notifications:manage', description: 'Clear system notifications for every user', group: 'Server' },
     { name: 'config:read', description: "See the server's configuration (secrets stay hidden)", group: 'Config' },
     { name: 'config:write', description: "Change the server's configuration", group: 'Config' },
     { name: 'audit:read', description: 'Read the audit log', group: 'Audit' },

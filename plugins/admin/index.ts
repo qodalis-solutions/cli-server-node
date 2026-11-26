@@ -139,3 +139,16 @@ export {
     SERVER_PLUGINS_CHANGED_EVENT,
 } from './services/server-plugin-marketplace';
 export { createServerMarketplaceController } from './controllers/server-marketplace-controller';
+export {
+    UpdateChecker,
+    UpdateCheckerDeps,
+    UpdateCheckOptions,
+    UpdateCheckScheduler,
+    UPDATE_CHECK_INTERVAL_MS,
+    UPDATE_CHECK_INITIAL_DELAY_MS,
+    UPDATE_CHECK_JOB_ID,
+    UPDATES_FILE,
+    UPDATES_LINK,
+    updateNotificationKey,
+} from './services/update-checker';
+export { createUpdatesController, canReadUpdates } from './controllers/updates-controller';

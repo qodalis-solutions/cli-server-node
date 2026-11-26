@@ -43,6 +43,12 @@ export interface CliEventSocketManagerOptions {
     cliRoutes?: boolean;
 }
 
+/**
+ * Rewrites an event's message for one socket (its caller, undefined on a server without sign-in), e.g. the caller's
+ * own unread count of `notification:changed`. Returning undefined skips that socket.
+ */
+export type CliEventPersonalizer = (message: Record<string, unknown>, auth: CliServerAuthContext | undefined) => Record<string, unknown> | undefined;
+
 /** Events delivered only to sockets authenticated as the event's user. */
 const USER_SCOPED_EVENTS = new Set(['session-kicked']);
 
@@ -93,6 +99,7 @@ export class CliEventSocketManager {
     private readonly _trustProxy: boolean | number;
     private readonly _cliRoutes: boolean;
     private readonly _sessionBound: SessionBoundSockets;
+    private readonly _personalizers = new Map<string, CliEventPersonalizer>();
 
     constructor(options: CliEventSocketManagerOptions = {}) {
         this._sessionBound = new SessionBoundSockets({
@@ -289,14 +296,33 @@ export class CliEventSocketManager {
         this._send(message, event.audience);
     }
 
+    /** Personalizes every message of `type` per socket (one per type; the server's `notification:changed`). */
+    setPersonalizer(type: string, personalizer: CliEventPersonalizer | undefined): void {
+        if (personalizer) this._personalizers.set(type, personalizer);
+        else this._personalizers.delete(type);
+    }
+
     /** Sends `message` to every open socket the audience allows (sockets of ended sessions excepted). */
     private _send(message: Record<string, unknown>, audience: CliEventAudience): void {
-        const data = JSON.stringify(message);
+        const personalize = typeof message.type === 'string' ? this._personalizers.get(message.type) : undefined;
+        const shared = personalize ? '' : JSON.stringify(message);
         for (const ws of this._clients) {
             if (ws.readyState !== WebSocket.OPEN) continue;
             // A socket whose session ended only waits for its session-kicked
             if (this._sessionBound.isEnding(ws)) continue;
-            if (!this._allows(this._clientMeta.get(ws)?.auth, audience)) continue;
+            const auth = this._clientMeta.get(ws)?.auth;
+            if (!this._allows(auth, audience)) continue;
+            let data = shared;
+            if (personalize) {
+                let own: Record<string, unknown> | undefined;
+                try {
+                    own = personalize(message, this._auth?.protectServer ? auth : undefined);
+                } catch {
+                    own = message;
+                }
+                if (!own) continue;
+                data = JSON.stringify(own);
+            }
             try {
                 ws.send(data);
             } catch {

@@ -21,6 +21,8 @@ const CORE_NAMES = [
     'dashboard:install',
     'plugins:install',
     'server:restart',
+    'updates:read',
+    'notifications:manage',
     'config:read',
     'config:write',
     'audit:read',
