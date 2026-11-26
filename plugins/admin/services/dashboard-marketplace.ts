@@ -66,8 +66,13 @@ export interface DashboardMarketplaceOptions {
     timeoutMs?: number;
     /** Server plugins: the npm registry their tarballs and integrity come from (default `https://registry.npmjs.org`). */
     npmRegistry?: string;
-    /** Server plugins: runs npm (default: the `npm` on the PATH; tests pass a fake). */
-    npm?: import('./server-plugin-marketplace').NpmRunner;
+    /**
+     * Server plugins: the dependencies a plugin may bring when the marketplace pins none for its version: package names,
+     * `@scope/*` or `prefix*` (default none: such a plugin installs only when the server already has every dependency).
+     */
+    trustedDependencies?: string[];
+    /** Server plugins: the version of a package the server resolves (default: read from the host's node_modules; tests pass one). */
+    hostPackageVersion?: (name: string) => string | undefined;
 }
 
 /** A refused or failed marketplace operation: the HTTP status and the `{ error }` text (`errors`: per-key messages of settings). */

@@ -67,7 +67,10 @@ let hookInstalled = false;
 
 type ResolveFilename = (request: string, parent: { filename?: string | null } | undefined, ...rest: unknown[]) => string;
 
-/** Makes `require` of a shared package from a file below `root` resolve to the server's copy. */
+/**
+ * Makes `require` of a shared package from a file below `root` resolve to the server's copy, and a package the plugin
+ * did not bring (the server has it: the marketplace install shares it, never installs it) resolve to the server's.
+ */
 function shareHostPackages(root: string): void {
     // Node names modules by their real path (`/private/var/...` for `/var/...` on macOS): both are kept
     for (const path of [root, existsSync(root) ? realpathSync(root) : root]) pluginRoots.add(path.endsWith(sep) ? path : path + sep);
@@ -84,7 +87,21 @@ function shareHostPackages(root: string): void {
                 // The server has no copy: the plugin's own
             }
         }
-        return original.call(this, request, parent, ...rest);
+        try {
+            return original.call(this, request, parent, ...rest);
+        } catch (err) {
+            // A dependency the server already has is never installed with the plugin: the server's copy
+            if (from && !request.startsWith('.') && !isAbsolute(request) && [...pluginRoots].some((r) => from.startsWith(r))) {
+                for (const req of [hostRequire, createRequire(join(process.cwd(), 'package.json'))]) {
+                    try {
+                        return req.resolve(request);
+                    } catch {
+                        // not there either
+                    }
+                }
+            }
+            throw err;
+        }
     };
 }
 

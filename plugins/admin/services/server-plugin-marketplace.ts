@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
-import { execFile } from 'child_process';
-import { existsSync } from 'fs';
-import { mkdir, rm, writeFile } from 'fs/promises';
-import { join, resolve, sep } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { mkdir, rename, rm, writeFile } from 'fs/promises';
+import { createRequire } from 'module';
+import { dirname, join, resolve, sep } from 'path';
 import { gunzipSync } from 'zlib';
 import type { CliInstalledPlugin, CliServerPluginRecord, CliServerPluginState, ICliServerPlugins, ICliServerRestart } from '@qodalis/cli-server-abstractions';
 import {
@@ -34,26 +34,6 @@ export const SERVER_CORE_PACKAGES: readonly string[] = ['@qodalis/cli-server-nod
 /** Published when a server plugin is installed, updated or removed (audience `admin:access`). */
 export const SERVER_PLUGINS_CHANGED_EVENT = 'server:plugins-changed';
 
-/** What npm printed and how it ended. */
-export interface NpmRunResult {
-    code: number;
-    stdout: string;
-    stderr: string;
-}
-
-/** Runs npm with these arguments (tests pass a fake: no npm, no network). */
-export type NpmRunner = (args: string[], options: { cwd: string }) => Promise<NpmRunResult>;
-
-/** Runs the `npm` on the PATH (5 minutes at most). */
-export const defaultNpmRunner: NpmRunner = (args, { cwd }) =>
-    new Promise((done) => {
-        const windows = process.platform === 'win32';
-        execFile(windows ? 'npm.cmd' : 'npm', args, { cwd, timeout: 5 * 60_000, maxBuffer: 10 * 1024 * 1024, shell: windows }, (err, stdout, stderr) => {
-            const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? ((err as { code: number }).code) : 1) : 0;
-            done({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? err?.message ?? '') });
-        });
-    });
-
 /** The server marketplace's options (the admin plugin's `setMarketplace`, shared with dashboard plugins). */
 export interface ServerPluginMarketplaceOptions {
     url?: string;
@@ -62,8 +42,81 @@ export interface ServerPluginMarketplaceOptions {
     timeoutMs?: number;
     /** The npm registry (default `https://registry.npmjs.org`). */
     npmRegistry?: string;
-    /** Runs npm (default: the `npm` on the PATH). */
-    npm?: NpmRunner;
+    /** The dependencies a plugin may bring when the marketplace pins none: names, `@scope/*` or `prefix*` (default none). */
+    trustedDependencies?: string[];
+    /** The version of a package the server resolves (default {@link defaultHostPackageVersion}). */
+    hostPackageVersion?: (name: string) => string | undefined;
+}
+
+/** A dependency the marketplace pins for a version: exactly this version, this tarball (npm's sha512). */
+export interface MarketplaceDependencyPin {
+    id: string;
+    version: string;
+    integrity: string;
+    /** The range the plugin (or another dependency) asks for; informative. */
+    range?: string;
+}
+
+/** True when `name` is allowed by a pattern: the name itself, `@scope/*`, or `prefix*`. */
+export function isTrustedDependency(name: string, patterns: readonly string[]): boolean {
+    return patterns.some((raw) => {
+        const pattern = raw.trim();
+        if (!pattern) return false;
+        if (pattern === '*') return true;
+        if (pattern.endsWith('*')) return name.startsWith(pattern.slice(0, -1));
+        return name === pattern;
+    });
+}
+
+const hostRequires = (): NodeRequire[] => {
+    const list: NodeRequire[] = [require];
+    try {
+        list.push(createRequire(join(process.cwd(), 'package.json')));
+    } catch {
+        // no working directory
+    }
+    if (require.main) list.push(require.main.require.bind(require.main) as NodeRequire);
+    return list;
+};
+
+/**
+ * The version of `name` the server resolves (from the admin plugin's own folder, the working directory, the main
+ * module), read from its package.json; undefined when the server has none.
+ */
+export function defaultHostPackageVersion(name: string): string | undefined {
+    for (const req of hostRequires()) {
+        try {
+            const pkg = req(`${name}/package.json`) as { name?: string; version?: string };
+            if (pkg?.name === name && typeof pkg.version === 'string') return pkg.version;
+        } catch {
+            // not exported or not there: from its main file up to its package.json
+        }
+        try {
+            let dir = dirname(req.resolve(name));
+            for (;;) {
+                const file = join(dir, 'package.json');
+                if (existsSync(file)) {
+                    const pkg = JSON.parse(readFileSync(file, 'utf8')) as { name?: string; version?: string };
+                    if (pkg.name === name && typeof pkg.version === 'string') return pkg.version;
+                }
+                const up = dirname(dir);
+                if (up === dir) break;
+                dir = up;
+            }
+        } catch {
+            // not resolvable from there
+        }
+    }
+    return undefined;
+}
+
+/** A dependency resolved for an install: its tarball checked against its integrity. */
+interface ResolvedDependency {
+    id: string;
+    version: string;
+    integrity: string;
+    source: 'pinned' | 'trusted';
+    bytes: Uint8Array;
 }
 
 export interface ServerPluginMarketplaceDeps {
@@ -94,6 +147,11 @@ export interface MarketplaceServerVersion {
     integrity?: string | null;
     autoInstall?: boolean;
     autoInstallReason?: string;
+    /**
+     * The version's dependencies pinned by the marketplace (the whole tree the server may lack): installed exactly,
+     * each checked against its sha512; a dependency without a pin is refused. Absent: the server's `trustedDependencies`.
+     */
+    dependencies?: MarketplaceDependencyPin[];
     [key: string]: unknown;
 }
 
@@ -326,6 +384,28 @@ export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
     }
 }
 
+/**
+ * Writes an npm tarball's files into `dir` (the `package/` folder's content; npm packs some with another top folder),
+ * each kept inside it. No scripts run.
+ */
+export async function unpackTarball(tgz: Uint8Array, dir: string): Promise<void> {
+    let files: Map<string, Buffer>;
+    try {
+        files = readTarballFiles(tgz);
+    } catch {
+        throw new DashboardMarketplaceError(502, 'invalid tarball');
+    }
+    const root = resolve(dir);
+    for (const [name, content] of files) {
+        const relative = name.includes('/') ? name.slice(name.indexOf('/') + 1) : name;
+        if (!relative) continue;
+        const path = resolve(root, relative);
+        if (!path.startsWith(root + sep)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name}`);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, content);
+    }
+}
+
 // ------------------------------------------------------------------------ the service
 
 /** The platforms of an item: `{ node: {...}, python: {...} }` from either form. */
@@ -364,17 +444,19 @@ function autoInstallOf(item: MarketplaceServerItem, p: MarketplaceServerPlatform
 
 /**
  * Server plugins from the marketplace (`kind=server`), the package of this server's platform only (`node`): browses
- * them, installs, updates and removes packages in `<dataDir>/server-plugins` with npm (the tarball downloaded first and
- * checked against the npm record's sha512, and the marketplace's when it has one), records them in `installed.json`
- * and marks a restart as required: they are loaded at the next start.
+ * them, installs, updates and removes packages in `<dataDir>/server-plugins/node_modules` (the tarball downloaded and
+ * checked against the npm record's sha512 and the marketplace's, its dependencies the marketplace's pins or what the host
+ * trusts, each checked too, the server's own packages shared; unpacked by the server, no install scripts), records them
+ * in `installed.json` and marks a restart as required: they are loaded at the next start.
  */
 export class ServerPluginMarketplace {
     readonly url: string;
     readonly install: DashboardInstallPolicy;
     readonly npmRegistry: string;
     private readonly fetchFn: MarketplaceFetch;
-    private readonly npm: NpmRunner;
     private readonly timeoutMs: number;
+    readonly trustedDependencies: readonly string[];
+    private readonly hostPackageVersion: (name: string) => string | undefined;
     private queue: Promise<unknown> = Promise.resolve();
 
     constructor(
@@ -393,8 +475,9 @@ export class ServerPluginMarketplace {
         this.install = install;
         this.npmRegistry = registry;
         this.fetchFn = fetchFn;
-        this.npm = options.npm ?? defaultNpmRunner;
         this.timeoutMs = options.timeoutMs ?? 15_000;
+        this.trustedDependencies = (options.trustedDependencies ?? []).filter((t) => typeof t === 'string' && t.trim());
+        this.hostPackageVersion = options.hostPackageVersion ?? defaultHostPackageVersion;
     }
 
     /** The running server's version (`@qodalis/cli-server-node`). */
@@ -672,7 +755,7 @@ export class ServerPluginMarketplace {
             if (!this.deps.plugins.enabled) throw new DashboardMarketplaceError(403, 'server plugins disabled');
             const current = this.recordOf(name);
             if (!current) throw new DashboardMarketplaceError(404, `not installed: ${name}`);
-            await this.runNpm(['uninstall', current.package, ...this.npmFlags()], 'npm uninstall');
+            await rm(this.packageDir(current.package), { recursive: true, force: true });
             await rm(this.tarballPath(current.package, current.version), { force: true });
             await this.deps.plugins.save(this.deps.plugins.records().filter((r) => r.name !== current.name));
             const restartRequired = this.syncRestart(current.name, `Remove ${current.name} ${current.version}`);
@@ -764,19 +847,20 @@ export class ServerPluginMarketplace {
             }
         }
 
-        // Verified: install the tarball (kept: npm's package.json refers to it)
+        // Its dependencies: the server's own copies, the marketplace's pins or what the host trusts, each checked
+        const dependencies = await this.resolveDependencies(pkg, target);
+
+        // Verified: unpacked into <dir>/node_modules/<package>, its dependencies in its own node_modules (no install
+        // scripts ever run, nothing else is fetched); the tarball is kept
         const dir = this.deps.plugins.dir;
         await mkdir(join(dir, 'tarballs'), { recursive: true });
-        if (!existsSync(join(dir, 'package.json'))) {
-            await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'qcli-server-plugins', private: true, description: 'Server plugins installed from the marketplace' }, null, 2) + '\n');
-        }
         const tarball = this.tarballPath(pkgName, target.version);
         await writeFile(tarball, bytes);
         try {
-            await this.runNpm(['install', tarball, ...this.npmFlags()], 'npm install');
+            await this.unpackAll(pkgName, bytes, dependencies);
         } catch (err) {
             await rm(tarball, { force: true });
-            throw err;
+            throw err instanceof DashboardMarketplaceError ? err : new DashboardMarketplaceError(502, `install failed: ${(err as Error).message}`);
         }
         const title = [plugin.title, plugin.name].find((t) => typeof t === 'string' && t.trim()) as string;
         return {
@@ -789,23 +873,141 @@ export class ServerPluginMarketplace {
             ...(typeof plugin.description === 'string' ? { description: plugin.description.slice(0, 500) } : {}),
             installedAt: new Date().toISOString(),
             installedBy: actor.userName,
+            ...(dependencies.length ? { dependencies: dependencies.map(({ id, version, integrity, source }) => ({ id, version, integrity, source })) } : {}),
         };
     }
 
-    private npmFlags(): string[] {
-        return ['--prefix', this.deps.plugins.dir, '--no-audit', '--no-fund', '--ignore-scripts'];
+    /**
+     * The dependencies to install with a package, in the order found: for each runtime dependency (`dependencies`,
+     * `optionalDependencies`; peers are the host's) of the package and of every dependency installed: a `@qodalis/*`
+     * package or one the server resolves at a compatible version is shared (never installed); at an incompatible
+     * version it is refused (`incompatible dependency`). Otherwise, with the marketplace's pins for this version, exactly
+     * the pinned version (in the range, its tarball matching the pin's sha512); a dependency without a pin is refused.
+     * Without pins, only a dependency the host trusts (`trustedDependencies`): the newest version in the range from the
+     * npm registry, its tarball matching the registry's sha512. An optional dependency that cannot be installed is left out.
+     */
+    private async resolveDependencies(root: Record<string, unknown>, target: MarketplaceServerVersion): Promise<ResolvedDependency[]> {
+        const rawPins = target.dependencies;
+        const pinned = Array.isArray(rawPins);
+        const pins = new Map<string, MarketplaceDependencyPin>();
+        for (const pin of pinned ? rawPins : []) {
+            if (!pin || !isPackage(pin.id) || !isVersion(pin.version) || typeof pin.integrity !== 'string' || !SHA512.test(pin.integrity)) {
+                throw new DashboardMarketplaceError(502, `invalid marketplace record: dependency ${String((pin as { id?: unknown })?.id)}`);
+            }
+            pins.set(pin.id, pin);
+        }
+        const resolved = new Map<string, ResolvedDependency>();
+        const queue: Array<{ id: string; range: string; optional: boolean }> = [];
+        const enqueue = (pkg: Record<string, unknown>) => {
+            for (const [field, optional] of [['dependencies', false], ['optionalDependencies', true]] as const) {
+                const deps = pkg[field];
+                if (!deps || typeof deps !== 'object') continue;
+                for (const [id, range] of Object.entries(deps as Record<string, unknown>)) {
+                    if (typeof range === 'string') queue.push({ id, range, optional });
+                }
+            }
+        };
+        enqueue(root);
+        while (queue.length) {
+            const { id, range, optional } = queue.shift()!;
+            try {
+                if (!isPackage(id)) throw new DashboardMarketplaceError(400, `invalid dependency: ${id}`);
+                if (/^(?:file|link|git|git\+\w+|https?|github):/.test(range) || range.includes('/')) {
+                    throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (${range} is not a registry version)`);
+                }
+                // The server's own copy is shared: never installed, never shadowed
+                const host = this.hostPackageVersion(id);
+                if (host !== undefined || id.startsWith('@qodalis/')) {
+                    if (host === undefined) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (a server package the host does not have)`);
+                    if (!satisfiesServerRange(host, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the server has ${host})`);
+                    continue;
+                }
+                const already = resolved.get(id);
+                if (already) {
+                    if (!satisfiesServerRange(already.version, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (${already.version} is installed for another dependency)`);
+                    continue;
+                }
+                const dep = pinned ? await this.pinnedDependency(id, range, pins.get(id)) : await this.trustedDependency(id, range);
+                resolved.set(id, dep);
+                const manifest = tarballPackageJson(dep.bytes);
+                if (manifest.name !== id || manifest.version !== dep.version) {
+                    throw new DashboardMarketplaceError(502, `the tarball is ${String(manifest.name)}@${String(manifest.version)}, not ${id}@${dep.version}`);
+                }
+                enqueue(manifest);
+            } catch (err) {
+                if (optional && err instanceof DashboardMarketplaceError && err.status === 400) continue;
+                throw err;
+            }
+        }
+        return [...resolved.values()];
     }
 
-    private async runNpm(args: string[], what: string): Promise<void> {
-        let result: NpmRunResult;
-        try {
-            result = await this.npm(args, { cwd: this.deps.plugins.dir });
-        } catch (err) {
-            throw new DashboardMarketplaceError(502, `${what} failed: ${(err as Error).message}`);
+    /** A pinned dependency: the pin's version in the range, its npm tarball matching the pin's sha512. */
+    private async pinnedDependency(id: string, range: string, pin: MarketplaceDependencyPin | undefined): Promise<ResolvedDependency> {
+        if (!pin) throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (not pinned by the marketplace)`);
+        if (!satisfiesServerRange(pin.version, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the marketplace pins ${pin.version})`);
+        const record = await this.npmManifest(id, pin.version);
+        const tarballUrl = record?.dist?.tarball;
+        if (typeof tarballUrl !== 'string' || !/^https?:\/\//i.test(tarballUrl)) throw new DashboardMarketplaceError(502, `not on the npm registry: ${id}@${pin.version}`);
+        if (record?.dist?.integrity !== undefined && record.dist.integrity !== pin.integrity) {
+            throw new DashboardMarketplaceError(502, `integrity mismatch: the marketplace and the npm registry disagree on ${id}@${pin.version}`);
         }
-        if (result.code !== 0) {
-            const line = result.stderr.split('\n').map((l) => l.trim()).filter(Boolean).find((l) => /err/i.test(l)) ?? result.stderr.trim().split('\n').pop() ?? '';
-            throw new DashboardMarketplaceError(502, `${what} failed (exit ${result.code})${line ? `: ${line.slice(0, 300)}` : ''}`);
+        const bytes = await this.download(tarballUrl);
+        if (sha512Integrity(bytes) !== pin.integrity) throw new DashboardMarketplaceError(502, `integrity mismatch: ${id}@${pin.version}`);
+        return { id, version: pin.version, integrity: pin.integrity, source: 'pinned', bytes };
+    }
+
+    /** A dependency the host trusts: the newest registry version in the range, its tarball matching the registry's sha512. */
+    private async trustedDependency(id: string, range: string): Promise<ResolvedDependency> {
+        if (!isTrustedDependency(id, this.trustedDependencies)) {
+            throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (the marketplace pins none and the server does not trust it)`);
+        }
+        const doc = (await this.getJson(`${this.npmRegistry}/${id.replace('/', '%2f')}`)) as
+            | { versions?: Record<string, { dist?: { tarball?: unknown; integrity?: unknown }; deprecated?: unknown }>; 'dist-tags'?: Record<string, string> }
+            | undefined;
+        const versions = doc?.versions ?? {};
+        const latest = doc?.['dist-tags']?.latest;
+        const candidates = Object.keys(versions).filter((v) => isVersion(v) && satisfiesServerRange(v, range));
+        const version =
+            latest && candidates.includes(latest)
+                ? latest
+                : candidates.filter((v) => !/-/.test(v) || /-/.test(range)).sort(compareDashboardPluginVersions).pop() ?? candidates.sort(compareDashboardPluginVersions).pop();
+        if (!version) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (no version on the npm registry)`);
+        const dist = versions[version].dist;
+        if (typeof dist?.integrity !== 'string' || !SHA512.test(dist.integrity)) throw new DashboardMarketplaceError(502, `the npm record of ${id}@${version} has no sha512 integrity`);
+        if (typeof dist.tarball !== 'string' || !/^https?:\/\//i.test(dist.tarball)) throw new DashboardMarketplaceError(502, `the npm record of ${id}@${version} has no tarball`);
+        const bytes = await this.download(dist.tarball);
+        if (sha512Integrity(bytes) !== dist.integrity) throw new DashboardMarketplaceError(502, `integrity mismatch: ${id}@${version}`);
+        return { id, version, integrity: dist.integrity, source: 'trusted', bytes };
+    }
+
+    /** `<dir>/node_modules/<package>`, inside the directory. */
+    private packageDir(pkgName: string): string {
+        if (!isPackage(pkgName)) throw new DashboardMarketplaceError(400, 'invalid package');
+        const base = resolve(this.deps.plugins.dir, 'node_modules');
+        const path = resolve(base, pkgName);
+        if (!path.startsWith(base + sep)) throw new DashboardMarketplaceError(400, 'invalid package');
+        return path;
+    }
+
+    /** Unpacks the package and its dependencies (in its own node_modules) into a staging folder, then swaps it in. */
+    private async unpackAll(pkgName: string, bytes: Uint8Array, dependencies: ResolvedDependency[]): Promise<void> {
+        const target = this.packageDir(pkgName);
+        const staging = `${target}.staging-${process.pid}-${Date.now()}`;
+        await rm(staging, { recursive: true, force: true });
+        try {
+            await unpackTarball(bytes, staging);
+            for (const dep of dependencies) {
+                const depDir = resolve(staging, 'node_modules', dep.id);
+                if (!depDir.startsWith(resolve(staging, 'node_modules') + sep)) throw new DashboardMarketplaceError(400, `invalid dependency: ${dep.id}`);
+                await unpackTarball(dep.bytes, depDir);
+            }
+            await rm(target, { recursive: true, force: true });
+            await mkdir(dirname(target), { recursive: true });
+            await rename(staging, target);
+        } catch (err) {
+            await rm(staging, { recursive: true, force: true });
+            throw err;
         }
     }
 

@@ -285,6 +285,11 @@ export interface CliServerPluginRecord {
     installedBy: string;
     /** Why the last start could not load it (cleared once it loads). */
     error?: string;
+    /**
+     * The dependencies installed with it (in its own `node_modules`), each checked against its sha512: the
+     * marketplace's pins, or packages the host trusts. Those the server already had are shared, never installed.
+     */
+    dependencies?: Array<{ id: string; version: string; integrity: string; source: 'pinned' | 'trusted' }>;
     /** `needs-configuration` when the last start found required settings without a value (cleared once it loads). */
     status?: 'needs-configuration';
     /** Those settings (`<section>.<key>`) or the reason. */
