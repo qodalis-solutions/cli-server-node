@@ -30,6 +30,11 @@ export async function createPlugin(context: CliPluginContext): Promise<CliPlugin
     const pool = context.options.pool as Pool | undefined;
     const connectionString = String(provider.value('settings', 'connectionString') ?? '').trim();
     if (!pool && !connectionString) return context.needsConfiguration(provider.missingRequired());
+    // The users plugin set up already (mounted in code, as the marketplace's own server does) never reads the stores:
+    // refused (failed, with why) instead of loaded and unused
+    if (context.builder.installedPlugins.some((p) => p.id === '@qodalis/cli-server-plugin-users')) {
+        throw new Error('the users plugin is set up in code before its stores: pass createPostgresUsersStores() to CliUsersBuilder, or add users and users-postgres with builder.addPlugin');
+    }
     const schema = String(provider.value('settings', 'schema') ?? '').trim();
     const tablePrefix = String(provider.value('settings', 'tablePrefix') ?? '').trim();
     const stores = createPostgresUsersStores(pool ?? connectionString, { ...(schema ? { schema } : {}), ...(tablePrefix ? { tablePrefix } : {}) });
@@ -41,8 +46,5 @@ export async function createPlugin(context: CliPluginContext): Promise<CliPlugin
     }
     (context.restart as { onShutdown?(name: string, fn: () => unknown): void }).onShutdown?.('users-postgres pool', () => stores.close());
     context.services.set(USERS_STORES_SERVICE, stores);
-    if (context.builder.installedPlugins.some((p) => p.id === '@qodalis/cli-server-plugin-users')) {
-        context.logger.warn('the users plugin was set up before its stores: add users-postgres with builder.addPlugin, or pass the stores to CliUsersBuilder');
-    }
     return undefined;
 }

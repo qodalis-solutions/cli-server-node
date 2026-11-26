@@ -135,6 +135,19 @@ describe('every official plugin installs from its entry point with settings', ()
         await (cli.builder.pluginServices.get<{ close(): Promise<void> }>('users.stores'))!.close();
     });
 
+    it('users-postgres with the users plugin mounted in code first: failed with why (it was "loaded" and unused), never connecting', async () => {
+        const cli = await start(dataDir(), {
+            configure: (b) =>
+                b
+                    .addInstalledPlugin({ id: '@qodalis/cli-server-plugin-users', name: 'Users' })
+                    .addPlugin(usersPostgresEntry, { connectionString: 'postgres://nobody@127.0.0.1:1/none' }),
+        });
+        const [state] = cli.serverPlugins.states();
+        expect(state).toMatchObject({ name: 'users-postgres', status: 'failed' });
+        expect(state.error).toContain('the users plugin is set up in code before its stores');
+        expect(cli.builder.pluginServices.has('users.stores')).toBe(false);
+    });
+
     it('databases: a SQLite database from its settings, shared as the databases service', async () => {
         const dir = dataDir();
         const cli = await start(dir, { configure: (b) => b.addPlugin(databasesEntry, { dialect: 'sqlite', connectionString: ':memory:', name: 'local' }) });
