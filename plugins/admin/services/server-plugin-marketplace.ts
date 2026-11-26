@@ -120,6 +120,11 @@ export function defaultHostPackageVersion(name: string): string | undefined {
 interface ResolvedDependency {
     id: string;
     version: string;
+    /**
+     * Where it is unpacked below the plugin's `node_modules`: its id when hoisted (`@aws-sdk/client-sts`), else below the
+     * dependency needing another version than the hoisted one (`@aws-sdk/client-s3/node_modules/@aws-sdk/client-sts`).
+     */
+    path: string;
     integrity: string;
     source: 'pinned' | 'trusted';
     bytes: Uint8Array;
@@ -945,7 +950,9 @@ export class ServerPluginMarketplace {
             ...(typeof plugin.description === 'string' ? { description: plugin.description.slice(0, 500) } : {}),
             installedAt: new Date().toISOString(),
             installedBy: actor.userName,
-            ...(dependencies.length ? { dependencies: dependencies.map(({ id, version, integrity, source }) => ({ id, version, integrity, source })) } : {}),
+            ...(dependencies.length
+                ? { dependencies: dependencies.map(({ id, version, integrity, source, path }) => ({ id, version, integrity, source, ...(path !== id ? { path } : {}) })) }
+                : {}),
         };
     }
 
@@ -955,33 +962,38 @@ export class ServerPluginMarketplace {
      * package or one the server resolves at a compatible version is shared (never installed); at an incompatible
      * version it is refused (`incompatible dependency`). Otherwise, with the marketplace's pins for this version, exactly
      * the pinned version (in the range, its tarball matching the pin's sha512); a dependency without a pin is refused.
+     * The marketplace pins the tree: one package can be pinned at several versions (`@aws-sdk/client-sts` ^3.700.0 for
+     * the plugin, 3.699.0 for `credential-provider-ini@3.699.0`). Laid out as npm does: hoisted to the plugin's
+     * `node_modules` unless the copy Node would find from the dependent is another version, then below the dependent.
      * Without pins, only a dependency the host trusts (`trustedDependencies`): the newest version in the range from the
      * npm registry, its tarball matching the registry's sha512. An optional dependency that cannot be installed is left out.
      */
     private async resolveDependencies(root: Record<string, unknown>, target: MarketplaceServerVersion): Promise<ResolvedDependency[]> {
         const rawPins = target.dependencies;
         const pinned = Array.isArray(rawPins);
-        const pins = new Map<string, MarketplaceDependencyPin>();
+        const pins = new Map<string, MarketplaceDependencyPin[]>();
         for (const pin of pinned ? rawPins : []) {
             if (!pin || !isPackage(pin.id) || !isVersion(pin.version) || typeof pin.integrity !== 'string' || !SHA512.test(pin.integrity)) {
                 throw new DashboardMarketplaceError(502, `invalid marketplace record: dependency ${String((pin as { id?: unknown })?.id)}`);
             }
-            pins.set(pin.id, pin);
+            pins.set(pin.id, [...(pins.get(pin.id) ?? []), pin]);
         }
+        // By path below the plugin's node_modules (`a`, `a/node_modules/b`)
         const resolved = new Map<string, ResolvedDependency>();
-        const queue: Array<{ id: string; range: string; optional: boolean }> = [];
-        const enqueue = (pkg: Record<string, unknown>) => {
+        const queue: Array<{ id: string; range: string; optional: boolean; parent: string[] }> = [];
+        const enqueue = (pkg: Record<string, unknown>, parent: string[]) => {
             for (const [field, optional] of [['dependencies', false], ['optionalDependencies', true]] as const) {
                 const deps = pkg[field];
                 if (!deps || typeof deps !== 'object') continue;
                 for (const [id, range] of Object.entries(deps as Record<string, unknown>)) {
-                    if (typeof range === 'string') queue.push({ id, range, optional });
+                    if (typeof range === 'string') queue.push({ id, range, optional, parent });
                 }
             }
         };
-        enqueue(root);
+        const pathOf = (chain: string[]) => chain.join('/node_modules/');
+        enqueue(root, []);
         while (queue.length) {
-            const { id, range, optional } = queue.shift()!;
+            const { id, range, optional, parent } = queue.shift()!;
             try {
                 if (!isPackage(id)) throw new DashboardMarketplaceError(400, `invalid dependency: ${id}`);
                 if (/^(?:file|link|git|git\+\w+|https?|github):/.test(range) || range.includes('/')) {
@@ -994,18 +1006,23 @@ export class ServerPluginMarketplace {
                     if (!satisfiesServerRange(host, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the server has ${host})`);
                     continue;
                 }
-                const already = resolved.get(id);
-                if (already) {
-                    if (!satisfiesServerRange(already.version, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (${already.version} is installed for another dependency)`);
-                    continue;
+                // The copy Node finds from the dependent: its own node_modules, then each one above it
+                let found: ResolvedDependency | undefined;
+                for (let depth = parent.length; depth >= 0 && !found; depth--) found = resolved.get(pathOf([...parent.slice(0, depth), id]));
+                if (found && satisfiesServerRange(found.version, range)) continue;
+                // Another version is found: this one goes below the dependent (hoisted when nothing is found)
+                const chain = found ? [...parent, id] : [id];
+                if (found && found.path === pathOf(chain)) {
+                    throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (${found.version} is installed for another dependency)`);
                 }
-                const dep = pinned ? await this.pinnedDependency(id, range, pins.get(id)) : await this.trustedDependency(id, range);
-                resolved.set(id, dep);
+                const path = pathOf(chain);
+                const dep = pinned ? await this.pinnedDependency(id, range, pins.get(id), path) : await this.trustedDependency(id, range, path);
+                resolved.set(path, dep);
                 const manifest = tarballPackageJson(dep.bytes);
                 if (manifest.name !== id || manifest.version !== dep.version) {
                     throw new DashboardMarketplaceError(502, `the tarball is ${String(manifest.name)}@${String(manifest.version)}, not ${id}@${dep.version}`);
                 }
-                enqueue(manifest);
+                enqueue(manifest, chain);
             } catch (err) {
                 if (optional && err instanceof DashboardMarketplaceError && err.status === 400) continue;
                 throw err;
@@ -1014,10 +1031,14 @@ export class ServerPluginMarketplace {
         return [...resolved.values()];
     }
 
-    /** A pinned dependency: the pin's version in the range, its npm tarball matching the pin's sha512. */
-    private async pinnedDependency(id: string, range: string, pin: MarketplaceDependencyPin | undefined): Promise<ResolvedDependency> {
-        if (!pin) throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (not pinned by the marketplace)`);
-        if (!satisfiesServerRange(pin.version, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the marketplace pins ${pin.version})`);
+    /** A pinned dependency: the newest of its pins in the range, its npm tarball matching the pin's sha512. */
+    private async pinnedDependency(id: string, range: string, pinsOf: MarketplaceDependencyPin[] | undefined, path: string): Promise<ResolvedDependency> {
+        if (!pinsOf?.length) throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (not pinned by the marketplace)`);
+        const pin = pinsOf
+            .filter((p) => satisfiesServerRange(p.version, range))
+            .sort((a, b) => compareDashboardPluginVersions(a.version, b.version))
+            .pop();
+        if (!pin) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the marketplace pins ${pinsOf.map((p) => p.version).join(', ')})`);
         const record = await this.npmManifest(id, pin.version);
         const tarballUrl = record?.dist?.tarball;
         if (typeof tarballUrl !== 'string' || !/^https?:\/\//i.test(tarballUrl)) throw new DashboardMarketplaceError(502, `not on the npm registry: ${id}@${pin.version}`);
@@ -1026,11 +1047,11 @@ export class ServerPluginMarketplace {
         }
         const bytes = await this.download(tarballUrl);
         if (sha512Integrity(bytes) !== pin.integrity) throw new DashboardMarketplaceError(502, `integrity mismatch: ${id}@${pin.version}`);
-        return { id, version: pin.version, integrity: pin.integrity, source: 'pinned', bytes };
+        return { id, version: pin.version, path, integrity: pin.integrity, source: 'pinned', bytes };
     }
 
     /** A dependency the host trusts: the newest registry version in the range, its tarball matching the registry's sha512. */
-    private async trustedDependency(id: string, range: string): Promise<ResolvedDependency> {
+    private async trustedDependency(id: string, range: string, path: string): Promise<ResolvedDependency> {
         if (!isTrustedDependency(id, this.trustedDependencies)) {
             throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (the marketplace pins none and the server does not trust it)`);
         }
@@ -1050,7 +1071,7 @@ export class ServerPluginMarketplace {
         if (typeof dist.tarball !== 'string' || !/^https?:\/\//i.test(dist.tarball)) throw new DashboardMarketplaceError(502, `the npm record of ${id}@${version} has no tarball`);
         const bytes = await this.download(dist.tarball);
         if (sha512Integrity(bytes) !== dist.integrity) throw new DashboardMarketplaceError(502, `integrity mismatch: ${id}@${version}`);
-        return { id, version, integrity: dist.integrity, source: 'trusted', bytes };
+        return { id, version, path, integrity: dist.integrity, source: 'trusted', bytes };
     }
 
     /** `<dir>/node_modules/<package>`, inside the directory. */
@@ -1070,7 +1091,7 @@ export class ServerPluginMarketplace {
         try {
             await unpackTarball(bytes, staging);
             for (const dep of dependencies) {
-                const depDir = resolve(staging, 'node_modules', dep.id);
+                const depDir = resolve(staging, 'node_modules', dep.path);
                 if (!depDir.startsWith(resolve(staging, 'node_modules') + sep)) throw new DashboardMarketplaceError(400, `invalid dependency: ${dep.id}`);
                 await unpackTarball(dep.bytes, depDir);
             }

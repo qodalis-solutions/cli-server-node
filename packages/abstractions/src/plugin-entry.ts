@@ -303,8 +303,9 @@ export interface CliServerPluginRecord {
     /**
      * The dependencies installed with it (in its own `node_modules`), each checked against its sha512: the
      * marketplace's pins, or packages the host trusts. Those the server already had are shared, never installed.
+     * `path`: below the plugin's `node_modules` when not hoisted (another version of it is needed there).
      */
-    dependencies?: Array<{ id: string; version: string; integrity: string; source: 'pinned' | 'trusted' }>;
+    dependencies?: Array<{ id: string; version: string; integrity: string; source: 'pinned' | 'trusted'; path?: string }>;
     /** `needs-configuration` when the last start found required settings without a value (cleared once it loads). */
     status?: 'needs-configuration';
     /** Those settings (`<section>.<key>`) or the reason. */

@@ -470,7 +470,16 @@ export class CliBuilder {
         return this;
     }
 
-    /** Returns the data explorer builder, if any providers have been registered. */
+    /**
+     * Serves the data explorer (its API, page and MCP tools) even before a source is added: the `data-explorer` plugin
+     * is loaded, so its page lists no sources instead of saying the plugin is missing.
+     */
+    enableDataExplorer(): CliBuilder {
+        if (!this._dataExplorerBuilder) this._dataExplorerBuilder = new DataExplorerBuilder();
+        return this;
+    }
+
+    /** Returns the data explorer builder, if any providers have been registered (or {@link enableDataExplorer}). */
     get dataExplorerBuilder(): DataExplorerBuilder | undefined {
         return this._dataExplorerBuilder;
     }
