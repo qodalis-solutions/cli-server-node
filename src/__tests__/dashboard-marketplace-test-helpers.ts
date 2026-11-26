@@ -190,11 +190,19 @@ export function tempDir(): string {
 
 /** A server with the admin plugin (password sign-in) and the fake marketplace. */
 export async function start(
-    options: { net?: FakeNet; dir?: string; install?: DashboardInstallPolicy; configure?: (cli: CliServerResult) => void; config?: CliServerConfigOptions } = {},
+    options: {
+        net?: FakeNet;
+        dir?: string;
+        install?: DashboardInstallPolicy;
+        configure?: (cli: CliServerResult) => void;
+        config?: CliServerConfigOptions;
+        /** Default true: the command tests run the installs without sign-in (the refusal has its own tests). */
+        allowAnonymousAdmin?: boolean;
+    } = {},
 ): Promise<Host> {
     const net = options.net ?? new FakeNet();
     const dir = options.dir ?? tempDir();
-    const cli = createCliServer(options.config ? { config: options.config } : {});
+    const cli = createCliServer({ allowAnonymousAdmin: options.allowAnonymousAdmin ?? true, ...(options.config ? { config: options.config } : {}) });
     const audit: AuditEntry[] = [];
     cli.builder.setConfigAuditStore({ log: async (e) => void audit.push(e), getEntries: async () => audit, clear: async () => void audit.splice(0) });
     const events: CliEvent[] = [];

@@ -54,7 +54,7 @@ function connect(port: number, path: string): Promise<Socket> {
 
 /** A real HTTP server with the events socket attached and the admin plugin mounted, like the demo. */
 async function start(protectWithUsers: boolean): Promise<{ cli: CliServerResult; port: number; users?: UsersPluginResult; adminToken: string }> {
-    const cli = createCliServer();
+    const cli = createCliServer(protectWithUsers ? {} : { allowAnonymousAdmin: true });
     const users = protectWithUsers ? new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).setIpRateLimit(10_000).setMinPasswordLength(4).build() : undefined;
     if (users) await users.ready;
     const builder = new CliAdminBuilder().setCredentials('admin', 'adminpass').setJwtSecret('secret');

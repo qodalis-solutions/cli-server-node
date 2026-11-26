@@ -143,6 +143,13 @@ export function createCliController(
                 return;
             }
 
+            const refusal = executor.accessRefusal?.(command);
+            if (refusal) {
+                res.write(`event: error\ndata: ${JSON.stringify({ message: refusal })}\n\n`);
+                res.end();
+                return;
+            }
+
             let exitCode: number;
 
             if (isStreamCapable(processor)) {

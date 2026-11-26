@@ -66,7 +66,8 @@ export interface CliServerRestartOptions {
     handler?: (context: CliServerRestartContext) => void | Promise<void>;
     /**
      * Allow restarting on a server without sign-in (no auth provider protecting it). Default false:
-     * the API and the command refuse with 403, since anyone could restart it.
+     * the API and the command refuse with 403, since anyone could restart it. `allowAnonymousAdmin`
+     * of `createCliServer` allows it too.
      */
     allowAnonymous?: boolean;
     /** How long the graceful shutdown waits for in-flight requests (default 10 s). */
@@ -81,6 +82,8 @@ export interface CliServerRestartServices {
     audit?: () => ((entry: AuditEntry) => Promise<void>) | undefined;
     /** True when an auth provider protects the server (callers are signed in). */
     isProtected?: () => boolean;
+    /** True when the host lets anonymous callers administer an unprotected server (`allowAnonymousAdmin`). */
+    allowAnonymousAdmin?: () => boolean;
     /** Closes the WebSockets (events, logs, shell) with a code and reason. */
     closeSockets?: (code: number, reason: string) => Promise<void>;
 }
@@ -248,8 +251,11 @@ export class CliServerRestart implements ICliServerRestart {
         }
         const { mode, supervisor } = this.resolveMode();
         if (mode === null) throw new CliServerRestartError(409, RESTART_NOT_SUPPORTED);
-        if (!request.actor && !this.services.isProtected?.() && !this.options.allowAnonymous) {
-            throw new CliServerRestartError(403, 'restart needs sign-in: protect the server (users plugin) or set restart.allowAnonymous');
+        if (!request.actor && !this.services.isProtected?.() && !this.options.allowAnonymous && !this.services.allowAnonymousAdmin?.()) {
+            throw new CliServerRestartError(
+                403,
+                'sign-in required: protect the server (users plugin) or set allowAnonymousAdmin: true (or restart.allowAnonymous)',
+            );
         }
         if (this._restarting) throw new CliServerRestartError(409, 'restart already in progress');
         this._restarting = true;

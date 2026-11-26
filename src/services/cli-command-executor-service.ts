@@ -4,6 +4,7 @@ import { ICliCommandRegistry } from './cli-command-registry';
 import { createLogger } from '../utils/logger';
 import { CliOutputLimits, DEFAULT_MAX_TABLE_ROWS } from './cli-output-limits';
 import { CliCommandUsageStats } from './cli-command-usage-stats';
+import { processorPermissions } from '../auth/cli-server-auth-gate';
 
 const logger = createLogger('CommandExecutor');
 
@@ -40,6 +41,13 @@ export interface ICliCommandExecutorService {
      * every execution; `/execute/stream` records its own.
      */
     readonly usage?: CliCommandUsageStats;
+
+    /**
+     * Why the command may not run for the current caller (e.g. an anonymous caller asking for an
+     * install on a server without sign-in), or undefined. `executeAsync` checks it; `/execute/stream`
+     * calls it before running the processor itself.
+     */
+    accessRefusal?(command: CliProcessCommand): string | undefined;
 }
 
 /** Options for {@link CliCommandExecutorService}. */
@@ -50,6 +58,12 @@ export interface CliCommandExecutorOptions {
      * and marked `truncated`, so a terminal never receives thousands of rows at once.
      */
     maxTableRows?: number;
+    /**
+     * Called with the permissions along the command's processor chain; returns why the current caller
+     * may not run it, or undefined. `createCliServer` refuses anonymous callers install and config
+     * permissions with it on a server without sign-in (see `allowAnonymousAdmin`).
+     */
+    refuse?: (permissions: string[]) => string | undefined;
 }
 
 /** Default executor that resolves processors from the registry and delegates command handling. */
@@ -62,11 +76,19 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
     /** Usage counters of the commands run through this executor, since it was created. */
     readonly usage = new CliCommandUsageStats();
 
+    private readonly _refuse?: (permissions: string[]) => string | undefined;
+
     constructor(
         private readonly _registry: ICliCommandRegistry,
         options: CliCommandExecutorOptions = {},
     ) {
         this.maxTableRows = options.maxTableRows ?? DEFAULT_MAX_TABLE_ROWS;
+        this._refuse = options.refuse;
+    }
+
+    accessRefusal(command: CliProcessCommand): string | undefined {
+        if (!this._refuse) return undefined;
+        return this._refuse(processorPermissions(this._registry, command?.command, command?.chainCommands));
     }
 
     addFilter(filter: ICliProcessorFilter): void {
@@ -122,6 +144,12 @@ export class CliCommandExecutorService implements ICliCommandExecutorService {
                     },
                 ],
             };
+        }
+
+        const refusal = this.accessRefusal(command);
+        if (refusal) {
+            logger.warn('Command refused: %s (%s)', command.command, refusal);
+            return { exitCode: 1, outputs: [{ type: 'text', value: refusal, style: 'error' }] };
         }
 
         try {

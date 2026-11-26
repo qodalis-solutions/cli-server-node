@@ -19,6 +19,8 @@ import {
     trustedProxyHops,
 } from './auth/cli-server-auth';
 import { DataExplorerCaller } from '@qodalis/cli-server-abstractions';
+import { anonymousAdminRefusal } from './auth/anonymous-admin';
+import { getCliCaller } from './auth/cli-caller';
 import { createServerAuthGate, isUnderPrefix, normalizePath, type CliRoutePermission } from './auth/cli-server-auth-gate';
 import { CliShellOptions } from './services/cli-shell-options';
 import { ShellCapabilities } from './controllers/cli-version-controller';
@@ -217,6 +219,16 @@ export interface CliServerOptions {
      * command again, then exit: bare runs and development) or `handler` (the host's function).
      */
     restart?: CliServerRestartOptions;
+    /**
+     * Let callers without sign-in install code and change the configuration on a server no auth provider
+     * protects (default false). Off, an anonymous caller (`/execute`, `/execute/stream`, the MCP endpoint)
+     * is refused `plugins:install` (`admin plugins install|update|remove`), `dashboard:install` (`admin
+     * dashboard install|update|remove`), `config:write` (`config set|reset`, the `config_set` MCP tool) and
+     * `server:restart`, with "sign-in required: protect the server (users plugin) or set allowAnonymousAdmin: true".
+     * Reads (`config get`, `admin plugins search`) stay open, secrets stay masked. Only for a server nobody
+     * else can reach (local development); a startup WARNING says it is on.
+     */
+    allowAnonymousAdmin?: boolean;
     /**
      * The server's data directory (default `./qcli-data`, from the working directory): runtime-installed server
      * plugins (`server-plugins/`) and their own data (`plugin-data/<id>/`).
@@ -431,7 +443,16 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         configure(builder);
     }
 
-    const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows });
+    const allowAnonymousAdmin = options.allowAnonymousAdmin === true;
+    if (allowAnonymousAdmin) {
+        logger.warn(
+            'WARNING: allowAnonymousAdmin is on: on a server without sign-in, anyone who can reach it can install plugins (code that runs in the server), change its configuration and restart it.',
+        );
+    }
+    /** Why the current caller may not use these permissions: anonymous on an unprotected server, without the opt-in. */
+    const anonymousRefusal = (permissions: string[]): string | undefined =>
+        allowAnonymousAdmin || serverAuth?.protectServer || getCliCaller() ? undefined : anonymousAdminRefusal(permissions);
+    const executor = new CliCommandExecutorService(registry, { maxTableRows: options.maxTableRows, refuse: anonymousRefusal });
 
     const eventSocketManager = new CliEventSocketManager({ enableShell, shell, allowedOrigins, trustProxy, cliRoutes });
     const eventBus = new CliEventBus();
@@ -447,6 +468,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         eventBus: () => eventBus,
         audit: () => builder.auditSink,
         isProtected: () => !!serverAuth?.protectServer,
+        allowAnonymousAdmin: () => allowAnonymousAdmin,
         closeSockets: async (code, reason) => {
             await eventSocketManager.broadcastDisconnect(code, reason);
             await logSocketManager.broadcastDisconnect(code, reason);
@@ -653,7 +675,7 @@ export function createCliServer(options: CliServerOptions = {}): CliServerResult
         builder.addProcessor(new CliConfigCommandProcessor(builder.config));
     }
     if (mcpOptions) {
-        mcpFeatureProviders.push(new ConfigMcpToolProvider(builder.config, () => serverAuth));
+        mcpFeatureProviders.push(new ConfigMcpToolProvider(builder.config, () => serverAuth, anonymousRefusal));
         mcpFeatures.add('config');
     }
 

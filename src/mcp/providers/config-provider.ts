@@ -20,11 +20,20 @@ export class ConfigMcpToolProvider implements McpToolProvider {
     constructor(
         private readonly service: ICliConfigService,
         private readonly getAuth: () => ICliServerAuth | undefined,
+        /**
+         * Why the current caller may not use these permissions (an anonymous caller on a server without
+         * sign-in is refused `config:write` unless `allowAnonymousAdmin`), or undefined.
+         */
+        private readonly refuse?: (permissions: string[]) => string | undefined,
     ) {}
 
     private context(auth: CliServerAuthContext | undefined): CliConfigContext {
         const server = this.getAuth();
-        if (!server?.protectServer || !auth) return cliConfigContext(undefined, 'mcp');
+        if (!server?.protectServer || !auth) {
+            // No caller: everything but what anonymous callers are refused (writes show as not writable)
+            const anonymous = cliConfigContext(undefined, 'mcp');
+            return { ...anonymous, hasPermission: (p) => !this.refuse?.([p]) };
+        }
         return {
             caller: { userId: auth.userId, userName: auth.userName, permissions: auth.permissions },
             hasPermission: (p) => server.hasPermission(auth, p),
@@ -111,6 +120,8 @@ export class ConfigMcpToolProvider implements McpToolProvider {
                 annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
                 call: (args, ctx) =>
                     this.run(async () => {
+                        const refusal = this.getAuth()?.protectServer && ctx.auth ? undefined : this.refuse?.([CliConfigPermissions.Write]);
+                        if (refusal) return mcpError(refusal);
                         const result = await this.service.update(
                             String(args.provider),
                             String(args.section),

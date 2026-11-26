@@ -52,7 +52,7 @@ function dataDir(): string {
 }
 
 async function start(dir: string, options: CliServerOptions = {}): Promise<CliServerResult> {
-    const cli = createCliServer({ dataDir: dir, ...options });
+    const cli = createCliServer({ dataDir: dir, allowAnonymousAdmin: true, ...options });
     servers.push(cli);
     await cli.serverPlugins.ready();
     return cli;

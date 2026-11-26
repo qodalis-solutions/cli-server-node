@@ -314,11 +314,13 @@ export async function startServer(
         users?: Record<string, string[]>;
         configure?: (cli: CliServerResult) => void;
         serverPlugins?: false;
+        /** Default true: the command tests run the installs without sign-in (the refusal has its own tests). */
+        allowAnonymousAdmin?: boolean;
     } = {},
 ): Promise<ServerHost> {
     const net = options.net ?? new FakeServerNet();
     const dataDir = options.dataDir ?? serverTempDir();
-    const cli = createCliServer({ dataDir, ...(options.serverPlugins === false ? { serverPlugins: false as const } : {}) });
+    const cli = createCliServer({ dataDir, allowAnonymousAdmin: options.allowAnonymousAdmin ?? true, ...(options.serverPlugins === false ? { serverPlugins: false as const } : {}) });
     const audit: AuditEntry[] = [];
     cli.builder.setConfigAuditStore({ log: async (e) => void audit.push(e), getEntries: async () => audit, clear: async () => void audit.splice(0) });
     const events: CliEvent[] = [];

@@ -96,6 +96,8 @@ export {
     hostTokenRefusal,
     isCliRoute,
     isUnderPrefix,
+    ANONYMOUS_ADMIN_PERMISSIONS,
+    anonymousAdminRefusal,
 } from './auth';
 
 // MCP endpoint

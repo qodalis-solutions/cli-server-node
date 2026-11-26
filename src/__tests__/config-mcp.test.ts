@@ -40,7 +40,7 @@ const call = (cli: CliServerResult, name: string, args: Record<string, unknown> 
 describe('config MCP tools (open server)', () => {
     let cli: CliServerResult;
     beforeAll(() => {
-        cli = createCliServer({ mcp: true, configure: (b) => b.addConfigProvider(app()) });
+        cli = createCliServer({ mcp: true, allowAnonymousAdmin: true, configure: (b) => b.addConfigProvider(app()) });
     });
 
     it('lists the three tools with permissions-free schemas and read-only hints', async () => {

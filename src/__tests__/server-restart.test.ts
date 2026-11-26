@@ -254,10 +254,18 @@ describe('restart modes', () => {
         const cli = start({ mode: 'exit', runtime });
         const res = await request(cli.app).post(URL_);
         expect(res.status).toBe(403);
-        expect(res.body.error).toMatch(/^restart needs sign-in/);
+        expect(res.body.error).toMatch(/^sign-in required: protect the server \(users plugin\) or set allowAnonymousAdmin/);
         // the status stays readable
         expect((await request(cli.app).get(URL_)).body.supported).toBe(true);
         expect(calls).toEqual([]);
+    });
+
+    it('allowAnonymousAdmin allows it too', async () => {
+        const { runtime } = fakeRuntime();
+        const cli = createCliServer({ restart: { mode: 'exit', runtime }, allowAnonymousAdmin: true });
+        hosts.push({ cli, dispose: () => {} });
+        expect((await request(cli.app).post(URL_)).status).toBe(202);
+        await cli.restart.completion;
     });
 });
 

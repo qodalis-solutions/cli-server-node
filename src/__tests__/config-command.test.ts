@@ -68,7 +68,7 @@ async function run(cli: CliServerResult, line: string, token?: string): Promise<
 describe('config command (open server)', () => {
     let cli: CliServerResult;
     beforeAll(() => {
-        cli = createCliServer({ configure: (b) => b.addConfigProvider(app()) });
+        cli = createCliServer({ allowAnonymousAdmin: true, configure: (b) => b.addConfigProvider(app()) });
     });
 
     it('is registered with its sub-commands and permissions', () => {
@@ -221,7 +221,7 @@ describe('config command (protected server)', () => {
     const tokens: Record<string, string> = {};
 
     beforeAll(async () => {
-        cli = createCliServer({ configure: (b) => b.addConfigProvider(app()) });
+        cli = createCliServer({ allowAnonymousAdmin: true, configure: (b) => b.addConfigProvider(app()) });
         users = new CliUsersBuilder().setDefaultAdminPassword(ROOT_PASS).setIpRateLimit(10_000).setMinPasswordLength(4).build();
         await users.ready;
         cli.mountPlugin(users);

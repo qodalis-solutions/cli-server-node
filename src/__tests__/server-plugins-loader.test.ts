@@ -72,7 +72,7 @@ function list(dir: string, records: CliServerPluginRecord[]): void {
 const listed = (dir: string): CliServerPluginRecord[] => JSON.parse(readFileSync(join(dir, 'server-plugins', 'installed.json'), 'utf8')).plugins;
 
 async function start(dir: string, options: CliServerOptions = {}): Promise<CliServerResult> {
-    const cli = createCliServer({ dataDir: dir, ...options });
+    const cli = createCliServer({ dataDir: dir, allowAnonymousAdmin: true, ...options });
     servers.push(cli);
     await cli.serverPlugins.ready();
     return cli;

@@ -30,7 +30,7 @@ interface Options {
 
 /** A server with the portal (stand-in site), optionally the docs (3 pages) and public-api sections. */
 function start({ sections = true, siteDir = SITE, configure }: Options = {}): { cli: CliServerResult; portal: PortalPluginResult } {
-    const cli = createCliServer();
+    const cli = createCliServer({ allowAnonymousAdmin: true });
     disposables.push(() => {
         cli.eventSocketManager.dispose();
         cli.logSocketManager.dispose();
@@ -85,7 +85,7 @@ describe('portal config provider', () => {
     });
 
     it('branding: unset builder values default to Documentation, no logo, system, no links', async () => {
-        const cli = createCliServer();
+        const cli = createCliServer({ allowAnonymousAdmin: true });
         disposables.push(() => {
             cli.eventSocketManager.dispose();
             cli.logSocketManager.dispose();
@@ -138,7 +138,7 @@ describe('portal config provider', () => {
     it('values already in the config store override the defaults from startup', async () => {
         const store = new InMemoryConfigStore();
         await store.write('portal', 'branding', { name: 'Stored Name', themeMode: 'light', footerLinks: [{ label: 'Blog', url: '/blog' }] });
-        const cli = createCliServer({ configure: (b) => b.setConfigStore(store) });
+        const cli = createCliServer({ allowAnonymousAdmin: true, configure: (b) => b.setConfigStore(store) });
         disposables.push(() => {
             cli.eventSocketManager.dispose();
             cli.logSocketManager.dispose();
@@ -241,7 +241,7 @@ describe('portal command', () => {
     });
 
     it('without sections or footer links', async () => {
-        const cli = createCliServer();
+        const cli = createCliServer({ allowAnonymousAdmin: true });
         disposables.push(() => {
             cli.eventSocketManager.dispose();
             cli.logSocketManager.dispose();

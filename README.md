@@ -613,6 +613,19 @@ When the users plugin is mounted (`mountPlugin(usersPlugin)`, or passed as `auth
 
 WebSockets authenticate with a single-use ticket from `POST /api/v1/qcli/sessions/ws-ticket` (`?ticket=<ticket>`). Sockets bound to a session close with 4401 `session ended` on logout, expiry, kick, or when the user is disabled or deleted. Details: [users plugin README](plugins/users/README.md).
 
+### Installs and config changes need sign-in
+
+On a server no auth provider protects (no users plugin, or `protectServer` off), commands run without a caller. Such an anonymous caller is refused what installs code or changes the server's configuration, through `POST /execute`, `/execute/stream` and the MCP endpoint alike:
+
+| Permission | Commands and tools |
+|---|---|
+| `plugins:install` | `admin plugins install|update|remove` |
+| `dashboard:install` | `admin dashboard install|update|remove` (with `--config`) |
+| `config:write` | `config set|reset`, the `config_set` MCP tool |
+| `server:restart` | `admin restart`, `POST /api/v1/qcli/server/restart` |
+
+The answer is `sign-in required: protect the server (users plugin) or set allowAnonymousAdmin: true (<permissions>)`. Reads stay open (`config list|get`, `config_list`, `config_get`, `admin plugins search|installed`, `admin dashboard search|info`), secrets stay masked. A server nobody else can reach (local development) may opt in with `createCliServer({ allowAnonymousAdmin: true })`; it logs a startup WARNING. `restart.allowAnonymous` still allows restarting alone. The admin plugin's own routes are not affected: its dashboard signs in.
+
 ### Remote shell
 
 The PTY shell gives OS-level access, so it is off unless `enableShell: true`, and then exactly one access mode applies:
@@ -1157,7 +1170,7 @@ server.restart.onShutdown('pool', () => pool.end()); // your own clean-up, in re
   keep working), detached, stdin ignored, stdout and stderr inherited: under `nohup ... >> server.log` the new process
   appends to the same file. This process then exits 0.
 - **Sign-in**: on a server without an auth provider protecting it, restarting is refused (403) unless
-  `restart.allowAnonymous` is set.
+  `restart.allowAnonymous` or `allowAnonymousAdmin` is set.
 
 | Route | Permission | Does |
 |---|---|---|
