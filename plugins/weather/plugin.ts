@@ -3,7 +3,8 @@
  * default place as a setting (`config set weather.settings.defaultLocation Paris`), read on every command.
  */
 import type { CliConfigSettingDefinition, CliPluginContext, CliPluginEntryInfo, CliPluginEntryResult } from '@qodalis/cli-server-abstractions';
-import { DEFAULT_WEATHER_LOCATION, WeatherModule } from './index';
+import { DEFAULT_WEATHER_LOCATION } from './defaults';
+import { WeatherModule } from './index';
 
 /** The plugin, for `builder.addPlugin(entry, options)` (the marketplace's record says it for an installed copy). */
 export const plugin: CliPluginEntryInfo = { id: 'weather', package: '@qodalis/cli-server-plugin-weather', title: 'Weather', icon: '🌤️' };

@@ -9,9 +9,9 @@ import {
 } from '@qodalis/cli-server-abstractions';
 import { CLI_INSTALLED_PLUGIN } from '@qodalis/cli-server-abstractions';
 import { weatherInstalledPlugin } from './package-info';
+import { DEFAULT_WEATHER_LOCATION } from './defaults';
 
-/** The place used when a command names none. */
-export const DEFAULT_WEATHER_LOCATION = 'London';
+export { DEFAULT_WEATHER_LOCATION };
 
 /** Where to read the place when a command names none (the module's `defaultLocation`). */
 type DefaultLocation = () => string;
