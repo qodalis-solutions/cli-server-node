@@ -234,6 +234,7 @@ describe('server marketplace: browsing', () => {
             }
             const twice = await request(h.cli.app).get(`${SBASE}/plugins?platform=all&platform=node`).set(bearer(h.token));
             expect(twice.status).toBe(400);
+            expect(twice.body).toEqual({ error: 'invalid platform: all,node (this, all, node, python, dotnet)' });
             expect(h.net.calls).toEqual([]);
         });
     });

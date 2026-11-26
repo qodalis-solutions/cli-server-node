@@ -45,7 +45,9 @@ export function createServerMarketplaceController(marketplace: ServerPluginMarke
             const query = typeof req.query.query === 'string' ? req.query.query : undefined;
             const page = intParam(req.query.page, 'page', 1_000_000);
             const pageSize = intParam(req.query.pageSize, 'pageSize', 100);
-            const platform = req.query.platform === undefined ? undefined : typeof req.query.platform === 'string' ? req.query.platform : '?';
+            // `platform=all&platform=node` is `all,node`: invalid
+            const raw = req.query.platform;
+            const platform = raw === undefined ? undefined : Array.isArray(raw) ? raw.map(String).join(',') : String(raw);
             res.json(await marketplace.search({ query, page, pageSize, platform }));
         } catch (err) {
             sendError(res, err);
