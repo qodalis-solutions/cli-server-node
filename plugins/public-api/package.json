@@ -1,6 +1,6 @@
 {
     "name": "@qodalis/cli-server-plugin-public-api",
-    "version": "1.0.0-beta.33",
+    "version": "1.0.0-beta.34",
     "description": "Public API plugin for Qodalis CLI server — host-token guard with per-account quotas and usage, the host's public OpenAPI document and Swagger UI",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
