@@ -519,3 +519,19 @@ describe('server marketplace: dependencies', () => {
         expect(isTrustedDependency('anything', [])).toBe(false);
     });
 });
+
+describe('server marketplace: the kind of every lookup', () => {
+    it('sends kind=server on the list and the details, installs and updates (the marketplace answers 404 for another kind)', async () => {
+        const net = seeded();
+        const h = await startServer({ net });
+        const send = (r: request.Test) => r.set(bearer(h.token));
+        expect((await send(request(h.cli.app).get(`${SBASE}/plugins`))).status).toBe(200);
+        expect((await send(request(h.cli.app).get(`${SBASE}/plugins/weather`))).status).toBe(200);
+        expect((await send(request(h.cli.app).post(`${SBASE}/installed`).send({ name: 'weather', version: '1.0.0' }))).status).toBe(202);
+        expect((await send(request(h.cli.app).put(`${SBASE}/installed/weather`).send({}))).status).toBe(202);
+
+        const lookups = net.calls.filter((c) => c.startsWith(`${MARKET}/api/v1/qcli/marketplace/plugins`));
+        expect(lookups.length).toBeGreaterThan(3);
+        for (const url of lookups) expect(new URL(url).searchParams.get('kind'), url).toBe('server');
+    });
+});

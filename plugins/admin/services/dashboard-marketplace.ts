@@ -26,6 +26,9 @@ export type DashboardInstallPolicy = 'verified' | 'listed' | 'off';
 /** The dashboard extension API this server's dashboard implements; versions needing a newer one are refused. */
 export const DASHBOARD_API_VERSION = 1;
 export const DEFAULT_MARKETPLACE_URL = 'https://plugins.qodalis.com';
+
+/** Sent on every request that looks up one plugin: the marketplace answers 404 for a plugin of another kind. */
+const KIND_QUERY = 'kind=dashboard';
 /** Where installed dashboard plugins are kept, relative to the working directory. */
 export const DEFAULT_DASHBOARD_PLUGINS_DIR = join('qcli-data', 'dashboard-plugins');
 /** CDNs the bundles are downloaded from, in order (jsDelivr, then unpkg). */
@@ -527,7 +530,7 @@ export class DashboardMarketplace {
     /** A plugin's details with its versions. Throws 400 for an invalid name, 404 when the marketplace does not list it. */
     private async fetchPlugin(name: string): Promise<MarketplaceDashboardItem> {
         if (!isValidDashboardPluginName(name)) throw new DashboardMarketplaceError(400, 'invalid package name');
-        const plugin = (await this.getJson(`/plugins/${encodeURIComponent(name)}`)) as MarketplaceDashboardItem | undefined;
+        const plugin = (await this.getJson(`/plugins/${encodeURIComponent(name)}?${KIND_QUERY}`)) as MarketplaceDashboardItem | undefined;
         if (!plugin || typeof plugin !== 'object') throw new DashboardMarketplaceError(404, `plugin not found: ${name}`);
         if (plugin.name !== name) throw new DashboardMarketplaceError(502, 'marketplace unreachable');
         return { ...plugin, versions: Array.isArray(plugin.versions) ? plugin.versions : [] };
@@ -760,7 +763,7 @@ export class DashboardMarketplace {
         }
         if (!Array.isArray(target.files) || target.config === undefined) {
             // A details view without files (an older marketplace) or settings: the version record has them
-            const record = (await this.getJson(`/plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(target.version)}`)) as MarketplaceDashboardVersion | undefined;
+            const record = (await this.getJson(`/plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(target.version)}?${KIND_QUERY}`)) as MarketplaceDashboardVersion | undefined;
             if (!record && !Array.isArray(target.files)) throw new DashboardMarketplaceError(404, `version not found: ${name}@${target.version}`);
             target = { ...target, files: Array.isArray(target.files) ? target.files : record!.files, config: target.config ?? record?.config ?? null };
         }

@@ -208,7 +208,7 @@ describe('dashboard plugin settings: install', () => {
         expect((await request(h.cli.app).get(`${BASE}/installed/${TICKETS}/config`).set(auth(h.token))).body).toEqual({ values: {}, version: null });
         expect(JSON.parse(readFileSync(join(h.dir, 'installed.json'), 'utf8')).plugins[0].config).toBeUndefined();
         // the settings were looked up in the version record: the details had none
-        expect(net.calls).toContain(`${MARKET}/api/v1/qcli/marketplace/plugins/${encodeURIComponent(TICKETS)}/versions/1.0.0`);
+        expect(net.calls).toContain(`${MARKET}/api/v1/qcli/marketplace/plugins/${encodeURIComponent(TICKETS)}/versions/1.0.0?kind=dashboard`);
     });
 
     it('GET /installed/{name}/config: 404 for a plugin not installed, 400 for an invalid name', async () => {

@@ -259,7 +259,8 @@ export class FakeServerNet {
         const m = /^\/plugins\/([^/]+)(?:\/versions\/([^/]+))?$/.exec(path);
         if (m) {
             const plugin = this.plugins.get(decodeURIComponent(m[1]));
-            if (!plugin) return response(404, { error: 'plugin not found' });
+            // As the marketplace: a plugin of another kind (server when none is asked for) is not found
+            if (!plugin || (plugin.kind ?? 'server') !== (u.searchParams.get('kind') ?? 'server')) return response(404, { error: 'plugin not found' });
             if (m[2]) {
                 const [p, v] = decodeURIComponent(m[2]).split(':');
                 const found = (plugin.versions as Array<Record<string, unknown>>).find((x) => x.platform === p && x.version === v);

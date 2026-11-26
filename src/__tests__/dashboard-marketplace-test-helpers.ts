@@ -54,7 +54,7 @@ export class FakeNet {
     filesOnlyInVersionRecord = false;
     /** Answer details without the versions' `config`: the version record has it. */
     configOnlyInVersionRecord = false;
-    /** Ignore the `kind` filter (the marketplace before dashboard plugins): every plugin listed and counted. */
+    /** Ignore the `kind` filter (the marketplace before dashboard plugins): every plugin listed, counted and found. */
     ignoresKind = false;
 
     readonly fetch: MarketplaceFetch = async (url) => {
@@ -128,7 +128,8 @@ export class FakeNet {
         const m = /^\/plugins\/(.+?)(?:\/versions\/([^/]+))?$/.exec(path);
         if (m) {
             const plugin = this.plugins.get(decodeURIComponent(m[1]));
-            if (!plugin) return response(404, { error: 'plugin not found' });
+            // As the marketplace: a plugin of another kind (server when none is asked for) is not found
+            if (!plugin || (!this.ignoresKind && plugin.kind !== (u.searchParams.get('kind') ?? 'server'))) return response(404, { error: 'plugin not found' });
             const versions = plugin.versions as Array<Record<string, unknown>>;
             if (m[2]) {
                 const v = versions.find((x) => x.version === decodeURIComponent(m[2]));

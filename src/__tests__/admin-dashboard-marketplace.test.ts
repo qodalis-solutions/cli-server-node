@@ -313,7 +313,11 @@ describe('dashboard marketplace: install, update, remove', () => {
         const h = await start({ net });
         const post = (name: string) => request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name });
         expect((await post('@acme/cli-dashboard-next')).body).toEqual({ error: 'needs dashboard API 2' });
+        // The marketplace does not find a plugin of another kind; an older one that does is refused here
+        expect((await post('@acme/web-thing')).body).toEqual({ error: 'plugin not found: @acme/web-thing' });
+        net.ignoresKind = true;
         expect((await post('@acme/web-thing')).body).toEqual({ error: 'not a dashboard plugin: @acme/web-thing' });
+        net.ignoresKind = false;
         const bad = await post('@acme/cli-dashboard-bad');
         expect(bad.status).toBe(502);
         expect(bad.body).toEqual({ error: 'invalid marketplace record: files' });
@@ -385,7 +389,7 @@ describe('dashboard marketplace: install, update, remove', () => {
         net.filesOnlyInVersionRecord = true;
         const h = await start({ net });
         expect((await request(h.cli.app).post(`${BASE}/installed`).set(auth(h.token)).send({ name: TICKETS })).status).toBe(201);
-        expect(net.calls).toContain(`${API}/plugins/${encodeURIComponent(TICKETS)}/versions/1.0.0`);
+        expect(net.calls).toContain(`${API}/plugins/${encodeURIComponent(TICKETS)}/versions/1.0.0?kind=dashboard`);
         expect(readdirSync(join(h.dir, '@acme+cli-dashboard-tickets', '1.0.0'))).toEqual(['extension.js']);
     });
 
@@ -672,5 +676,24 @@ describe('dashboard marketplace: admin dashboard command', () => {
         const h = await start({ net });
         expect((await runCommand(h.cli, 'admin dashboard search')).text).toBe('Error: marketplace unreachable');
         expect((await runCommand(h.cli, `admin dashboard install ${TICKETS}`)).text).toBe('Error: marketplace unreachable');
+    });
+});
+
+describe('dashboard marketplace: the kind of every lookup', () => {
+    it('sends kind=dashboard on the list, the details and the version records (the marketplace answers 404 for another kind)', async () => {
+        const net = new FakeNet();
+        net.publish(TICKETS, { versions: [{ version: '1.0.0' }, { version: '1.1.0' }] });
+        net.filesOnlyInVersionRecord = true;
+        const h = await start({ net });
+        const send = (r: request.Test) => r.set(auth(h.token));
+        expect((await send(request(h.cli.app).get(`${BASE}/plugins`))).status).toBe(200);
+        expect((await send(request(h.cli.app).get(`${BASE}/plugins/${encodeURIComponent(TICKETS)}`))).status).toBe(200);
+        expect((await send(request(h.cli.app).post(`${BASE}/installed`).send({ name: TICKETS, version: '1.0.0' }))).status).toBe(201);
+        expect((await send(request(h.cli.app).put(`${BASE}/installed/${encodeURIComponent(TICKETS)}`).send({}))).status).toBe(200);
+
+        const lookups = net.calls.filter((c) => c.startsWith(`${API}/plugins`));
+        expect(lookups.some((c) => c.includes('/versions/'))).toBe(true);
+        expect(lookups.length).toBeGreaterThan(3);
+        for (const url of lookups) expect(new URL(url).searchParams.get('kind'), url).toBe('dashboard');
     });
 });
