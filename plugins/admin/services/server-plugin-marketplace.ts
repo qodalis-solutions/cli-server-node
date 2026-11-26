@@ -386,32 +386,34 @@ export function readTarballFiles(tgz: Uint8Array, limit = 200 * 1024 * 1024): Ma
     return files;
 }
 
-/** The folder every file of an npm tarball is under. */
-const TARBALL_ROOT = 'package/';
-
 /**
- * The files of an npm tarball, every one under `package/` (names as stored). Throws 502 `invalid tarball` when it
- * cannot be read, `invalid tarball: <name>` for a file outside `package/`: `tarballPackageJson` reads
- * `package/package.json` and `unpackTarball` writes the folder's content, so another top folder could replace it.
+ * The files of an npm tarball, every one under its single top folder (`package/`; some packages have another name,
+ * `@types/uuid` has `uuid/`: npm strips the first folder whatever it is), with that folder. Throws 502
+ * `invalid tarball` when it cannot be read, `invalid tarball: <name>` for a file outside the top folder:
+ * `tarballPackageJson` reads `<top>/package.json` and `unpackTarball` writes the folder's content, so another top
+ * folder could replace it.
  */
-function tarballPackageFiles(tgz: Uint8Array): Map<string, Buffer> {
+function tarballPackageFiles(tgz: Uint8Array): { files: Map<string, Buffer>; root: string } {
     let files: Map<string, Buffer>;
     try {
         files = readTarballFiles(tgz);
     } catch {
         throw new DashboardMarketplaceError(502, 'invalid tarball');
     }
+    const first = files.keys().next().value as string | undefined;
+    const slash = first?.indexOf('/') ?? -1;
+    const root = first && slash > 0 ? first.slice(0, slash + 1) : 'package/';
     for (const name of files.keys()) {
-        if (!name.startsWith(TARBALL_ROOT)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name.slice(0, 200)} is outside package/`);
+        if (!name.startsWith(root)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name.slice(0, 200)} is outside ${root.slice(0, 200)}`);
     }
-    return files;
+    return { files, root };
 }
 
-/** The `package.json` of an npm tarball (`package/package.json`). Throws when there is none or a file is outside `package/`. */
+/** The `package.json` of an npm tarball (`package/package.json`). Throws when there is none or a file is outside its top folder. */
 export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
-    const files = tarballPackageFiles(tgz);
-    const raw = files.get(`${TARBALL_ROOT}package.json`);
-    if (!raw) throw new DashboardMarketplaceError(502, 'invalid tarball: no package/package.json');
+    const { files, root } = tarballPackageFiles(tgz);
+    const raw = files.get(`${root}package.json`);
+    if (!raw) throw new DashboardMarketplaceError(502, `invalid tarball: no ${root.slice(0, 200)}package.json`);
     try {
         return JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
     } catch {
@@ -420,15 +422,15 @@ export function tarballPackageJson(tgz: Uint8Array): Record<string, unknown> {
 }
 
 /**
- * Writes an npm tarball's files into `dir` (the content of its `package/` folder; a file outside it refuses the
+ * Writes an npm tarball's files into `dir` (the content of its top folder, `package/`; a file outside it refuses the
  * whole tarball before anything is written), each kept inside it. No scripts run.
  */
 export async function unpackTarball(tgz: Uint8Array, dir: string): Promise<void> {
-    const files = tarballPackageFiles(tgz);
+    const { files, root: top } = tarballPackageFiles(tgz);
     const root = resolve(dir);
     const targets: Array<[string, Buffer]> = [];
     for (const [name, content] of files) {
-        const relative = name.slice(TARBALL_ROOT.length);
+        const relative = name.slice(top.length);
         if (!relative) continue;
         const path = resolve(root, relative);
         if (!path.startsWith(root + sep)) throw new DashboardMarketplaceError(502, `invalid tarball: ${name}`);
@@ -999,19 +1001,32 @@ export class ServerPluginMarketplace {
                 if (/^(?:file|link|git|git\+\w+|https?|github):/.test(range) || range.includes('/')) {
                     throw new DashboardMarketplaceError(400, `untrusted dependency: ${id} (${range} is not a registry version)`);
                 }
-                // The server's own copy is shared: never installed, never shadowed
+                // The server's packages (@qodalis/*) are always the server's copies
                 const host = this.hostPackageVersion(id);
-                if (host !== undefined || id.startsWith('@qodalis/')) {
+                if (id.startsWith('@qodalis/')) {
                     if (host === undefined) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (a server package the host does not have)`);
                     if (!satisfiesServerRange(host, range)) throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (the server has ${host})`);
                     continue;
                 }
-                // The copy Node finds from the dependent: its own node_modules, then each one above it
+                // The copy Node finds from the dependent: its own node_modules, then each one above it, then the server's
                 let found: ResolvedDependency | undefined;
                 for (let depth = parent.length; depth >= 0 && !found; depth--) found = resolved.get(pathOf([...parent.slice(0, depth), id]));
-                if (found && satisfiesServerRange(found.version, range)) continue;
-                // Another version is found: this one goes below the dependent (hoisted when nothing is found)
-                const chain = found ? [...parent, id] : [id];
+                if (found ? satisfiesServerRange(found.version, range) : host !== undefined && satisfiesServerRange(host, range)) continue;
+                // Another version is found: this one goes below the dependent (hoisted when nothing is found). The
+                // plugin's own dependencies share the server's copy or are refused (the plugin works with the
+                // server's objects); a dependency of theirs gets its own copy (the AWS SDK pins exact versions).
+                let chain = [id];
+                if (found || host !== undefined) {
+                    if (parent.length === 0) {
+                        throw new DashboardMarketplaceError(
+                            400,
+                            found
+                                ? `incompatible dependency: ${id}@${range} (${found.version} is installed for another dependency)`
+                                : `incompatible dependency: ${id}@${range} (the server has ${host})`,
+                        );
+                    }
+                    chain = [...parent, id];
+                }
                 if (found && found.path === pathOf(chain)) {
                     throw new DashboardMarketplaceError(400, `incompatible dependency: ${id}@${range} (${found.version} is installed for another dependency)`);
                 }
