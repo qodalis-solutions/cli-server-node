@@ -112,7 +112,7 @@ export interface CliAdminPluginResult {
      */
     updates?: UpdateChecker;
     /** The `updates_list` MCP tool (registered by `mountPlugin` when MCP is on). */
-    mcpProviders: Array<{ name: string; getTools(): unknown[] }>;
+    mcpProviders: Array<{ name: string; getTools(): AdminMcpTool[] }>;
 }
 
 /**
@@ -578,8 +578,22 @@ export class CliAdminBuilder {
     }
 }
 
+// The server's MCP tool shape, repeated here so the plugin does not depend on @qodalis/cli-server-node
+// (mountPlugin registers `mcpProviders` with the server's MCP endpoint).
+type AdminMcpPropertySchema = { type: 'string' | 'integer' | 'boolean'; description?: string; default?: unknown };
+
+/** An MCP tool of the admin plugin (structurally the server's `McpTool`). */
+export interface AdminMcpTool {
+    name: string;
+    description: string;
+    inputSchema: { type: 'object'; properties: Record<string, AdminMcpPropertySchema>; required: string[]; additionalProperties: false };
+    requiredPermissions: string[];
+    annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+    call(args: Record<string, unknown>, context: { auth?: { permissions?: string[] } }): Promise<{ text: string; structured?: Record<string, unknown>; isError: boolean }>;
+}
+
 /** `updates_list`: the update checker's last result (`check: true` checks first). */
-function updatesMcpProvider(checker: UpdateChecker) {
+function updatesMcpProvider(checker: UpdateChecker): { name: string; getTools(): AdminMcpTool[] } {
     return {
         name: 'updates',
         getTools: () => [

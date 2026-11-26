@@ -82,6 +82,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Plugins mount in an app (types)
+        run: npx tsc -p tsconfig.typecheck.json
+
       - name: Test
         run: npm test
         env:
